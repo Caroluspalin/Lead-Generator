@@ -29,6 +29,7 @@ load_dotenv(_backend_dir / ".env")
 # Load API key from environment variable (set in .env file)
 # Never commit .env to git - it's in .gitignore
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Safety Limits
 MAX_SEARCH_CALLS = 15    # Geocode + Nearby Search + paginointi yhteensä
@@ -391,3 +392,101 @@ def delete_lead(lead_id: int, session: Session = Depends(get_session)):
     session.delete(db_lead)
     session.commit()
     return {"ok": True}
+
+# --- AI EMAIL SERVICE ---
+
+EMAIL_SYSTEM_PROMPT = """Olet B2B-myyntiavustaja suomalaiselle web-kehitysyritykselle.
+
+Kirjoita lyhyt, rento ja suora sähköposti potentiaaliselle asiakkaalle.
+Sähköpostin pitää tuntua henkilökohtaiselta — ei massaviestiltä.
+
+SÄÄNNÖT:
+- Kieli: suomi
+- Pituus: max 6 lausetta (tervehdys + 2-3 lausetta asiaa + ehdotus + lopetus)
+- Sävy: ystävällinen, asiantunteva, EI painostava
+- Älä käytä sanoja "ainutlaatuinen", "mahtava", "upea" tai muuta kliseistä mainosjargonia
+- Älä lupaa mitään konkreettista (hintaa, aikataulua) — tavoite on saada vastaus
+- Mainitse löydetty ongelma luontevasti, älä haukkuen
+- Allekirjoitus: jätä pois, käyttäjä lisää oman
+- Palauta VAIN sähköpostin teksti, ei subject-riviä erikseen
+
+ONGELMIEN KUVAUKSET:
+- NO WEBSITE: yrityksellä ei ole nettisivuja lainkaan
+- BROKEN WEBSITE: nettisivu ei toimi tai antaa virheen
+- NOT MOBILE: nettisivu toimii mutta ei skaalaudu mobiililaitteille
+- WEBSITE OK: sivu toimii hyvin — keskity muuhun lisäarvoon (esim. näkyvyys, päivitys)"""
+
+class EmailGenerateRequest(BaseModel):
+    instruction: Optional[str] = None
+
+class EmailGenerateResponse(BaseModel):
+    subject: str
+    body: str
+    model: str
+
+def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> str:
+    parts = [
+        f"Yritys: {lead.name}",
+        f"Kaupunki: {lead.city}",
+    ]
+    if lead.website:
+        parts.append(f"Nettisivu: {lead.website}")
+    if lead.website_status:
+        parts.append(f"Nettisivun tila: {lead.website_status}")
+    if lead.notes:
+        parts.append(f"Muistiinpanot: {lead.notes}")
+
+    parts.append("\nKirjoita sähköposti tämän perusteella.")
+
+    if instruction:
+        parts.append(f"\nLisäohje: {instruction}")
+
+    return "\n".join(parts)
+
+# 6. GENEROI SÄHKÖPOSTI (AI)
+@app.post("/leads/{lead_id}/generate-email", response_model=EmailGenerateResponse)
+async def generate_email(
+    lead_id: int,
+    req: EmailGenerateRequest = EmailGenerateRequest(),
+    session: Session = Depends(get_session),
+):
+    if not OPENAI_API_KEY:
+        raise HTTPException(500, "OPENAI_API_KEY not configured")
+
+    db_lead = session.get(Lead, lead_id)
+    if not db_lead:
+        raise HTTPException(404, "Lead not found")
+
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    user_prompt = build_email_user_prompt(db_lead, req.instruction)
+
+    def _call_openai():
+        return client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": EMAIL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=500,
+            temperature=0.7,
+        )
+
+    response = await asyncio.to_thread(_call_openai)
+    body = response.choices[0].message.content.strip()
+
+    # Generoi subject-rivi liidin tietojen perusteella
+    status_subjects = {
+        "NO WEBSITE": f"Nettisivut yritykselle {db_lead.name}?",
+        "BROKEN WEBSITE": f"Huomasimme ongelman sivuillanne — {db_lead.name}",
+        "NOT MOBILE": f"Mobiiliystävällisyys — {db_lead.name}",
+        "WEBSITE OK": f"Nettinäkyvyyden kehittäminen — {db_lead.name}",
+    }
+    subject = status_subjects.get(db_lead.website_status or "", f"Yhteistyöehdotus — {db_lead.name}")
+
+    return EmailGenerateResponse(
+        subject=subject,
+        body=body,
+        model=response.model,
+    )

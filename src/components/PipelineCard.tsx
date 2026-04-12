@@ -7,9 +7,11 @@ import {
   Trash2,
   Globe,
   Building2,
+  Sparkles,
 } from 'lucide-react';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
+import EmailDraftModal from './EmailDraftModal';
 
 interface PipelineCardProps {
   agency: SavedAgency;
@@ -26,6 +28,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 }) => {
   const [notesDraft, setNotesDraft] = useState(agency.notes ?? '');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   const handleNotesBlur = () => {
     if (notesDraft !== (agency.notes ?? '')) {
@@ -176,7 +179,23 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-3 text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors"
           />
         </div>
+
+        {/* AI Draft Button */}
+        <button
+          onClick={() => setEmailModalOpen(true)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-purple-700 bg-gradient-to-r from-purple-50 to-indigo-50 hover:from-purple-100 hover:to-indigo-100 border-2 border-purple-200 hover:border-purple-300 rounded-lg transition-all"
+        >
+          <Sparkles size={15} />
+          AI Draft
+        </button>
       </div>
+
+      {/* Email Modal */}
+      <EmailDraftModal
+        isOpen={emailModalOpen}
+        onClose={() => setEmailModalOpen(false)}
+        agency={agency}
+      />
     </motion.div>
   );
 };

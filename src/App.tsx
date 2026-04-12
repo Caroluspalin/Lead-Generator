@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Loader2, Filter, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import LeadTable from './components/LeadTable';
@@ -16,6 +16,25 @@ function App() {
   const [city, setCity] = useState('Tampere');
   const [leads, setLeads] = useState<Agency[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  const loadingTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (loading) {
+      setLoadingSeconds(0);
+      loadingTimerRef.current = window.setInterval(() => {
+        setLoadingSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      if (loadingTimerRef.current) {
+        clearInterval(loadingTimerRef.current);
+        loadingTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (loadingTimerRef.current) clearInterval(loadingTimerRef.current);
+    };
+  }, [loading]);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<NavTab>('pipeline');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -44,7 +63,7 @@ function App() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
-    }, 15000);
+    }, 60000);
 
     try {
       const response = await fetch(
@@ -84,7 +103,7 @@ function App() {
     } catch (err) {
       console.error(err);
       if ((err as DOMException).name === 'AbortError') {
-        setError('Search timed out. Google API or backend is not responding.');
+        setError('Search timed out after 60s. The city may be too large or Google API is throttling.');
       } else {
         setError('Search failed. Make sure the backend is running.');
       }
@@ -167,7 +186,12 @@ function App() {
                 >
                   {loading ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" /> Searching...
+                      <Loader2 size={18} className="animate-spin" />
+                      {loadingSeconds < 5
+                        ? 'Scanning grid points...'
+                        : loadingSeconds < 20
+                          ? `Searching nearby businesses... ${loadingSeconds}s`
+                          : `Analyzing websites... ${loadingSeconds}s`}
                     </>
                   ) : (
                     'Find Leads'
