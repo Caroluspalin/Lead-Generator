@@ -7,7 +7,7 @@
 - **Phase 5**: Hakualgoritmin laajennus — 3x3 grid search, dynaaminen säde, turvakytkimet (15+40), asyncio.to_thread, 60s frontend timeout
 - **Phase 6**: AI-sähköpostiavustaja — OpenAI GPT-4o-mini, POST /leads/{id}/generate-email, EmailDraftModal, instruction-parametri iteroinnille, copy to clipboard
 
-## Seuraavaksi
+## Käynnissä
 
 ### Phase 7: ScannedPlace Caching
 
@@ -21,12 +21,27 @@
 
 **Hyödyt**: Vähentää Google API -kutsuja merkittävästi, nopeuttaa toistuvia hakuja sekunteista millisekunteihin.
 
+## Seuraavaksi
+
+### Phase 8: UX ja Workflow-optimointi
+
+- Pipeline-taulun hallinnan nopeuttaminen (esim. yhden klikkauksen "Seuraava vaihe" -napit pudotusvalikoiden sijaan)
+- Datan vienti (CSV/Excel export), jotta liidit saa helposti ulos järjestelmästä
+
+### Phase 9: AI Deep Scan (Edistynyt personointi)
+
+- Moottori laajennetaan lukemaan kohdeyrityksen verkkosivujen tekstiä (scraping)
+- Tekoäly (OpenAI) käyttää sivuilta luettua dataa (esim. arvot, palvelut) luodakseen hyper-personoituja "jäänmurtaja"-lauseita sähköposteihin, sen sijaan että se vain huomauttaisi rikkinäisistä sivuista
+
+### Phase 10: Tuotanto ja Skaalaus (Myöhemmin)
+
+- Siirtyminen SQLitestä Supabaseen/PostgreSQL:ään
+- Käyttäjien autentikaatio
+- Palvelimen vieminen pilveen (Render/Heroku)
+
 ## Backlog (tulevaisuuden ideat)
 
 - **Sähköpostin lähetys** — SMTP-integraatio suoraan sovelluksesta (draft → send)
 - **Bulk-toiminnot** — Valitse useita liidejä ja generoi/lähetä sähköpostit kerralla
-- **CSV-export** — Lataa pipeline-data taulukkolaskentaan
-- **Käyttäjähallinta** — Auth + monen käyttäjän tuki
-- **PostgreSQL tuotantoon** — Docker Compose -pohjainen deploy
 - **Hakuhistoria** — Näytä aiemmat haut ja niiden tulokset
 - **Dashboard-analytiikka** — Konversioasteet pipeline-vaiheittain

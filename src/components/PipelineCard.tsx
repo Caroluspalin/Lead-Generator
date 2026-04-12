@@ -8,6 +8,8 @@ import {
   Globe,
   Building2,
   Sparkles,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
@@ -135,24 +137,38 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           )}
         </div>
 
-        {/* Pipeline Status */}
+        {/* Pipeline Stage Navigation */}
         <div>
           <label className="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">
             Pipeline Stage
           </label>
-          <select
-            value={agency.pipeline_status}
-            onChange={(e) =>
-              onStatusChange(agency.id, e.target.value as PipelineStatus)
-            }
-            className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 bg-white text-slate-700 font-medium hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors"
-          >
-            {PIPELINE_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const i = PIPELINE_STATUSES.indexOf(agency.pipeline_status);
+                if (i > 0) onStatusChange(agency.id, PIPELINE_STATUSES[i - 1]);
+              }}
+              disabled={PIPELINE_STATUSES.indexOf(agency.pipeline_status) === 0}
+              className="p-2 rounded-lg border-2 border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-200 disabled:hover:text-slate-600"
+              aria-label="Previous stage"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="flex-1 text-center text-sm font-semibold text-slate-700 py-2 bg-slate-50 rounded-lg border-2 border-slate-200">
+              {agency.pipeline_status}
+            </span>
+            <button
+              onClick={() => {
+                const i = PIPELINE_STATUSES.indexOf(agency.pipeline_status);
+                if (i < PIPELINE_STATUSES.length - 1) onStatusChange(agency.id, PIPELINE_STATUSES[i + 1]);
+              }}
+              disabled={PIPELINE_STATUSES.indexOf(agency.pipeline_status) === PIPELINE_STATUSES.length - 1}
+              className="p-2 rounded-lg border-2 border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-200 disabled:hover:text-slate-600"
+              aria-label="Next stage"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Notes Section */}
