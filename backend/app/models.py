@@ -10,6 +10,12 @@ PIPELINE_STATUSES = ["Shortlisted", "Contacted", "Proposal Received", "Hired", "
 # Nettisivu-statukset (tekninen tila, backendin analyze_website palauttaa naita)
 WEBSITE_STATUSES = ["NO WEBSITE", "BROKEN WEBSITE", "NOT MOBILE", "WEBSITE OK"]
 
+class ScannedPlace(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    google_place_id: str = Field(index=True, unique=True)
+    scanned_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class Lead(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     google_place_id: Optional[str] = Field(default=None, index=True, unique=True)

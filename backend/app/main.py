@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
-from .models import Lead, LeadCreate, LeadUpdate
+from .models import Lead, LeadCreate, LeadUpdate, ScannedPlace
 
 # --- CONFIGURATION ---
 import os
@@ -232,16 +232,29 @@ class GooglePlacesService:
             DETAILS_URL, {"place_id": place_id, "fields": fields}, call_type="detail"
         ).get("result", {})
 
-    def enrich_with_details(self, unique_places: Dict[str, Dict]) -> List[Dict]:
+    def enrich_with_details(self, unique_places: Dict[str, Dict], session: Session) -> List[Dict]:
         """Hakee Details-datan max MAX_DETAIL_CALLS yritykselle rinnakkain.
 
-        Yritykset yli rajan hylätään kokonaan — ei palauteta puutteellista dataa.
+        Ohittaa yritykset jotka on jo skannattu (ScannedPlace-taulu).
+        Uudet skannatut tallennetaan kantaan kutsun jälkeen.
         """
-        place_ids = list(unique_places.keys())[:MAX_DETAIL_CALLS]
+        already_scanned = set(
+            row.google_place_id
+            for row in session.exec(select(ScannedPlace)).all()
+        )
 
-        if len(unique_places) > MAX_DETAIL_CALLS:
+        all_ids = list(unique_places.keys())
+        new_ids = [pid for pid in all_ids if pid not in already_scanned]
+        skipped = len(all_ids) - len(new_ids)
+
+        if skipped:
+            logger.info(f"ScannedPlace-cache: ohitetaan {skipped} jo skannattua yritystä")
+
+        place_ids = new_ids[:MAX_DETAIL_CALLS]
+
+        if len(new_ids) > MAX_DETAIL_CALLS:
             logger.warning(
-                f"Uniikkeja yrityksiä {len(unique_places)}, "
+                f"Uusia skannaamattomia yrityksiä {len(new_ids)}, "
                 f"haetaan Details vain ensimmäiselle {MAX_DETAIL_CALLS}:lle"
             )
 
@@ -256,8 +269,14 @@ class GooglePlacesService:
                     base.update(detail)
                     enriched.append(base)
 
+        # Tallennetaan skannatut place_id:t kantaan
+        for pid in place_ids:
+            session.add(ScannedPlace(google_place_id=pid))
+        session.commit()
+
         logger.info(
             f"Details-haku valmis: {len(enriched)} rikastettua tulosta, "
+            f"{len(place_ids)} uutta tallennettu ScannedPlace-tauluun, "
             f"detail-kutsuja käytetty: {self._detail_call_count}/{MAX_DETAIL_CALLS}"
         )
         return enriched
@@ -285,7 +304,8 @@ def analyze_website(url: str) -> str:
 @app.get("/search", response_model=List[GoogleSearchResult])
 async def search_google(
     business_type: str = Query(..., min_length=2),
-    city: str = Query(..., min_length=2)
+    city: str = Query(..., min_length=2),
+    session: Session = Depends(get_session),
 ):
     # Fast local/dev fallback so the app works even if Google API is slow or blocked
     if not USE_LIVE_GOOGLE:
@@ -316,8 +336,8 @@ async def search_google(
         if not unique_places:
             return []
 
-        # 2. Details Enrichment (rinnakkain, max MAX_DETAIL_CALLS)
-        return service.enrich_with_details(unique_places)
+        # 2. Details Enrichment — suodattaa jo skannatut pois (ScannedPlace-cache)
+        return service.enrich_with_details(unique_places, session)
 
     final_data = await asyncio.to_thread(_blocking_search)
 
