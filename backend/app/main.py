@@ -1,5 +1,7 @@
 # FILE: backend/app/main.py
 import asyncio
+import csv
+import io
 import logging
 import time
 from typing import List, Optional, Dict
@@ -8,6 +10,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from pydantic import BaseModel
 import requests
@@ -386,6 +389,41 @@ def create_lead(lead: LeadCreate, session: Session = Depends(get_session)):
 def read_leads(session: Session = Depends(get_session)):
     leads = session.exec(select(Lead).order_by(Lead.created_at.desc())).all()
     return leads
+
+# 3b. CSV EXPORT
+@app.get("/leads/export")
+def export_leads_csv(
+    ids: str = Query(..., description="Pilkuilla erotetut liidi-ID:t"),
+    session: Session = Depends(get_session),
+) -> StreamingResponse:
+    id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+    if not id_list:
+        raise HTTPException(400, "No valid IDs provided")
+
+    leads = session.exec(select(Lead).where(Lead.id.in_(id_list))).all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ID", "Name", "City", "Address", "Phone", "Website", "Website Status", "Stage", "Notes"])
+    for lead in leads:
+        writer.writerow([
+            lead.id,
+            lead.name,
+            lead.city,
+            lead.address or "",
+            lead.phone or "",
+            lead.website or "",
+            lead.website_status or "",
+            lead.pipeline_status,
+            lead.notes or "",
+        ])
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads_export.csv"},
+    )
 
 # 4. PÄIVITÄ LIIDI (Status / Notes)
 @app.patch("/leads/{lead_id}", response_model=Lead)

@@ -9,6 +9,7 @@ import {
   X,
   CheckSquare,
   Loader2,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PIPELINE_STATUSES } from '../types/agency';
@@ -109,6 +110,15 @@ const PipelineBoard: React.FC = () => {
     if (failed > 0) toast.error(`${failed} draft(s) failed`);
     clearSelection();
     setBulkLoading(false);
+  };
+
+  const handleExportCsv = () => {
+    const idsParam = [...selectedIds].join(',');
+    const url = `${API_BASE}/leads/export?ids=${idsParam}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads_export.csv';
+    a.click();
   };
 
   const handleBulkDelete = async () => {
@@ -353,6 +363,16 @@ const PipelineBoard: React.FC = () => {
               >
                 {bulkLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                 AI Drafts
+              </button>
+
+              {/* Export CSV */}
+              <button
+                onClick={handleExportCsv}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Download size={14} />
+                CSV
               </button>
 
               {/* Delete */}
