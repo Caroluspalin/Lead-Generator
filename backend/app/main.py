@@ -33,7 +33,8 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 # Safety Limits
 MAX_SEARCH_CALLS = 15    # Geocode + Nearby Search + paginointi yhteensä
 MAX_DETAIL_CALLS = 40    # Place Details -kutsut (1 per uniikki yritys)
-GRID_RADIUS_METERS = 2000
+GRID_SIZE = 3              # 3x3 = 9 ruutua
+GRID_OVERLAP_FACTOR = 1.2  # 20% limittyminen ruutujen välillä
 MAX_WORKERS_WEBSITE = 5
 
 # URL Config
@@ -119,14 +120,32 @@ class GooglePlacesService:
         return data["results"][0]["geometry"].get("viewport")
 
     @staticmethod
-    def generate_grid_points(viewport: Dict, grid_size: int = 2) -> List[Dict]:
-        """Jakaa viewportin grid_size x grid_size ruudukkoon ja palauttaa keskipisteet.
+    def generate_grid_points(viewport: Dict, grid_size: int = GRID_SIZE) -> tuple:
+        """Jakaa viewportin grid_size x grid_size ruudukkoon.
 
-        viewport: {"northeast": {"lat": N, "lng": E}, "southwest": {"lat": S, "lng": W}}
-        Palauttaa: [{"lat": float, "lng": float}, ...]
+        Palauttaa (points, radius_meters):
+          - points: [{"lat": float, "lng": float}, ...]
+          - radius_meters: dynaaminen säde metreinä, laskettu viewportista
         """
+        import math
+
         ne = viewport["northeast"]
         sw = viewport["southwest"]
+
+        # Lasketaan viewportin fyysinen koko metreinä (Haversine-approksimaatio)
+        lat_mid = (ne["lat"] + sw["lat"]) / 2
+        lat_span_m = (ne["lat"] - sw["lat"]) * 111_320  # 1° lat ≈ 111.32 km
+        lng_span_m = (ne["lng"] - sw["lng"]) * 111_320 * math.cos(math.radians(lat_mid))
+
+        # Yhden ruudun diagonaalin puolikas = säde joka peittää ruudun
+        # Kerrotaan GRID_OVERLAP_FACTOR:lla niin ruudut limittyvät hieman
+        cell_lat_m = lat_span_m / grid_size
+        cell_lng_m = lng_span_m / grid_size
+        cell_diagonal = math.sqrt(cell_lat_m**2 + cell_lng_m**2)
+        radius_m = int((cell_diagonal / 2) * GRID_OVERLAP_FACTOR)
+
+        # Google Nearby Search max radius = 50 000 m
+        radius_m = min(radius_m, 50_000)
 
         lat_step = (ne["lat"] - sw["lat"]) / grid_size
         lng_step = (ne["lng"] - sw["lng"]) / grid_size
@@ -137,9 +156,10 @@ class GooglePlacesService:
                 center_lat = sw["lat"] + lat_step * (row + 0.5)
                 center_lng = sw["lng"] + lng_step * (col + 0.5)
                 points.append({"lat": center_lat, "lng": center_lng})
-        return points
 
-    def search_nearby_pagination(self, lat: float, lng: float, keyword: str) -> List[Dict]:
+        return points, radius_m
+
+    def search_nearby_pagination(self, lat: float, lng: float, keyword: str, radius: int) -> List[Dict]:
         """Nearby Search yhdelle ruudukon pisteelle, max 3 sivua paginointia."""
         all_results: List[Dict] = []
         next_token = None
@@ -147,7 +167,7 @@ class GooglePlacesService:
         for _ in range(3):  # Googlen max 3 sivua = 60 tulosta
             params: Dict = {
                 "location": f"{lat},{lng}",
-                "radius": GRID_RADIUS_METERS,
+                "radius": radius,
                 "keyword": keyword,
             }
             if next_token:
@@ -174,13 +194,16 @@ class GooglePlacesService:
             logger.warning(f"Kaupungin '{city}' viewport-rajoja ei löytynyt")
             return {}
 
-        grid_points = self.generate_grid_points(viewport, grid_size=2)
-        logger.info(f"Grid-haku: {len(grid_points)} ruutua kaupungille '{city}', keyword='{keyword}'")
+        grid_points, radius_m = self.generate_grid_points(viewport)
+        logger.info(
+            f"Grid-haku: {len(grid_points)} ruutua, säde {radius_m}m, "
+            f"kaupunki='{city}', keyword='{keyword}'"
+        )
 
         unique_places: Dict[str, Dict] = {}
 
         for i, point in enumerate(grid_points):
-            results = self.search_nearby_pagination(point["lat"], point["lng"], keyword)
+            results = self.search_nearby_pagination(point["lat"], point["lng"], keyword, radius_m)
             before = len(unique_places)
             for place in results:
                 pid = place.get("place_id")

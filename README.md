@@ -1,73 +1,116 @@
-# React + TypeScript + Vite
+# Agency Hunter
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Lead generation tool for finding local businesses that need web development services. Search any industry + city combination, automatically analyze their web presence, and manage prospects through a sales pipeline.
 
-Currently, two official plugins are available:
+## How It Works
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. **Search** — Enter an industry and city. The app queries Google Places API using a 3x3 grid search to cover the entire city area, not just top results.
+2. **Analyze** — Each business's website is automatically checked: does it exist, does it respond, is it mobile-friendly (viewport meta tag)?
+3. **Save** — Bookmark interesting leads to your local database with one click.
+4. **Manage** — Track leads through pipeline stages: Shortlisted → Contacted → Proposal Received → Hired / Rejected.
 
-## React Compiler
+### Website Status Scoring
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Status | Meaning |
+|---|---|
+| `NO WEBSITE` | Business has no website at all |
+| `BROKEN WEBSITE` | Site returns HTTP errors or doesn't respond |
+| `NOT MOBILE` | Site works but missing viewport meta tag |
+| `WEBSITE OK` | Site works and is mobile-friendly |
 
-## Expanding the ESLint configuration
+The "Opportunities Only" filter hides `WEBSITE OK` results — those aren't potential clients.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+**Frontend:** React 19 + TypeScript, Vite 7, Tailwind CSS 3, Framer Motion, Lucide icons, Sonner toasts
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+**Backend:** FastAPI, SQLModel (SQLAlchemy + Pydantic), SQLite (swappable to PostgreSQL), Google Places API, BeautifulSoup4
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- Python 3.10+
+- Google Places API key ([get one here](https://console.cloud.google.com/google/maps-apis))
+
+### Backend
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env            # Then edit .env with your API key
+uvicorn app.main:app --reload
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Backend runs at `http://127.0.0.1:8000`. API docs at `/docs`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Frontend
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
+
+Frontend runs at `http://localhost:5173`.
+
+### Environment Variables
+
+Create `backend/.env`:
+
+```
+DATABASE_URL=sqlite:///agency_hunter.db
+GOOGLE_API_KEY=your_key_here
+USE_LIVE_GOOGLE=false
+```
+
+Set `USE_LIVE_GOOGLE=true` when you're ready to make real API calls. With `false`, the app returns mock data for development.
+
+### PostgreSQL (Optional)
+
+```bash
+docker compose up -d
+```
+
+Then update `DATABASE_URL` in `.env` to `postgresql://postgres:password@localhost:5432/agency_hunter`.
+
+## Project Structure
+
+```
+agency-hunter/
+├── src/                    # React frontend
+│   ├── components/         # UI components
+│   ├── context/            # PipelineContext (global state + API calls)
+│   └── types/              # TypeScript interfaces
+├── backend/
+│   └── app/
+│       ├── main.py         # FastAPI routes + Google Places service
+│       ├── models.py       # SQLModel database models
+│       └── database.py     # DB connection setup
+├── docker-compose.yml      # PostgreSQL + pgAdmin (optional)
+└── package.json
+```
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/search?business_type=X&city=Y` | Search businesses via Google Places (stateless) |
+| `POST` | `/leads` | Save a lead to the database |
+| `GET` | `/leads` | Get all saved leads |
+| `PATCH` | `/leads/{id}` | Update lead status, notes, phone, or website |
+| `DELETE` | `/leads/{id}` | Delete a lead |
+
+## Grid Search Algorithm
+
+Instead of a single Google search (which returns ~20 results), Agency Hunter divides the city into a **3x3 grid** and searches each cell independently. The search radius is calculated dynamically from the city's viewport size with 20% overlap between cells. Results are deduplicated by `place_id`.
+
+Safety limits prevent runaway API costs:
+- **15** max search API calls (geocode + nearby search + pagination)
+- **40** max detail API calls (one per unique business)
+
+## License
+
+MIT
