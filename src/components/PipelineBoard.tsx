@@ -1,15 +1,125 @@
-import React, { useState } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  AlertTriangle,
+  RefreshCw,
+  ArrowRightLeft,
+  Sparkles,
+  Trash2,
+  X,
+  CheckSquare,
+  Loader2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { PIPELINE_STATUSES } from '../types/agency';
-import type { PipelineStatus, SavedAgency } from '../types/agency';
+import type { PipelineStatus } from '../types/agency';
 import { usePipeline } from '../context/PipelineContext';
 import PipelineCard from './PipelineCard';
+
+const API_BASE = 'http://127.0.0.1:8000';
+
+const BATCH_SIZE = 5;
+
+async function processInBatches<T>(
+  items: T[],
+  fn: (item: T) => Promise<void>,
+): Promise<{ ok: number; failed: number }> {
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(batch.map(fn));
+    for (const r of results) {
+      if (r.status === 'fulfilled') ok++;
+      else failed++;
+    }
+  }
+  return { ok, failed };
+}
 
 const PipelineBoard: React.FC = () => {
   const { savedAgencies, loading, error, updateStatus, updateNotes, removeFromPipeline, refresh } =
     usePipeline();
   const [activeTab, setActiveTab] = useState<PipelineStatus>('Shortlisted');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [stageMenuOpen, setStageMenuOpen] = useState(false);
+
+  const toggleSelect = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllInTab = useCallback(() => {
+    const tabIds = savedAgencies
+      .filter((a) => a.pipeline_status === activeTab)
+      .map((a) => a.id);
+    setSelectedIds((prev) => {
+      const allSelected = tabIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        tabIds.forEach((id) => next.delete(id));
+      } else {
+        tabIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }, [savedAgencies, activeTab]);
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkStatusChange = async (status: PipelineStatus) => {
+    setBulkLoading(true);
+    setStageMenuOpen(false);
+    const ids = [...selectedIds];
+    const { ok, failed } = await processInBatches(ids, (id) => updateStatus(id, status));
+    if (ok > 0) toast.success(`${ok} lead(s) moved to ${status}`);
+    if (failed > 0) toast.error(`${failed} lead(s) failed to update`);
+    clearSelection();
+    setBulkLoading(false);
+  };
+
+  const handleBulkGenerateEmails = async () => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    let ok = 0;
+    let failed = 0;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (id) => {
+          const res = await fetch(`${API_BASE}/leads/${id}/generate-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (!res.ok) throw new Error(`${res.status}`);
+        }),
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') ok++;
+        else failed++;
+      }
+    }
+    if (ok > 0) toast.success(`${ok} email draft(s) generated`);
+    if (failed > 0) toast.error(`${failed} draft(s) failed`);
+    clearSelection();
+    setBulkLoading(false);
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { ok, failed } = await processInBatches(ids, (id) => removeFromPipeline(id));
+    if (ok > 0) toast.success(`${ok} lead(s) removed`);
+    if (failed > 0) toast.error(`${failed} lead(s) failed to remove`);
+    clearSelection();
+    setBulkLoading(false);
+  };
 
   const handleStatusChange = async (id: number, status: PipelineStatus) => {
     try {
@@ -149,11 +259,22 @@ const PipelineBoard: React.FC = () => {
 
           {/* Content */}
           <div className="p-6">
-            {/* Tab Description */}
-            <div className="mb-6 pb-4 border-b border-slate-100">
+            {/* Tab Description + Select All */}
+            <div className="mb-6 pb-4 border-b border-slate-100 flex items-center justify-between">
               <p className="text-sm text-slate-600">
                 {statusDescriptions[activeTab]}
               </p>
+              {activeAgencies.length > 0 && (
+                <button
+                  onClick={selectAllInTab}
+                  className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors"
+                >
+                  <CheckSquare size={14} />
+                  {activeAgencies.every((a) => selectedIds.has(a.id))
+                    ? 'Deselect All'
+                    : 'Select All'}
+                </button>
+              )}
             </div>
 
             {/* Cards Grid */}
@@ -169,6 +290,8 @@ const PipelineBoard: React.FC = () => {
                   <PipelineCard
                     key={agency.id}
                     agency={agency}
+                    selected={selectedIds.has(agency.id)}
+                    onToggleSelect={toggleSelect}
                     onStatusChange={handleStatusChange}
                     onNotesChange={handleNotesChange}
                     onRemove={handleRemove}
@@ -179,6 +302,83 @@ const PipelineBoard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Bulk Actions Toolbar */}
+      <AnimatePresence>
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
+          >
+            <div className="flex items-center gap-3 px-5 py-3 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700">
+              <span className="text-sm font-semibold whitespace-nowrap">
+                {selectedIds.size} selected
+              </span>
+
+              <div className="w-px h-6 bg-slate-700" />
+
+              {/* Move Stage */}
+              <div className="relative">
+                <button
+                  onClick={() => setStageMenuOpen(!stageMenuOpen)}
+                  disabled={bulkLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <ArrowRightLeft size={14} />
+                  Move
+                </button>
+                {stageMenuOpen && (
+                  <div className="absolute bottom-full mb-2 left-0 bg-white border border-slate-200 rounded-xl shadow-xl py-1 min-w-[180px]">
+                    {PIPELINE_STATUSES.map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => handleBulkStatusChange(status)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Generate AI Drafts */}
+              <button
+                onClick={handleBulkGenerateEmails}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {bulkLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                AI Drafts
+              </button>
+
+              {/* Delete */}
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                Delete
+              </button>
+
+              <div className="w-px h-6 bg-slate-700" />
+
+              {/* Clear */}
+              <button
+                onClick={clearSelection}
+                className="p-2 text-slate-400 hover:text-white transition-colors"
+                aria-label="Clear selection"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 };

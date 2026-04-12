@@ -17,6 +17,8 @@ import EmailDraftModal from './EmailDraftModal';
 
 interface PipelineCardProps {
   agency: SavedAgency;
+  selected: boolean;
+  onToggleSelect: (id: number) => void;
   onStatusChange: (id: number, status: PipelineStatus) => void;
   onNotesChange: (id: number, notes: string) => void;
   onRemove: (id: number) => void;
@@ -24,6 +26,8 @@ interface PipelineCardProps {
 
 const PipelineCard: React.FC<PipelineCardProps> = ({
   agency,
+  selected,
+  onToggleSelect,
   onStatusChange,
   onNotesChange,
   onRemove,
@@ -60,11 +64,21 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
+      className={`bg-white rounded-xl border-2 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden ${
+        selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'
+      }`}
     >
       {/* Header Section */}
       <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
         <div className="flex items-start justify-between gap-3 mb-3">
+          <label className="flex items-center shrink-0 cursor-pointer pt-0.5">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(agency.id)}
+              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            />
+          </label>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
               <Building2 size={16} className="text-indigo-600 shrink-0" />

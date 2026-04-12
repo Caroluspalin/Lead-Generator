@@ -11,7 +11,7 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  SQLit
 
 - Frontend: `npm run dev` (localhost:5173)
 - Backend: `uvicorn app.main:app --reload` (127.0.0.1:8000)
-- Ei routeria — navigaatio `activeTab`-tilalla (search | pipeline | comparison | guides)
+- Ei routeria — navigaatio `activeTab`-tilalla (search | pipeline)
 
 ## Tietokanta: Lead-taulu
 
@@ -30,6 +30,14 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  SQLit
 | notes | str? | |
 | created_at | datetime | |
 | updated_at | datetime | |
+
+## Tietokanta: ScannedPlace-taulu
+
+| Kentta | Tyyppi | Huom |
+|---|---|---|
+| id | int, PK, auto | |
+| google_place_id | str, unique, index | Jo Details-haulla käsitelty yritys |
+| scanned_at | datetime | UTC-aikaleima |
 
 ## API-endpointit
 
@@ -50,6 +58,8 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  SQLit
 - **Rinnakkaisuus**: `ThreadPoolExecutor(max_workers=5)` Details- ja website-analyyseille
 - **Frontend timeout**: 60s AbortController, dynaaminen latausteksti sekuntilaskurilla
 - **AI-sahkopostit**: OpenAI GPT-4o-mini, suomenkielinen system prompt, instruction-parametri iteroinnille
+- **ScannedPlace-cache**: Jo skannatut place_id:t tallennetaan kantaan — toistuvat haut eivät kuluta Details API -kutsuja samoihin yrityksiin
+- **Pipeline-navigointi**: Chevron-napit (< >) dropdownin sijaan, yhden klikkauksen stage-siirto
 
 ## Ymparistomuuttujat (backend/.env)
 
@@ -68,11 +78,11 @@ React 19, Tailwind CSS 3, framer-motion, lucide-react, sonner
 
 ```
 backend/app/main.py          — GooglePlacesService, email service, kaikki endpointit
-backend/app/models.py        — Lead, LeadCreate, LeadUpdate
+backend/app/models.py        — Lead, LeadCreate, LeadUpdate, ScannedPlace
 backend/app/database.py      — DB-yhteys
 src/App.tsx                   — Haku-UI, tab-navigaatio
 src/context/PipelineContext.tsx — Globaali tila + API-kutsut backendiin
-src/components/PipelineCard.tsx — Liidikortti (status, notes, AI Draft -nappi)
+src/components/PipelineCard.tsx — Liidikortti (chevron-navigointi, notes, AI Draft -nappi)
 src/components/EmailDraftModal.tsx — AI-sahkopostimodaali
 src/components/PipelineBoard.tsx — Pipeline-kanban
 src/types/agency.ts           — Agency, SavedAgency, PipelineStatus

@@ -6,27 +6,16 @@
 - **Phase 4**: UI-yhtenäistäminen — lucide-react, englanninkielinen UI, Tailwind-pohjaiset komponentit
 - **Phase 5**: Hakualgoritmin laajennus — 3x3 grid search, dynaaminen säde, turvakytkimet (15+40), asyncio.to_thread, 60s frontend timeout
 - **Phase 6**: AI-sähköpostiavustaja — OpenAI GPT-4o-mini, POST /leads/{id}/generate-email, EmailDraftModal, instruction-parametri iteroinnille, copy to clipboard
+- **Phase 7**: ScannedPlace Caching — `ScannedPlace`-taulu, Details API -kutsujen deduplikaatio tietokantapohjaisella cachella
+- **Phase 8a**: Pipeline-navigointi — Chevron-napit (< >) dropdownin sijaan, yhden klikkauksen stage-siirto
 
 ## Käynnissä
 
-### Phase 7: ScannedPlace Caching
-
-**Ongelma**: Jokainen haku tekee uudet Google API -kutsut samoille yrityksille. Toistuvat haut samaan kaupunkiin/toimialaan kuluttavat API-krediittejä turhaan.
-
-**Ratkaisu**: Uusi `ScannedPlace`-taulu tietokantaan.
-- Tallenna jokaisen haun tulokset (place_id, name, address, phone, website, website_status, city, business_type, scanned_at)
-- Ennen Google API -kutsua tarkista onko vastaava haku tehty esim. viimeisen 7 päivän sisällä
-- Jos tuoreet tulokset löytyvät kannasta, palauta ne suoraan ilman API-kutsua
-- Frontend ei muutu — sama vastausformaatti
-
-**Hyödyt**: Vähentää Google API -kutsuja merkittävästi, nopeuttaa toistuvia hakuja sekunteista millisekunteihin.
-
-## Seuraavaksi
-
 ### Phase 8: UX ja Workflow-optimointi
 
-- Pipeline-taulun hallinnan nopeuttaminen (esim. yhden klikkauksen "Seuraava vaihe" -napit pudotusvalikoiden sijaan)
 - Datan vienti (CSV/Excel export), jotta liidit saa helposti ulos järjestelmästä
+- **Bulk Actions** — Valitse useita liidejä checkboxeilla: "Generate All Emails", "Export Selected", "Move to Stage X"
+- **Lead Detail SlideOver** — Klikkaa liidin nimeä → oikealle liukuva paneeli (kaikki tiedot, muistiinpanot, generoidut sähköpostit, timeline)
 
 ### Phase 9: AI Deep Scan (Edistynyt personointi)
 
@@ -42,6 +31,5 @@
 ## Backlog (tulevaisuuden ideat)
 
 - **Sähköpostin lähetys** — SMTP-integraatio suoraan sovelluksesta (draft → send)
-- **Bulk-toiminnot** — Valitse useita liidejä ja generoi/lähetä sähköpostit kerralla
-- **Hakuhistoria** — Näytä aiemmat haut ja niiden tulokset
+- **SearchHistory** — Näytä aiemmat haut (hakusana + kaupunki + tulosmäärä + päivämäärä), yhden klikkauksen uudelleenhaku
 - **Dashboard-analytiikka** — Konversioasteet pipeline-vaiheittain
