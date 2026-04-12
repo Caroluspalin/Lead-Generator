@@ -1,4 +1,5 @@
 # FILE: backend/app/main.py
+import asyncio
 import logging
 import time
 from typing import List, Optional, Dict
@@ -30,7 +31,8 @@ load_dotenv(_backend_dir / ".env")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # Safety Limits
-MAX_RESULTS_SAFETY = 60
+MAX_SEARCH_CALLS = 15    # Geocode + Nearby Search + paginointi yhteensä
+MAX_DETAIL_CALLS = 40    # Place Details -kutsut (1 per uniikki yritys)
 GRID_RADIUS_METERS = 2000
 MAX_WORKERS_WEBSITE = 5
 
@@ -79,8 +81,25 @@ class GoogleSearchResult(BaseModel):
 class GooglePlacesService:
     def __init__(self, api_key: str):
         self.key = api_key
+        self._search_call_count = 0
+        self._detail_call_count = 0
 
-    def _make_request(self, url: str, params: Dict) -> Dict:
+    def _make_request(self, url: str, params: Dict, *, call_type: str = "search") -> Dict:
+        """Tekee API-kutsun ja tarkistaa turvarajan ennen kutsua.
+
+        call_type: "search" (geocode, nearby/text search) tai "detail" (place details).
+        """
+        if call_type == "search":
+            if self._search_call_count >= MAX_SEARCH_CALLS:
+                logger.warning(f"Search-kutsujen raja ({MAX_SEARCH_CALLS}) saavutettu — ohitetaan kutsu")
+                return {}
+            self._search_call_count += 1
+        elif call_type == "detail":
+            if self._detail_call_count >= MAX_DETAIL_CALLS:
+                logger.warning(f"Detail-kutsujen raja ({MAX_DETAIL_CALLS}) saavutettu — ohitetaan kutsu")
+                return {}
+            self._detail_call_count += 1
+
         params["key"] = self.key
         try:
             r = requests.get(url, params=params, timeout=10)
@@ -90,27 +109,134 @@ class GooglePlacesService:
             logger.error(f"API Error: {e}")
             return {}
 
+    # --- Grid-haku ---
+
     def get_city_bounds(self, city_name: str) -> Optional[Dict]:
-        data = self._make_request(GEOCODE_URL, {"address": f"{city_name}, Finland"})
-        if not data.get("results"): return None
+        """Hakee kaupungin viewport-rajat Geocode API:lla (1 search-kutsu)."""
+        data = self._make_request(GEOCODE_URL, {"address": f"{city_name}, Finland"}, call_type="search")
+        if not data.get("results"):
+            return None
         return data["results"][0]["geometry"].get("viewport")
 
-    def search_place_pagination(self, url: str, params: Dict) -> List[Dict]:
-        all_res = []
+    @staticmethod
+    def generate_grid_points(viewport: Dict, grid_size: int = 2) -> List[Dict]:
+        """Jakaa viewportin grid_size x grid_size ruudukkoon ja palauttaa keskipisteet.
+
+        viewport: {"northeast": {"lat": N, "lng": E}, "southwest": {"lat": S, "lng": W}}
+        Palauttaa: [{"lat": float, "lng": float}, ...]
+        """
+        ne = viewport["northeast"]
+        sw = viewport["southwest"]
+
+        lat_step = (ne["lat"] - sw["lat"]) / grid_size
+        lng_step = (ne["lng"] - sw["lng"]) / grid_size
+
+        points = []
+        for row in range(grid_size):
+            for col in range(grid_size):
+                center_lat = sw["lat"] + lat_step * (row + 0.5)
+                center_lng = sw["lng"] + lng_step * (col + 0.5)
+                points.append({"lat": center_lat, "lng": center_lng})
+        return points
+
+    def search_nearby_pagination(self, lat: float, lng: float, keyword: str) -> List[Dict]:
+        """Nearby Search yhdelle ruudukon pisteelle, max 3 sivua paginointia."""
+        all_results: List[Dict] = []
         next_token = None
-        for _ in range(2): # Max 2 sivua per haku (säästöä)
+
+        for _ in range(3):  # Googlen max 3 sivua = 60 tulosta
+            params: Dict = {
+                "location": f"{lat},{lng}",
+                "radius": GRID_RADIUS_METERS,
+                "keyword": keyword,
+            }
             if next_token:
                 params["pagetoken"] = next_token
-                time.sleep(2)
-            data = self._make_request(url, params)
-            all_res.extend(data.get("results", []))
+                time.sleep(2)  # Google vaatii ~2s viiveen next_page_token:lle
+
+            data = self._make_request(NEARBY_SEARCH_URL, params, call_type="search")
+            results = data.get("results", [])
+            all_results.extend(results)
+
             next_token = data.get("next_page_token")
-            if not next_token: break
-        return all_res
+            if not next_token:
+                break
+
+        return all_results
+
+    def search_grid(self, city: str, keyword: str) -> Dict[str, Dict]:
+        """Suorittaa koko grid-haun: geocode → ruudukko → nearby search → deduplikaatio.
+
+        Palauttaa: {place_id: place_dict} — deduplikoitu dict.
+        """
+        viewport = self.get_city_bounds(city)
+        if not viewport:
+            logger.warning(f"Kaupungin '{city}' viewport-rajoja ei löytynyt")
+            return {}
+
+        grid_points = self.generate_grid_points(viewport, grid_size=2)
+        logger.info(f"Grid-haku: {len(grid_points)} ruutua kaupungille '{city}', keyword='{keyword}'")
+
+        unique_places: Dict[str, Dict] = {}
+
+        for i, point in enumerate(grid_points):
+            results = self.search_nearby_pagination(point["lat"], point["lng"], keyword)
+            before = len(unique_places)
+            for place in results:
+                pid = place.get("place_id")
+                if pid:
+                    unique_places[pid] = place  # Deduplikaatio: sama place_id ylikirjoittaa
+            after = len(unique_places)
+            logger.info(
+                f"  Ruutu {i+1}/{len(grid_points)}: "
+                f"{len(results)} tulosta, {after - before} uutta "
+                f"(yhteensä {after} uniikkia)"
+            )
+
+        logger.info(
+            f"Grid-haku valmis: {len(unique_places)} uniikkia yritystä, "
+            f"search-kutsuja käytetty: {self._search_call_count}/{MAX_SEARCH_CALLS}"
+        )
+        return unique_places
+
+    # --- Details ---
 
     def get_place_details(self, place_id: str) -> Dict:
+        """Hakee yksittäisen paikan lisätiedot (1 detail-kutsu)."""
         fields = "name,formatted_address,formatted_phone_number,website"
-        return self._make_request(DETAILS_URL, {"place_id": place_id, "fields": fields}).get("result", {})
+        return self._make_request(
+            DETAILS_URL, {"place_id": place_id, "fields": fields}, call_type="detail"
+        ).get("result", {})
+
+    def enrich_with_details(self, unique_places: Dict[str, Dict]) -> List[Dict]:
+        """Hakee Details-datan max MAX_DETAIL_CALLS yritykselle rinnakkain.
+
+        Yritykset yli rajan hylätään kokonaan — ei palauteta puutteellista dataa.
+        """
+        place_ids = list(unique_places.keys())[:MAX_DETAIL_CALLS]
+
+        if len(unique_places) > MAX_DETAIL_CALLS:
+            logger.warning(
+                f"Uniikkeja yrityksiä {len(unique_places)}, "
+                f"haetaan Details vain ensimmäiselle {MAX_DETAIL_CALLS}:lle"
+            )
+
+        enriched: List[Dict] = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(self.get_place_details, pid): pid for pid in place_ids}
+            for future in as_completed(futures):
+                detail = future.result()
+                if detail:
+                    pid = futures[future]
+                    base = unique_places[pid].copy()
+                    base.update(detail)
+                    enriched.append(base)
+
+        logger.info(
+            f"Details-haku valmis: {len(enriched)} rikastettua tulosta, "
+            f"detail-kutsuja käytetty: {self._detail_call_count}/{MAX_DETAIL_CALLS}"
+        )
+        return enriched
 
 def analyze_website(url: str) -> str:
     if not url: return "NO WEBSITE"
@@ -157,43 +283,44 @@ async def search_google(
         raise HTTPException(500, "API Key missing")
 
     service = GooglePlacesService(GOOGLE_API_KEY)
-    
-    # 1. Text Search
-    results = service.search_place_pagination(TEXT_SEARCH_URL, {"query": f"{business_type} in {city}"})
-    unique_places = {p["place_id"]: p for p in results}
 
-    # 2. Details Enrichment (Parallel)
-    final_data = []
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        futures = {ex.submit(service.get_place_details, pid): pid for pid in unique_places}
-        for f in as_completed(futures):
-            res = f.result()
-            if res:
-                # Yhdistä alkuperäinen ja detail-data
-                pid = futures[f]
-                base = unique_places[pid]
-                base.update(res)
-                final_data.append(base)
+    # Kaikki blokkavat Google API -kutsut ajetaan taustasäikeessä
+    # jotta FastAPI:n event loop ei jäädy (time.sleep paginoinnissa)
+    def _blocking_search() -> List[Dict]:
+        # 1. Grid Search (geocode + nearby search + deduplikaatio)
+        unique_places = service.search_grid(city, business_type)
+        if not unique_places:
+            return []
 
-    # 3. Website Analysis & Formatting
-    output = []
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        future_map = {ex.submit(analyze_website, d.get("website")): d for d in final_data}
-        for f in as_completed(future_map):
-            d = future_map[f]
-            web_status = f.result()
-            
-            output.append(GoogleSearchResult(
-                name=d.get("name"),
-                place_id=d.get("place_id"),
-                address=d.get("formatted_address") or d.get("vicinity"),
-                phone=d.get("formatted_phone_number"),
-                website=d.get("website"),
-                website_status=web_status,
-                discovery_method="API"
-            ))
+        # 2. Details Enrichment (rinnakkain, max MAX_DETAIL_CALLS)
+        return service.enrich_with_details(unique_places)
 
-    return output
+    final_data = await asyncio.to_thread(_blocking_search)
+
+    if not final_data:
+        return []
+
+    # 3. Website Analysis (rinnakkain, ei Google-kutsuja — ei blokkaa pitkään)
+    def _blocking_website_analysis() -> List[GoogleSearchResult]:
+        output = []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS_WEBSITE) as ex:
+            future_map = {ex.submit(analyze_website, d.get("website")): d for d in final_data}
+            for f in as_completed(future_map):
+                d = future_map[f]
+                web_status = f.result()
+
+                output.append(GoogleSearchResult(
+                    name=d.get("name"),
+                    place_id=d.get("place_id"),
+                    address=d.get("formatted_address") or d.get("vicinity"),
+                    phone=d.get("formatted_phone_number"),
+                    website=d.get("website"),
+                    website_status=web_status,
+                    discovery_method="API",
+                ))
+        return output
+
+    return await asyncio.to_thread(_blocking_website_analysis)
 
 # 2. TALLENNA LIIDI (Database)
 @app.post("/leads", response_model=Lead)

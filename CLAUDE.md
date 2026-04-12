@@ -15,7 +15,8 @@ Liidigeneraattori paikallisille yrityksille. Ydinlooppi:
 - **React 19** + TypeScript + Vite 7
 - **Tailwind CSS 3** (PostCSS)
 - **framer-motion** (animaatiot)
-- **react-icons** (SidebarNav) + **lucide-react** (muu UI) — kaksi ikonikirjastoa
+- **lucide-react** (ikonit, yhtenaistetty Phase 4:ssa)
+- **sonner** (toast-ilmoitukset)
 - Ei routeria — navigaatio hoidetaan `activeTab`-tilalla (search | pipeline | comparison | guides)
 
 ### Backend
@@ -143,6 +144,66 @@ UI-kieli: **englanti**. Kaikki napit, otsikot, placeholder-tekstit ja ilmoitukse
 
 ## Phase 5: Hakualgoritmin laajennus (TODO)
 
-- Nosta paginointi 2 → 3 sivuun (Google max 60 tulosta per haku)
-- Toteuta grid search: jaa kaupunki osiin `get_city_bounds` + `NEARBY_SEARCH_URL` -yhdistelmalla, hae jokaisesta ruudusta erikseen ja yhdista tulokset (deduplikointi place_id:lla)
-- Tavoite: loyda kaikki yritykset, ei vain Googlen "relevantimmat"
+Tavoite: loyda kaikki toimialan yritykset kaupungista, ei vain Googlen "relevantimmat".
+Muutettava tiedosto: **backend/app/main.py** (frontend ei muutu).
+
+### 1. Grid Search -logiikka
+
+Nykyinen: yksi Text Search -kutsu → max 40 tulosta.
+Uusi: jaa kaupunki ruudukkoon, hae jokaisesta ruudusta erikseen.
+
+```
+Vaihe 1: Geocode-kutsu → get_city_bounds(city) → viewport (northeast, southwest)
+Vaihe 2: Jaa viewport 2x2 ruudukkoon → 4 ruutua, laske jokaisen keskipiste (lat, lng)
+Vaihe 3: Jokaiselle ruudulle Nearby Search:
+         location=lat,lng & radius=GRID_RADIUS_METERS(2000) & keyword=business_type
+Vaihe 4: Yhdista kaikki tulokset yhteen dict:iin {place_id: data} → automaattinen deduplikaatio
+```
+
+Deduplikaatio: sama `place_id` eri ruuduista ylikirjoittaa itsensa dict:issa.
+Ruudukon koko: 2x2 = 4 ruutua (konservatiivinen alku, riittaa Tampere-kokoisille kaupungeille).
+
+### 2. Paginoinnin nosto ja viive
+
+Nosta `search_place_pagination` max-sivut: 2 → 3 (Googlen max, 60 tulosta per ruutu).
+Google vaatii ~2s viiveen next_page_token:n kayton valilla — nykyinen `time.sleep(2)` sailyy.
+Blokkaus: kaytetaan `asyncio.to_thread()` wrapperia jotta FastAPI event loop ei blokkaudu.
+
+### 3. Turvakytkin: KAKSI erillistä hard-limitia
+
+```python
+class GooglePlacesService:
+    MAX_SEARCH_CALLS = 15   # Geocode + Nearby Search + paginointi yhteensa
+    MAX_DETAIL_CALLS = 40   # Place Details -kutsut (1 per uniikki yritys)
+
+    def __init__(self, api_key):
+        self.key = api_key
+        self._search_call_count = 0
+        self._detail_call_count = 0
+```
+
+**MAX_SEARCH_CALLS = 15:** Kattaa kaiken hakuvaiheen (1 geocode + max 4 ruutua x 3 sivua = 13, yhteensa 14). Jos limitti tulee vastaan, haku palauttaa mita ehti loyda.
+
+**MAX_DETAIL_CALLS = 40:** Jos uniikkeja yrityksia loytyy ruudukkohausta 100+, Details-data haetaan vain ensimmaiselle 40:lle. Loput hylataan kokonaan — niita EI palauteta frontendille ilman Details-dataa, koska puutteelliset tulokset olisivat harhaanjohtavia.
+
+Molemmat limitit toimivat samalla periaatteella: `_make_request` tarkistaa laskurin, rajan ylittyessa palauttaa tyhjan `{}` ja logittaa varoituksen.
+
+### 4. Kutsulaskuri pahimmassa tapauksessa
+
+| Vaihe | Kutsut | Limitti |
+|---|---|---|
+| Geocode (kaupungin rajat) | 1 | MAX_SEARCH_CALLS (15) |
+| 4 ruutua x max 3 sivua Nearby Search | 4-12 | MAX_SEARCH_CALLS (15) |
+| Details (per uniikki yritys, max 40) | 1-40 | MAX_DETAIL_CALLS (40) |
+| Website-analyysi (requests, ei Google) | 1-40 | Ei Google-kutsuja |
+| **Pahimman tapauksen Google-kutsut** | **53** | **Rajattu 15+40=55** |
+
+### 5. Muutokset main.py:ssa
+
+- `GooglePlacesService`: lisaa `_search_call_count`, `_detail_call_count`, limitit
+- `_make_request`: lisaa laskuri + tarkistus (erillinen search/detail-parametri)
+- Uusi metodi `generate_grid_points(viewport, grid_size=2)`: palauttaa keskipisteet
+- `search_place_pagination`: max-sivut 2 → 3
+- `search_google` endpoint: text search → grid-based nearby search + `asyncio.to_thread()`
+- Details-kutsut: leikkaa uniikkien listan `[:MAX_DETAIL_CALLS]` ennen ThreadPoolExecutoria
+- Frontend ei muutu — API-vastaus on taysmalleen samaa `List[GoogleSearchResult]` -muotoa
