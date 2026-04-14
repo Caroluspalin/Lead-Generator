@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import type { Agency, SavedAgency, PipelineStatus } from '../types/agency';
-
-const API_BASE = 'http://127.0.0.1:8000';
+import { apiFetch } from '../lib/api';
+import { useAuth } from './AuthContext';
 
 interface PipelineContextValue {
   savedAgencies: SavedAgency[];
@@ -21,15 +21,21 @@ const PipelineContext = createContext<PipelineContextValue | undefined>(
 export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
+  const { session } = useAuth();
   const [savedAgencies, setSavedAgencies] = useState<SavedAgency[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
+    if (!session) {
+      setSavedAgencies([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/leads`);
+      const res = await apiFetch(`/leads`);
       if (!res.ok) {
         throw new Error(`Palvelin palautti virheen: ${res.status}`);
       }
@@ -45,10 +51,10 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, session]);
 
   const addToPipeline = async (agency: Agency) => {
-    const res = await fetch(`${API_BASE}/leads`, {
+    const res = await apiFetch(`/leads`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -71,7 +77,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const updateStatus = async (id: number, status: PipelineStatus) => {
-    const res = await fetch(`${API_BASE}/leads/${id}`, {
+    const res = await apiFetch(`/leads/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pipeline_status: status }),
@@ -86,7 +92,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const updateNotes = async (id: number, notes: string) => {
-    const res = await fetch(`${API_BASE}/leads/${id}`, {
+    const res = await apiFetch(`/leads/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notes }),
@@ -101,7 +107,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const removeFromPipeline = async (id: number) => {
-    const res = await fetch(`${API_BASE}/leads/${id}`, {
+    const res = await apiFetch(`/leads/${id}`, {
       method: 'DELETE',
     });
     if (!res.ok) {

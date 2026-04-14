@@ -10,6 +10,23 @@ PIPELINE_STATUSES = ["Shortlisted", "Contacted", "Proposal Received", "Hired", "
 # Nettisivu-statukset (tekninen tila, backendin analyze_website palauttaa naita)
 WEBSITE_STATUSES = ["NO WEBSITE", "BROKEN WEBSITE", "NOT MOBILE", "WEBSITE OK"]
 
+class SearchHistoryEntry(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    business_type: str
+    city: str
+    result_count: int = 0
+    searched_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class EmailDraft(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    lead_id: int = Field(index=True)
+    subject: str
+    body: str
+    model: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ScannedPlace(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     google_place_id: str = Field(index=True, unique=True)
@@ -26,6 +43,10 @@ class Lead(SQLModel, table=True):
     phone: Optional[str] = None
     website: Optional[str] = None
     website_status: Optional[str] = None  # NO WEBSITE | BROKEN WEBSITE | WEBSITE OK
+
+    # Deep Scan: skraapattu verkkosivun konteksti personointia varten
+    website_context: Optional[str] = None
+    scraped_at: Optional[datetime] = None
 
     pipeline_status: str = Field(default="Shortlisted", index=True)
     source: str = Field(default="API")  # API tai MANUAL

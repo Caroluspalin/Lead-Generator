@@ -3,7 +3,11 @@ import asyncio
 import csv
 import io
 import logging
+import smtplib
 import time
+from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
@@ -18,7 +22,9 @@ from bs4 import BeautifulSoup
 
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
-from .models import Lead, LeadCreate, LeadUpdate, ScannedPlace
+from .models import Lead, LeadCreate, LeadUpdate, ScannedPlace, SearchHistoryEntry, EmailDraft
+from .utils.scraper import scrape_website_text
+from .auth import verify_token, AuthUser
 
 # --- CONFIGURATION ---
 import os
@@ -33,6 +39,13 @@ load_dotenv(_backend_dir / ".env")
 # Never commit .env to git - it's in .gitignore
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# SMTP (sähköpostin lähetys)
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "")
 
 # Safety Limits
 MAX_SEARCH_CALLS = 15    # Geocode + Nearby Search + paginointi yhteensä
@@ -58,9 +71,17 @@ logger = logging.getLogger(__name__)
 # App Initialization
 app = FastAPI(title="Agency Hunter CRM", version="2.1.0")
 
+# Tuotanto: aseta ALLOWED_ORIGINS=https://app.example.com,https://example.com
+# Dev: oletuksena Viten localhost
+_allowed_origins = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -309,6 +330,7 @@ async def search_google(
     business_type: str = Query(..., min_length=2),
     city: str = Query(..., min_length=2),
     session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
 ):
     # Fast local/dev fallback so the app works even if Google API is slow or blocked
     if not USE_LIVE_GOOGLE:
@@ -324,6 +346,8 @@ async def search_google(
             )
             for i in range(1, 6)
         ]
+        session.add(SearchHistoryEntry(business_type=business_type, city=city, result_count=len(sample_results)))
+        session.commit()
         return sample_results
 
     if "AIza" not in GOOGLE_API_KEY:
@@ -367,11 +391,18 @@ async def search_google(
                 ))
         return output
 
-    return await asyncio.to_thread(_blocking_website_analysis)
+    results = await asyncio.to_thread(_blocking_website_analysis)
+    session.add(SearchHistoryEntry(business_type=business_type, city=city, result_count=len(results)))
+    session.commit()
+    return results
 
 # 2. TALLENNA LIIDI (Database)
 @app.post("/leads", response_model=Lead)
-def create_lead(lead: LeadCreate, session: Session = Depends(get_session)):
+def create_lead(
+    lead: LeadCreate,
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+):
     # Tarkista onko jo olemassa (Google Place ID:n perusteella)
     if lead.google_place_id:
         existing = session.exec(select(Lead).where(Lead.google_place_id == lead.google_place_id)).first()
@@ -386,7 +417,10 @@ def create_lead(lead: LeadCreate, session: Session = Depends(get_session)):
 
 # 3. HAE TALLENNETUT LIIDIT (Database)
 @app.get("/leads", response_model=List[Lead])
-def read_leads(session: Session = Depends(get_session)):
+def read_leads(
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+):
     leads = session.exec(select(Lead).order_by(Lead.created_at.desc())).all()
     return leads
 
@@ -395,6 +429,7 @@ def read_leads(session: Session = Depends(get_session)):
 def export_leads_csv(
     ids: str = Query(..., description="Pilkuilla erotetut liidi-ID:t"),
     session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
 ) -> StreamingResponse:
     id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
     if not id_list:
@@ -425,9 +460,50 @@ def export_leads_csv(
         headers={"Content-Disposition": "attachment; filename=leads_export.csv"},
     )
 
+# --- SEARCH HISTORY ---
+
+@app.get("/search-history", response_model=List[SearchHistoryEntry])
+def get_search_history(
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+) -> list[SearchHistoryEntry]:
+    return list(session.exec(
+        select(SearchHistoryEntry).order_by(SearchHistoryEntry.searched_at.desc()).limit(50)
+    ).all())
+
+@app.delete("/search-history/{entry_id}")
+def delete_search_history_entry(
+    entry_id: int,
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+):
+    entry = session.get(SearchHistoryEntry, entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    session.delete(entry)
+    session.commit()
+    return {"ok": True}
+
+# --- EMAIL DRAFTS ---
+
+@app.get("/leads/{lead_id}/drafts", response_model=List[EmailDraft])
+def get_lead_drafts(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+) -> list[EmailDraft]:
+    return list(session.exec(
+        select(EmailDraft).where(EmailDraft.lead_id == lead_id).order_by(EmailDraft.created_at.desc())
+    ).all())
+
 # 4. PÄIVITÄ LIIDI (Status / Notes)
 @app.patch("/leads/{lead_id}", response_model=Lead)
-def update_lead(lead_id: int, lead_update: LeadUpdate, session: Session = Depends(get_session)):
+def update_lead(
+    lead_id: int,
+    lead_update: LeadUpdate,
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+):
     db_lead = session.get(Lead, lead_id)
     if not db_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -443,7 +519,11 @@ def update_lead(lead_id: int, lead_update: LeadUpdate, session: Session = Depend
 
 # 5. POISTA LIIDI
 @app.delete("/leads/{lead_id}")
-def delete_lead(lead_id: int, session: Session = Depends(get_session)):
+def delete_lead(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
+):
     db_lead = session.get(Lead, lead_id)
     if not db_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -472,7 +552,13 @@ ONGELMIEN KUVAUKSET:
 - NO WEBSITE: yrityksellä ei ole nettisivuja lainkaan
 - BROKEN WEBSITE: nettisivu ei toimi tai antaa virheen
 - NOT MOBILE: nettisivu toimii mutta ei skaalaudu mobiililaitteille
-- WEBSITE OK: sivu toimii hyvin — keskity muuhun lisäarvoon (esim. näkyvyys, päivitys)"""
+- WEBSITE OK: sivu toimii hyvin — keskity muuhun lisäarvoon (esim. näkyvyys, päivitys)
+
+DEEP SCAN (jos VERKKOSIVUN SISÄLTÖ on annettu):
+- Aloita sähköposti lyhyellä, personoidulla jäänmurtajalla (1-2 lausetta) joka viittaa suoraan yrityksen verkkosivulta löytyneeseen konkreettiseen asiaan (esim. palvelu, arvo, saavutus, erikoisuus)
+- Jäänmurtajan pitää osoittaa että olet oikeasti tutustunut yritykseen — ei geneerisiä fraaseja
+- Siirry sen jälkeen luontevasti varsinaiseen asiaan (nettisivujen ongelma tai kehitysehdotus)
+- Jos verkkosivun sisältö ei ole saatavilla, kirjoita meili normaalisti ilman jäänmurtajaa"""
 
 class EmailGenerateRequest(BaseModel):
     instruction: Optional[str] = None
@@ -491,6 +577,8 @@ def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> st
         parts.append(f"Nettisivu: {lead.website}")
     if lead.website_status:
         parts.append(f"Nettisivun tila: {lead.website_status}")
+    if lead.website_context:
+        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan):\n{lead.website_context}")
     if lead.notes:
         parts.append(f"Muistiinpanot: {lead.notes}")
 
@@ -507,6 +595,7 @@ async def generate_email(
     lead_id: int,
     req: EmailGenerateRequest = EmailGenerateRequest(),
     session: Session = Depends(get_session),
+    _user: AuthUser = Depends(verify_token),
 ):
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
@@ -514,6 +603,20 @@ async def generate_email(
     db_lead = session.get(Lead, lead_id)
     if not db_lead:
         raise HTTPException(404, "Lead not found")
+
+    # Deep Scan: skraapataan verkkosivun teksti jos ei vielä cachessa
+    if not db_lead.website_context and db_lead.website and db_lead.website_status != "NO WEBSITE":
+        try:
+            context = await asyncio.to_thread(scrape_website_text, db_lead.website)
+            if context:
+                db_lead.website_context = context
+                db_lead.scraped_at = datetime.utcnow()
+                session.add(db_lead)
+                session.commit()
+                session.refresh(db_lead)
+                logger.info(f"Deep Scan: tallennettu {len(context)} merkkia kontekstia liidille {lead_id}")
+        except Exception as e:
+            logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -543,8 +646,51 @@ async def generate_email(
     }
     subject = status_subjects.get(db_lead.website_status or "", f"Yhteistyöehdotus — {db_lead.name}")
 
+    # Tallenna draft kantaan
+    session.add(EmailDraft(lead_id=lead_id, subject=subject, body=body, model=response.model))
+    session.commit()
+
     return EmailGenerateResponse(
         subject=subject,
         body=body,
         model=response.model,
     )
+
+# 7. LÄHETÄ SÄHKÖPOSTI (SMTP)
+
+class SendEmailRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+
+class SendEmailResponse(BaseModel):
+    ok: bool
+    message: str
+
+@app.post("/send-email", response_model=SendEmailResponse)
+async def send_email(
+    req: SendEmailRequest,
+    _user: AuthUser = Depends(verify_token),
+):
+    if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM]):
+        raise HTTPException(500, "SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD and SMTP_FROM in .env")
+
+    msg = MIMEMultipart()
+    msg["From"] = SMTP_FROM
+    msg["To"] = req.to
+    msg["Subject"] = req.subject
+    msg.attach(MIMEText(req.body, "plain", "utf-8"))
+
+    def _send():
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+
+    try:
+        await asyncio.to_thread(_send)
+    except Exception as e:
+        logger.error(f"SMTP error: {e}")
+        raise HTTPException(500, f"Email sending failed: {e}")
+
+    return SendEmailResponse(ok=True, message=f"Email sent to {req.to}")

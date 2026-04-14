@@ -15,9 +15,8 @@ import { toast } from 'sonner';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { PipelineStatus } from '../types/agency';
 import { usePipeline } from '../context/PipelineContext';
+import { apiFetch } from '../lib/api';
 import PipelineCard from './PipelineCard';
-
-const API_BASE = 'http://127.0.0.1:8000';
 
 const BATCH_SIZE = 5;
 
@@ -93,9 +92,8 @@ const PipelineBoard: React.FC = () => {
       const batch = ids.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async (id) => {
-          const res = await fetch(`${API_BASE}/leads/${id}/generate-email`, {
+          const res = await apiFetch(`/leads/${id}/generate-email`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({}),
           });
           if (!res.ok) throw new Error(`${res.status}`);
@@ -112,13 +110,21 @@ const PipelineBoard: React.FC = () => {
     setBulkLoading(false);
   };
 
-  const handleExportCsv = () => {
+  const handleExportCsv = async () => {
     const idsParam = [...selectedIds].join(',');
-    const url = `${API_BASE}/leads/export?ids=${idsParam}`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'leads_export.csv';
-    a.click();
+    try {
+      const res = await apiFetch(`/leads/export?ids=${idsParam}`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'leads_export.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('CSV export failed');
+    }
   };
 
   const handleBulkDelete = async () => {

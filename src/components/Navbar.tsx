@@ -2,7 +2,7 @@ import React from 'react';
 import { Building2 } from 'lucide-react';
 import { usePipeline } from '../context/PipelineContext';
 
-type NavTab = 'search' | 'pipeline' | 'comparison' | 'guides';
+type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history';
 
 interface NavbarProps {
   activeTab: NavTab;
@@ -13,10 +13,10 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, onChangeTab }) => {
   const { savedAgencies } = usePipeline();
 
   const navItems: { id: NavTab; label: string }[] = [
-    { id: 'search', label: 'Search Agencies' },
-    { id: 'pipeline', label: 'My Pipeline (Saved)' },
-    { id: 'comparison', label: 'Comparison Tool' },
-    { id: 'guides', label: 'Hiring Guides' },
+    { id: 'search', label: 'Search Businesses' },
+    { id: 'pipeline', label: 'My Pipeline' },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'history', label: 'Search History' },
   ];
 
   return (

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, RefreshCw, Sparkles } from 'lucide-react';
+import { X, Copy, RefreshCw, Sparkles, Send, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SavedAgency } from '../types/agency';
+import { apiFetch } from '../lib/api';
 
 interface EmailDraftModalProps {
   isOpen: boolean;
@@ -23,19 +24,28 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
 }) => {
   const [draft, setDraft] = useState<EmailDraft | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<'scan' | 'generate'>('generate');
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [instruction, setInstruction] = useState('');
+  const [recipientEmail, setRecipientEmail] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchDraft = async (extraInstruction?: string) => {
     setLoading(true);
+    setLoadingPhase(agency.website ? 'scan' : 'generate');
     setError('');
+
+    // Vaihda viesti generointi-vaiheeseen 3s jälkeen (scraping valmis)
+    const phaseTimer = agency.website
+      ? setTimeout(() => setLoadingPhase('generate'), 3000)
+      : undefined;
+
     try {
-      const res = await fetch(
-        `http://127.0.0.1:8000/leads/${agency.id}/generate-email`,
+      const res = await apiFetch(
+        `/leads/${agency.id}/generate-email`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             instruction: extraInstruction || undefined,
           }),
@@ -50,6 +60,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       console.error(err);
       setError('Failed to generate email. Is the backend running?');
     } finally {
+      if (phaseTimer) clearTimeout(phaseTimer);
       setLoading(false);
     }
   };
@@ -58,6 +69,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
     if (isOpen) {
       setDraft(null);
       setInstruction('');
+      setRecipientEmail('');
       setError('');
       fetchDraft();
     }
@@ -75,6 +87,34 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       toast.success('Copied to clipboard!');
     } catch {
       toast.error('Failed to copy');
+    }
+  };
+
+  const handleSend = async () => {
+    if (!draft || !recipientEmail) {
+      toast.error('Enter a recipient email address');
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await apiFetch('/send-email', {
+        method: 'POST',
+        body: JSON.stringify({
+          to: recipientEmail,
+          subject: draft.subject,
+          body: draft.body,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(data.detail || `${res.status}`);
+      }
+      toast.success(`Email sent to ${recipientEmail}`);
+      setRecipientEmail('');
+    } catch (err) {
+      toast.error(`Failed to send: ${(err as Error).message}`);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -131,7 +171,9 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                     />
                   </div>
                   <p className="text-sm font-medium text-indigo-600 animate-pulse">
-                    AI is writing...
+                    {loadingPhase === 'scan'
+                      ? 'Analyzing website for personalization...'
+                      : 'AI is writing...'}
                   </p>
                 </div>
               ) : error ? (
@@ -209,14 +251,33 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                   </button>
                 </div>
 
-                {/* Copy */}
-                <button
-                  onClick={handleCopy}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm shadow-indigo-200"
-                >
-                  <Copy size={14} />
-                  Copy to Clipboard
-                </button>
+                {/* Copy & Send */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCopy}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm shadow-indigo-200"
+                  >
+                    <Copy size={14} />
+                    Copy
+                  </button>
+                  <button
+                    onClick={handleSend}
+                    disabled={sending || !recipientEmail}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm shadow-emerald-200"
+                  >
+                    {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Send
+                  </button>
+                </div>
+
+                {/* Recipient */}
+                <input
+                  type="email"
+                  value={recipientEmail}
+                  onChange={(e) => setRecipientEmail(e.target.value)}
+                  placeholder="Recipient email (e.g. info@yritys.fi)"
+                  className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-500 transition-colors"
+                />
               </div>
             )}
           </motion.div>

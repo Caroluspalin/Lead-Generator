@@ -6,12 +6,33 @@ import SidebarNav from './components/SidebarNav';
 import AddBusinessModal from './components/AddBusinessModal';
 import type { NavTab } from './components/Navbar';
 import PipelineBoard from './components/PipelineBoard';
-import ComparisonView from './components/ComparisonView';
-import HiringGuides from './components/HiringGuides';
+import DashboardView from './components/DashboardView';
+import SearchHistoryView from './components/SearchHistoryView';
 import type { Agency } from './types/agency';
 import { usePipeline } from './context/PipelineContext';
+import { useAuth } from './context/AuthContext';
+import { apiFetch } from './lib/api';
+import Login from './components/Login';
 
 function App() {
+  const { session, loading: authLoading } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader2 size={28} className="animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Login />;
+  }
+
+  return <AppShell />;
+}
+
+function AppShell() {
   const [businessType, setBusinessType] = useState('autokorjaamo');
   const [city, setCity] = useState('Tampere');
   const [leads, setLeads] = useState<Agency[]>([]);
@@ -51,8 +72,10 @@ function App() {
     }
   };
 
-  const doSearch = async () => {
-    if (!businessType || !city) {
+  const doSearch = async (overrideBt?: string, overrideCity?: string) => {
+    const bt = overrideBt ?? businessType;
+    const ct = overrideCity ?? city;
+    if (!bt || !ct) {
       setError('Please fill in both fields.');
       return;
     }
@@ -66,10 +89,10 @@ function App() {
     }, 60000);
 
     try {
-      const response = await fetch(
-        `http://127.0.0.1:8000/search?business_type=${encodeURIComponent(
-          businessType,
-        )}&city=${encodeURIComponent(city)}`,
+      const response = await apiFetch(
+        `/search?business_type=${encodeURIComponent(
+          bt,
+        )}&city=${encodeURIComponent(ct)}`,
         { signal: controller.signal },
       );
       window.clearTimeout(timeoutId);
@@ -91,7 +114,7 @@ function App() {
       const mapped: Agency[] = raw.map((item) => ({
         id: item.place_id,
         name: item.name,
-        city: city,
+        city: ct,
         address: item.address,
         phone: item.phone,
         website: item.website ?? undefined,
@@ -247,8 +270,17 @@ function App() {
         )}
 
         {activeTab === 'pipeline' && <PipelineBoard />}
-        {activeTab === 'comparison' && <ComparisonView />}
-        {activeTab === 'guides' && <HiringGuides />}
+        {activeTab === 'dashboard' && <DashboardView />}
+        {activeTab === 'history' && (
+          <SearchHistoryView
+            onReSearch={(bt, c) => {
+              setBusinessType(bt);
+              setCity(c);
+              setActiveTab('search');
+              doSearch(bt, c);
+            }}
+          />
+        )}
       </main>
     </div>
   );

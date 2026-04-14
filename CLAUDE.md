@@ -18,6 +18,7 @@
 - Backend: `asyncio.to_thread()` kaikille blokkaaville kutsuille. Älä blokkaa event loopia.
 - UI-kieli: englanti. Koodikommentit: suomi tai englanti, ei väliä.
 - Turvakytkimet (MAX_SEARCH_CALLS, MAX_DETAIL_CALLS) ovat ehdottomia rajoja. Älä nosta niitä ilman lupaa.
+- Poista `agency_hunter.db` ennen uudelleenkäynnistystä jos malleja on muutettu (ei Alembicia).
 
 ## Komennot
 

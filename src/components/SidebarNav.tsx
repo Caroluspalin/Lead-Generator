@@ -5,11 +5,13 @@ import {
   Search,
   Layers,
   BarChart2,
-  BookOpen,
+  History,
   Plus,
+  LogOut,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { usePipeline } from '../context/PipelineContext';
+import { useAuth } from '../context/AuthContext';
 import type { NavTab } from './Navbar';
 
 interface SidebarNavProps {
@@ -23,6 +25,7 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
   onChangeTab,
   onAddClick,
 }) => {
+  const { signOut, user } = useAuth();
   const [open, setOpen] = useState(true);
   const { savedAgencies } = usePipeline();
 
@@ -35,11 +38,11 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
       badge: savedAgencies.length,
     },
     {
-      id: 'comparison' as NavTab,
+      id: 'dashboard' as NavTab,
       icon: BarChart2,
-      label: 'Comparison',
+      label: 'Dashboard',
     },
-    { id: 'guides' as NavTab, icon: BookOpen, label: 'Hiring Guides' },
+    { id: 'history' as NavTab, icon: History, label: 'Search History' },
   ];
 
   return (
@@ -83,6 +86,30 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
               className="text-xs font-medium"
             >
               Add Manually
+            </motion.span>
+          )}
+        </button>
+
+        <button
+          onClick={() => signOut()}
+          className="relative flex h-10 w-full items-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 mt-2"
+          title={user?.email ?? 'Sign out'}
+        >
+          <motion.div
+            layout
+            className="grid h-full w-10 place-content-center text-lg"
+          >
+            <LogOut />
+          </motion.div>
+          {open && (
+            <motion.span
+              layout
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.125 }}
+              className="text-xs font-medium truncate max-w-[140px]"
+            >
+              {user?.email ?? 'Sign out'}
             </motion.span>
           )}
         </button>
