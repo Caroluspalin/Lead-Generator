@@ -346,7 +346,7 @@ async def search_google(
             )
             for i in range(1, 6)
         ]
-        session.add(SearchHistoryEntry(business_type=business_type, city=city, result_count=len(sample_results)))
+        session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(sample_results)))
         session.commit()
         return sample_results
 
@@ -392,7 +392,7 @@ async def search_google(
         return output
 
     results = await asyncio.to_thread(_blocking_website_analysis)
-    session.add(SearchHistoryEntry(business_type=business_type, city=city, result_count=len(results)))
+    session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
     session.commit()
     return results
 
@@ -401,15 +401,20 @@ async def search_google(
 def create_lead(
     lead: LeadCreate,
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ):
-    # Tarkista onko jo olemassa (Google Place ID:n perusteella)
+    # Duplikaattitarkistus käyttäjäkohtaisesti — sama place_id eri käyttäjällä on sallittu
     if lead.google_place_id:
-        existing = session.exec(select(Lead).where(Lead.google_place_id == lead.google_place_id)).first()
+        existing = session.exec(
+            select(Lead).where(
+                Lead.google_place_id == lead.google_place_id,
+                Lead.user_id == user.id,
+            )
+        ).first()
         if existing:
             raise HTTPException(status_code=400, detail="Lead already exists")
-            
-    db_lead = Lead.model_validate(lead)
+
+    db_lead = Lead.model_validate(lead, update={"user_id": user.id})
     session.add(db_lead)
     session.commit()
     session.refresh(db_lead)
@@ -419,9 +424,11 @@ def create_lead(
 @app.get("/leads", response_model=List[Lead])
 def read_leads(
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ):
-    leads = session.exec(select(Lead).order_by(Lead.created_at.desc())).all()
+    leads = session.exec(
+        select(Lead).where(Lead.user_id == user.id).order_by(Lead.created_at.desc())
+    ).all()
     return leads
 
 # 3b. CSV EXPORT
@@ -429,13 +436,15 @@ def read_leads(
 def export_leads_csv(
     ids: str = Query(..., description="Pilkuilla erotetut liidi-ID:t"),
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ) -> StreamingResponse:
     id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
     if not id_list:
         raise HTTPException(400, "No valid IDs provided")
 
-    leads = session.exec(select(Lead).where(Lead.id.in_(id_list))).all()
+    leads = session.exec(
+        select(Lead).where(Lead.id.in_(id_list), Lead.user_id == user.id)
+    ).all()
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -465,20 +474,23 @@ def export_leads_csv(
 @app.get("/search-history", response_model=List[SearchHistoryEntry])
 def get_search_history(
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ) -> list[SearchHistoryEntry]:
     return list(session.exec(
-        select(SearchHistoryEntry).order_by(SearchHistoryEntry.searched_at.desc()).limit(50)
+        select(SearchHistoryEntry)
+        .where(SearchHistoryEntry.user_id == user.id)
+        .order_by(SearchHistoryEntry.searched_at.desc())
+        .limit(50)
     ).all())
 
 @app.delete("/search-history/{entry_id}")
 def delete_search_history_entry(
     entry_id: int,
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ):
     entry = session.get(SearchHistoryEntry, entry_id)
-    if not entry:
+    if not entry or entry.user_id != user.id:
         raise HTTPException(404, "Entry not found")
     session.delete(entry)
     session.commit()
@@ -490,10 +502,17 @@ def delete_search_history_entry(
 def get_lead_drafts(
     lead_id: int,
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ) -> list[EmailDraft]:
+    # Varmista että liidi kuuluu käyttäjälle
+    db_lead = session.get(Lead, lead_id)
+    if not db_lead or db_lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+
     return list(session.exec(
-        select(EmailDraft).where(EmailDraft.lead_id == lead_id).order_by(EmailDraft.created_at.desc())
+        select(EmailDraft)
+        .where(EmailDraft.lead_id == lead_id, EmailDraft.user_id == user.id)
+        .order_by(EmailDraft.created_at.desc())
     ).all())
 
 # 4. PÄIVITÄ LIIDI (Status / Notes)
@@ -502,16 +521,16 @@ def update_lead(
     lead_id: int,
     lead_update: LeadUpdate,
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ):
     db_lead = session.get(Lead, lead_id)
-    if not db_lead:
+    if not db_lead or db_lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found")
-        
+
     lead_data = lead_update.model_dump(exclude_unset=True)
     for key, value in lead_data.items():
         setattr(db_lead, key, value)
-        
+
     session.add(db_lead)
     session.commit()
     session.refresh(db_lead)
@@ -522,10 +541,10 @@ def update_lead(
 def delete_lead(
     lead_id: int,
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ):
     db_lead = session.get(Lead, lead_id)
-    if not db_lead:
+    if not db_lead or db_lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found")
     session.delete(db_lead)
     session.commit()
@@ -595,13 +614,13 @@ async def generate_email(
     lead_id: int,
     req: EmailGenerateRequest = EmailGenerateRequest(),
     session: Session = Depends(get_session),
-    _user: AuthUser = Depends(verify_token),
+    user: AuthUser = Depends(verify_token),
 ):
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
 
     db_lead = session.get(Lead, lead_id)
-    if not db_lead:
+    if not db_lead or db_lead.user_id != user.id:
         raise HTTPException(404, "Lead not found")
 
     # Deep Scan: skraapataan verkkosivun teksti jos ei vielä cachessa
@@ -647,7 +666,7 @@ async def generate_email(
     subject = status_subjects.get(db_lead.website_status or "", f"Yhteistyöehdotus — {db_lead.name}")
 
     # Tallenna draft kantaan
-    session.add(EmailDraft(lead_id=lead_id, subject=subject, body=body, model=response.model))
+    session.add(EmailDraft(user_id=user.id, lead_id=lead_id, subject=subject, body=body, model=response.model))
     session.commit()
 
     return EmailGenerateResponse(

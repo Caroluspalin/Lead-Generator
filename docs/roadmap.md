@@ -24,16 +24,32 @@
   - Frontend: `@supabase/supabase-js`, `AuthContext`, `Login`-komponentti, `apiFetch`-helper JWT-injektioon
   - CORS rajoitettu `ALLOWED_ORIGINS`-env-muuttujalla
   - `.env.example`-tiedostot sekä backendille että frontendille
+- **Phase 11a**: Multi-tenancy (sovellustaso):
+  - `user_id`-kenttä (str, indexed) malleihin: `Lead`, `EmailDraft`, `SearchHistoryEntry`
+  - `Lead.google_place_id` ei enää globaalisti unique — `UniqueConstraint("google_place_id", "user_id")` sallii saman yrityksen useammalle käyttäjälle
+  - Kaikki endpointit suodattavat/tarkistavat `user_id == current_user.id` — 404 (ei 403) toisen käyttäjän resurssista
+  - POST-operaatiot asettavat `user_id` serverissä (`AuthUser.id`), ei clientin syötteestä
+  - ScannedPlace pysyy globaalina cachena (julkinen place_id, per-user cache kaksinkertaistaisi API-laskun)
+  - Dev-SQLite poistettu schema-muutosten takia (CLAUDE.md:n ohjeen mukaan, ei Alembicia)
 
 ## Seuraavaksi
 
-### Phase 11: Pilvideployaus (Myöhemmin)
+### Phase 11b: Supabase RLS -policyt (tulevaisuudessa)
+
+Jos PostgREST-pääsy Supabaseen avataan frontille ohi FastAPI-backendin, sovellustason `user_id`-suodatus ei enää riitä. Silloin:
+
+- Ota RLS käyttöön: `ALTER TABLE lead ENABLE ROW LEVEL SECURITY;` (sama `email_draft`, `search_history_entry`)
+- Policy per taulu: `CREATE POLICY "users see own rows" ON lead FOR ALL USING (user_id = auth.uid()::text) WITH CHECK (user_id = auth.uid()::text);`
+- `ScannedPlace` pysyy RLS:ttä (tai policy `USING (true)` lukuun, ei kirjoitusta clientille)
+- Huom: `user_id` on tällä hetkellä `str` (Supabase UUID string-muodossa), ei `uuid` — casting `auth.uid()::text` vaaditaan. Vaihtoehto: migroi `user_id` PostgreSQL `uuid`-tyypiksi tuotantoa varten
+- Nyt backend on ainoa reitti dataan → sovellustason suodatus riittää, RLS on defense-in-depth
+
+### Phase 12: Pilvideployaus (Myöhemmin)
 
 - Backend deployaus pilveen (Render / Fly.io / Railway)
 - Frontend deployaus (Vercel / Netlify / Cloudflare Pages)
 - CI/CD-putki (GitHub Actions)
 - Monitorointi ja lokitus (Sentry / Logflare)
-- Row Level Security (RLS) Supabase-kantaan, jotta käyttäjät näkevät vain omat liidinsä
 
 ## Backlog (tulevaisuuden ideat)
 

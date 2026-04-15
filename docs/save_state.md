@@ -24,7 +24,8 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | Kentta | Tyyppi | Huom |
 |---|---|---|
 | id | int, PK, auto | |
-| google_place_id | str?, unique, index | Duplikaattien esto |
+| user_id | str, index | Supabase user UUID — omistaja |
+| google_place_id | str?, index | Duplikaattien esto (unique per user_id, ks. UniqueConstraint) |
 | name | str | |
 | city | str, index | |
 | address | str? | |
@@ -47,11 +48,14 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | google_place_id | str, unique, index | Jo Details-haulla käsitelty yritys |
 | scanned_at | datetime | UTC-aikaleima |
 
+Globaali cache (ei user_id:tä): place_id on julkista Google-dataa ja per-user cache kaksinkertaistaisi API-laskun. Jos halutaan "vain minun skannaukseni" -tilasto → erillinen UserSearchLog-taulu, ei puututa cache-tauluun.
+
 ### SearchHistoryEntry
 
 | Kentta | Tyyppi | Huom |
 |---|---|---|
 | id | int, PK, auto | |
+| user_id | str, index | Supabase user UUID — omistaja |
 | business_type | str | Hakusana |
 | city | str | Kaupunki |
 | result_count | int | Tulosten määrä |
@@ -62,6 +66,7 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | Kentta | Tyyppi | Huom |
 |---|---|---|
 | id | int, PK, auto | |
+| user_id | str, index | Supabase user UUID — omistaja |
 | lead_id | int, index | Viittaus Lead-tauluun |
 | subject | str | Sähköpostin otsikko |
 | body | str | Sähköpostin teksti |
@@ -98,6 +103,7 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 - **Bulk Actions**: Leijuva toolbar — Move Stage, AI Drafts, CSV Export, Delete valituille liideille (erissä, 5 kerrallaan)
 - **Deep Scan**: Verkkosivun leipätekstin scraping (requests + BeautifulSoup, 5s timeout) → teksti cachetetaan Lead.website_context -kenttään → OpenAI käyttää sitä personoitujen jäänmurtajien generointiin sähköposteihin. Vikasietoinen: jos scraping epäonnistuu, meili generoidaan ilman personointia
 - **Auth**: Supabase Auth + JWT. Frontend käyttää `@supabase/supabase-js`, session tallentuu selaimeen, access_token lisätään automaattisesti `apiFetch`-helperillä Authorization-headeriin. Backend verifioi JWT:n (`backend/app/auth.py`, `verify_token`-dependency) tukien sekä uusia ES256/RS256-tokeneita JWKS-endpointista (`PyJWKClient`, `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, avainten cache, macOS-venvissä certifi-SSL-context) että legacy-HS256-tokeneita `SUPABASE_JWT_SECRET`-salaisuudella. Algoritmi tunnistetaan tokenin headerista. `AUTH_DISABLED=true` ohittaa verifioinnin dev-kehityksessä. SidebarNav näyttää kirjautuneen käyttäjän emailin ja sign-out-napin
+- **Multi-tenancy**: Lead, EmailDraft ja SearchHistoryEntry sisältävät `user_id`-kentän (Supabase UUID, indexed). Kaikki endpointit suodattavat `user_id == current_user.id`: GET-listat `.where(user_id)`, PATCH/DELETE/single-GET palauttavat 404:n (ei 403:a) jos toisen käyttäjän resurssia yritetään käyttää — ei paljasta resurssien olemassaoloa. POST-operaatiot asettavat `user_id` serverissä `AuthUser.id`:stä (ei clientin syötteestä). `Lead.google_place_id` ei ole enää globaalisti unique — `UniqueConstraint("google_place_id", "user_id")` sallii saman yrityksen useammalle käyttäjälle. ScannedPlace pysyy globaalina cachena (ei user_id:tä, ks. tietokantaosio)
 - **Tietokanta**: Dev SQLite, tuotanto PostgreSQL (Supabase). `DATABASE_URL` tukee `postgres://`- ja `postgresql://`-muotoja, Postgresissa pool_pre_ping + pool_size=5
 
 ## Ympäristömuuttujat (backend/.env)
