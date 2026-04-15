@@ -6,12 +6,14 @@ import React, {
   ReactNode,
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, isAuthConfigured } from '../lib/supabaseClient';
 
 interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  /** Jos Supabasea ei ole konfiguroitu, sovellus on dev-moodissa. */
+  devMode: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -19,11 +21,18 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+// Feikkisessio dev-moodille — mahdollistaa AppShellin renderöinnin ilman kirjautumista.
+const DEV_SESSION = { access_token: 'dev', user: { id: 'dev', email: 'dev@local' } } as unknown as Session;
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(
+    isAuthConfigured ? null : DEV_SESSION,
+  );
+  const [loading, setLoading] = useState(isAuthConfigured);
 
   useEffect(() => {
+    if (!supabase) return;
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
@@ -39,16 +48,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    if (!supabase) throw new Error('Auth not configured');
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
   const signUp = async (email: string, password: string) => {
+    if (!supabase) throw new Error('Auth not configured');
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
   };
 
   const signOut = async () => {
+    if (!supabase) return;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
@@ -59,6 +71,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         session,
         user: session?.user ?? null,
         loading,
+        devMode: !isAuthConfigured,
         signIn,
         signUp,
         signOut,

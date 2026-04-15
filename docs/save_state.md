@@ -97,7 +97,7 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 - **Pipeline-navigointi**: Chevron-napit (< >) dropdownin sijaan, yhden klikkauksen stage-siirto
 - **Bulk Actions**: Leijuva toolbar — Move Stage, AI Drafts, CSV Export, Delete valituille liideille (erissä, 5 kerrallaan)
 - **Deep Scan**: Verkkosivun leipätekstin scraping (requests + BeautifulSoup, 5s timeout) → teksti cachetetaan Lead.website_context -kenttään → OpenAI käyttää sitä personoitujen jäänmurtajien generointiin sähköposteihin. Vikasietoinen: jos scraping epäonnistuu, meili generoidaan ilman personointia
-- **Auth**: Supabase Auth + JWT. Frontend käyttää `@supabase/supabase-js`, session tallentuu selaimeen, access_token lisätään automaattisesti `apiFetch`-helperillä Authorization-headeriin. Backend verifioi JWT:n HS256+`SUPABASE_JWT_SECRET` -salaisuudella (`backend/app/auth.py`, `verify_token`-dependency). `AUTH_DISABLED=true` ohittaa verifioinnin dev-kehityksessä
+- **Auth**: Supabase Auth + JWT. Frontend käyttää `@supabase/supabase-js`, session tallentuu selaimeen, access_token lisätään automaattisesti `apiFetch`-helperillä Authorization-headeriin. Backend verifioi JWT:n (`backend/app/auth.py`, `verify_token`-dependency) tukien sekä uusia ES256/RS256-tokeneita JWKS-endpointista (`PyJWKClient`, `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, avainten cache, macOS-venvissä certifi-SSL-context) että legacy-HS256-tokeneita `SUPABASE_JWT_SECRET`-salaisuudella. Algoritmi tunnistetaan tokenin headerista. `AUTH_DISABLED=true` ohittaa verifioinnin dev-kehityksessä. SidebarNav näyttää kirjautuneen käyttäjän emailin ja sign-out-napin
 - **Tietokanta**: Dev SQLite, tuotanto PostgreSQL (Supabase). `DATABASE_URL` tukee `postgres://`- ja `postgresql://`-muotoja, Postgresissa pool_pre_ping + pool_size=5
 
 ## Ympäristömuuttujat (backend/.env)
@@ -105,9 +105,8 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 ```
 DATABASE_URL=sqlite:///agency_hunter.db   # tai postgresql://... Supabasesta
 SQL_ECHO=false
-SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_ANON_KEY=
-SUPABASE_JWT_SECRET=
+SUPABASE_URL=https://<project>.supabase.co   # pakollinen ES256/RS256-tokeneille (JWKS)
+SUPABASE_JWT_SECRET=                         # pakollinen HS256-legacy-tokeneille
 SUPABASE_JWT_AUDIENCE=authenticated
 AUTH_DISABLED=false        # dev-override, ohittaa JWT-verifioinnin
 ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
@@ -139,7 +138,7 @@ React 19, Tailwind CSS 3, framer-motion, lucide-react, sonner
 backend/app/main.py            — GooglePlacesService, email/SMTP service, kaikki endpointit
 backend/app/models.py          — Lead, LeadCreate, LeadUpdate, ScannedPlace, SearchHistoryEntry, EmailDraft
 backend/app/database.py        — DB-yhteys (SQLite dev, Postgres tuotannossa)
-backend/app/auth.py            — Supabase JWT -verifiointi (verify_token FastAPI-dependency)
+backend/app/auth.py            — Supabase JWT -verifiointi (ES256/RS256 JWKS + HS256 legacy, verify_token FastAPI-dependency)
 backend/app/utils/scraper.py   — Deep Scan: verkkosivun leipätekstin scraping (5s timeout, max 2000 merkkiä)
 src/lib/supabaseClient.ts      — Supabase-client (VITE_SUPABASE_URL + ANON_KEY)
 src/lib/api.ts                 — apiFetch: lisää Authorization-Bearer-tokenin kaikkiin pyyntöihin

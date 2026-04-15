@@ -18,7 +18,8 @@
 - **Phase 9**: AI Deep Scan — verkkosivun scraping (requests+BS4, 5s timeout), tekstin caching Lead-tauluun (website_context), OpenAI-prompti laajennettu personoiduilla jäänmurtajilla, vikasietoinen fallback
 - **Phase 10**: Tuotantovalmius:
   - PostgreSQL-tuki (Supabase) `database.py`:ssä, `postgres://` → `postgresql://` -normalisointi, pool_pre_ping
-  - Supabase Auth + JWT-verifiointi backendissä (`backend/app/auth.py`, PyJWT, HS256)
+  - Supabase Auth + JWT-verifiointi backendissä (`backend/app/auth.py`, PyJWT[crypto] + certifi): uudet ES256/RS256-tokenit JWKS-endpointista (PyJWKClient, avainten cache) sekä legacy-HS256-tokenit symmetrisellä secretillä
+  - Sidebar sign-out -nappi + kirjautuneen käyttäjän email
   - Kaikki kirjoittavat + liidien luku/draftit/history-endpointit suojattu `verify_token`-dependencyllä
   - Frontend: `@supabase/supabase-js`, `AuthContext`, `Login`-komponentti, `apiFetch`-helper JWT-injektioon
   - CORS rajoitettu `ALLOWED_ORIGINS`-env-muuttujalla
