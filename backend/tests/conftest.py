@@ -135,3 +135,19 @@ def fake_openai(monkeypatch: pytest.MonkeyPatch) -> type[FakeOpenAI]:
     monkeypatch.setattr("app.main.OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
     return FakeOpenAI
+
+
+TEST_PROFILE: dict[str, Any] = {
+    "name": "Palin",
+    "company_name": "",
+    "phone": "040 123 4567",
+    "website": "https://palin.fi",
+    "short_intro": "teen nettisivuja paikallisille yrityksille pääkaupunkiseudulla",
+}
+
+
+@pytest.fixture
+def sender_profile(client_a: TestClient) -> dict[str, Any]:
+    res = client_a.put("/sender-profile", json=TEST_PROFILE)
+    assert res.status_code == 200, res.text
+    return res.json()

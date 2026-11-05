@@ -3,6 +3,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 import smtplib
 import threading
 import unicodedata
@@ -750,35 +751,84 @@ def delete_lead(
 
 OPENAI_MODEL = "gpt-4o-mini"
 
-# Lisätään koodissa jokaisen viestin loppuun, jotta se on aina mukana (ei luoteta malliin)
+# Lisätään koodissa jokaisen viestin loppuun, jotta ne ovat aina mukana (ei luoteta malliin)
 OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastaa vain "ei kiitos", niin en ota enää yhteyttä.'
+SIGN_OFF = "Terveisin,"
+MAX_EMAIL_WORDS = 90
 
-# website_issue (tekninen, website_check.py) -> selkokielinen havainto asiakkaalle.
+# website_issue (tekninen, website_check.py) -> oma, varma havainto te-muodossa.
 # Avain täsmätään issue-tekstin alkuun; yhdistetyt syyt ("no HTTPS; no viewport meta") pilkotaan.
 ISSUE_DESCRIPTIONS: list[tuple[str, str]] = [
-    ("social media only", "yrityksellä on vain somesivu (esim. Facebook), ei omaa nettisivua"),
-    ("DNS not resolving", "Googlen kautta löytyvä nettisivuosoite ei enää avaudu"),
-    ("connection refused", "nettisivu ei tällä hetkellä avaudu"),
-    ("connection failed", "nettisivu ei tällä hetkellä avaudu"),
-    ("parked domain", "nettisivuosoitteessa ei ole enää yrityksen omaa sivua"),
-    ("HTTP 404", "Googlessa oleva linkki nettisivuille johtaa sivulle, jota ei löydy"),
-    ("HTTP 410", "Googlessa oleva linkki nettisivuille johtaa sivulle, jota ei löydy"),
-    ("HTTP 5", "nettisivu näyttää tällä hetkellä virheilmoituksen"),
-    ("SSL certificate", "selain näyttää kävijöille turvallisuusvaroituksen ennen sivulle pääsyä"),
-    ("no HTTPS", 'sivustolla ei ole suojattua yhteyttä, joten selain merkitsee sen "ei turvallinen"'),
-    ("redirects to HTTP", 'sivustolla ei ole suojattua yhteyttä, joten selain merkitsee sen "ei turvallinen"'),
-    ("no viewport meta", "sivusto ei mukaudu puhelimen näytölle"),
+    ("social media only", "löysin teidät vain Facebookista, omaa nettisivua en löytänyt"),
+    ("DNS not resolving", "Googlen kautta löytyvä nettisivuosoitteenne ei avaudu"),
+    ("connection refused", "nettisivunne ei avautunut, kun yritin avata sen"),
+    ("connection failed", "nettisivunne ei avautunut, kun yritin avata sen"),
+    ("parked domain", "Googlessa oleva nettisivuosoitteenne johtaa sivulle, jolla ei ole teidän sisältöänne"),
+    ("HTTP 404", 'Googlessa oleva linkki sivuillenne johtaa "sivua ei löydy" -ilmoitukseen'),
+    ("HTTP 410", 'Googlessa oleva linkki sivuillenne johtaa "sivua ei löydy" -ilmoitukseen'),
+    ("HTTP 5", "sivunne näytti virheilmoituksen, kun avasin sen"),
+    ("SSL certificate", "kun avasin sivunne, selain varoitti, ettei yhteys ole turvallinen"),
+    ("no HTTPS", 'selain merkitsee sivunne "ei turvallinen" -merkinnällä'),
+    ("redirects to HTTP", 'selain merkitsee sivunne "ei turvallinen" -merkinnällä'),
+    ("no viewport meta", "sivunne ei mukaudu puhelimen näytölle"),
 ]
 STATUS_DESCRIPTIONS: Dict[str, str] = {
-    "NO WEBSITE": "yrityksellä ei ole nettisivuja",
-    "BROKEN WEBSITE": "nettisivu ei tällä hetkellä toimi",
-    "INSECURE": 'sivustolla ei ole suojattua yhteyttä, joten selain merkitsee sen "ei turvallinen"',
-    "NOT MOBILE": "sivusto ei mukaudu puhelimen näytölle",
+    "NO WEBSITE": "en löytänyt teille omaa nettisivua Googlesta",
+    "BROKEN WEBSITE": "nettisivunne ei avautunut, kun yritin avata sen",
+    "INSECURE": 'selain merkitsee sivunne "ei turvallinen" -merkinnällä',
+    "NOT MOBILE": "sivunne ei mukaudu puhelimen näytölle",
 }
+
+# Vihje "miksi sillä on väliä" -lauseeseen: arkinen asiakkaan näkökulma, ei pelottelua
+WHY_IT_MATTERS: Dict[str, str] = {
+    "NO WEBSITE": "moni etsii aukioloajat, hinnat ja yhteystiedot ensin netistä",
+    "BROKEN WEBSITE": "Googlesta tulevat asiakkaat päätyvät nyt tyhjään, eivätkä löydä esim. aukioloaikoja",
+    "INSECURE": "varoitus saa osan kävijöistä palaamaan hakutuloksiin ennen kuin he näkevät sivunne",
+    "NOT MOBILE": "suurin osa etsii palveluja puhelimella",
+}
+
+# Pieni, konkreettinen tarjous (ei "keskustella tarkemmin")
+OFFERS: Dict[str, str] = {
+    "NO WEBSITE": "Voin tehdä teille ilmaisen luonnoksen, jonka näette ennen kuin päätätte mitään.",
+    "BROKEN WEBSITE": "Voin katsoa, mistä vika johtuu, ja kertoa mitä korjaus vaatisi.",
+    "INSECURE": "Korjaus on yleensä nopea, voin katsoa sen teille.",
+    "NOT MOBILE": "Voin näyttää, miltä sivunne näyttäisi puhelimella korjattuna.",
+}
+DEFAULT_OFFER = "Voin tehdä sivuistanne lyhyen ilmaisen katsauksen ja kertoa, mitä parantaisin."
+
+# Kielletyt sanat/fraasit: (näytettävä nimi, regex). Taivutusmuodot mukana; "ihan" ei osu "ihana"-kuvioon.
+FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (label, re.compile(pattern, re.IGNORECASE))
+    for label, pattern in [
+        ("ihana", r"\bihan(a|aa|an|at|ia|ista|imp)\w*"),
+        ("upea", r"\bupe(a|i)\w*"),
+        ("mahtava", r"\bmahtav\w*"),
+        ("ainutlaatuinen", r"\bainutlaatui\w*"),
+        ("intohimo", r"\bintohimo\w*"),
+        ("ratkaisu", r"\bratkaisu\w*"),
+        ("kokonaisvaltainen", r"\bkokonaisvaltai\w*"),
+        ("digitaalinen läsnäolo", r"\bdigitaali\w*\s+läsnäolo\w*"),
+        ("nostaa seuraavalle tasolle", r"\b(seuraavalle|uudelle)\s+tasolle\b"),
+        ("innovatiivinen", r"\binnovatiivi\w*"),
+        ("räätälöity", r"\bräätälöi\w*"),
+        ("huippu", r"\bhuippu\w*"),
+        ("saumaton", r"\bsaumat\w*"),
+        ("synergia", r"\bsynergi\w*"),
+        ("keskustella tarkemmin", r"\bkeskustel\w*\s+(asiasta\s+)?tarkemmin\b"),
+        ("liiketoiminnan kasvu", r"\bliiketoimin\w*\s+kasv\w*"),
+        ("saattaa (arvailu)", r"\bsaatta(a|vat|isi)\b"),
+    ]
+]
+PRICE_RE = re.compile(r"\d[\d\s.,]*\s*(€|e\b|euro)", re.IGNORECASE)
+
+_SIGN_OFF_RE = re.compile(
+    r"^\s*(ystävällisin terveisin|parhain terveisin|terveisin|t\.|kiittäen|kiitos ja mukavaa)\b.*$",
+    re.IGNORECASE,
+)
 
 
 def describe_website_problem(website_status: Optional[str], website_issue: Optional[str]) -> Optional[str]:
-    """Selkokielinen kuvaus havaitusta ongelmasta, tai None jos ongelmaa ei saa mainita.
+    """Oma, varma havainto te-muodossa, tai None jos ongelmaa ei saa mainita.
 
     UNKNOWN ja WEBSITE OK -> None: emme väitä ongelmaa jota ei ole varmistettu.
     """
@@ -795,55 +845,106 @@ def describe_website_problem(website_status: Optional[str], website_issue: Optio
     return " ja ".join(descriptions)
 
 
-EMAIL_SYSTEM_PROMPT = """Olet B2B-myyntiavustaja suomalaiselle web-kehitysyritykselle.
+def find_forbidden_words(text: str) -> list[str]:
+    return [label for label, pattern in FORBIDDEN_PATTERNS if pattern.search(text)]
 
-Kirjoita lyhyt, rento ja suora sähköposti potentiaaliselle asiakkaalle.
-Sähköpostin pitää tuntua henkilökohtaiselta — ei massaviestiltä.
 
-SÄÄNNÖT:
-- Kieli: suomi
-- Pituus: max 6 lausetta (tervehdys + 2-3 lausetta asiaa + ehdotus + lopetus)
-- Sävy: ystävällinen, asiantunteva, EI painostava
-- Älä käytä sanoja "ainutlaatuinen", "mahtava", "upea" tai muuta kliseistä mainosjargonia
-- Älä lupaa mitään konkreettista (hintaa, aikataulua) — tavoite on saada vastaus
-- Allekirjoitus: jätä pois, käyttäjä lisää oman
-- Älä kirjoita omaa "jos ei kiinnosta" -lopetusriviä, se lisätään automaattisesti
-- Palauta VAIN sähköpostin teksti, ei subject-riviä erikseen
+def word_count(text: str) -> int:
+    return len(re.findall(r"\w+", text))
 
-HAVAITTU ONGELMA:
-- Jos "Havaittu ongelma" on annettu, kerro se yhdellä konkreettisella lauseella omin sanoin, esim.
-  "huomasin, että Googlen kautta löytyvä osoitteenne ei enää avaudu" tai
-  "selain näyttää kävijöille turvallisuusvaroituksen sivuillenne tullessa" tai
-  "huomasin, että teillä on vain Facebook-sivu"
-- EI teknistä jargonia: älä sano SSL, HTTPS, DNS, sertifikaatti, viewport, domain tai HTTP-virhekoodi
-- EI liioittelua eikä pelottelua: älä puhu hakkereista, tietovuodoista, sakoista tai menetetyistä asiakkaista
-- Kerro havainto ystävällisesti vinkkinä, älä moitteena
-- Jos havaittua ongelmaa EI ole annettu, älä keksi ongelmaa — keskity yleiseen lisäarvoon (esim. näkyvyys, ajanvaraus verkossa)
 
-DEEP SCAN (jos VERKKOSIVUN SISÄLTÖ on annettu):
-- Aloita sähköposti lyhyellä, personoidulla jäänmurtajalla (1-2 lausetta) joka viittaa suoraan yrityksen verkkosivulta löytyneeseen konkreettiseen asiaan (esim. palvelu, arvo, saavutus, erikoisuus)
-- Jäänmurtajan pitää osoittaa että olet oikeasti tutustunut yritykseen — ei geneerisiä fraaseja
-- Siirry sen jälkeen luontevasti varsinaiseen asiaan
-- Jos verkkosivun sisältö ei ole saatavilla, kirjoita meili normaalisti ilman jäänmurtajaa"""
+def check_generated_text(text: str, *, kind: str, lead_id: int, model: str, max_words: Optional[int] = None) -> list[str]:
+    """Lokittaa varoitukset (ei estä): kielletyt sanat, liian pitkä teksti, keksitty hinta."""
+    warnings: list[str] = []
+    forbidden = find_forbidden_words(text)
+    if forbidden:
+        warnings.append(f"kielletyt sanat: {', '.join(forbidden)}")
+    if max_words is not None and word_count(text) > max_words + 20:
+        warnings.append(f"liian pitkä: {word_count(text)} sanaa (tavoite ~{max_words})")
+    if PRICE_RE.search(text):
+        warnings.append("tekstissä mainitaan hinta")
+    for w in warnings:
+        logger.warning(f"Generoitu {kind} (liidi {lead_id}, {model}): {w}")
+    return warnings
 
-CALL_SCRIPT_SYSTEM_PROMPT = """Olet B2B-myyntivalmentaja suomalaiselle web-kehitysyritykselle.
 
-Kirjoita noin 30 sekunnin puhelinrunko (puhuttuna max ~90 sanaa kohdissa 1-4) myyjälle,
-joka soittaa paikalliselle yritykselle ensimmäistä kertaa.
+def email_subject(lead: Lead) -> str:
+    issue = lead.website_issue or ""
+    if lead.website_status == "NO WEBSITE":
+        return "Löysin teidät Facebookista" if issue.startswith("social media only") else "Kysymys nettisivuista"
+    if lead.website_status == "BROKEN WEBSITE" and issue.startswith(("DNS", "connection")):
+        return "Nettisivunne ei aukea"
+    if lead.website_status in ("BROKEN WEBSITE", "INSECURE"):
+        return "Huomasin jotain sivuistanne"
+    if lead.website_status == "NOT MOBILE":
+        return "Sivunne puhelimella"
+    return "Kysymys nettisivuistanne"
+
+
+def build_signature(profile: SenderProfile) -> str:
+    lines = [profile.name, profile.company_name, profile.phone, profile.website]
+    return "\n".join(line for line in lines if line)
+
+
+def strip_model_sign_off(text: str) -> str:
+    """Poistaa mallin mahdollisesti kirjoittaman lopputervehdyksen/allekirjoituksen (koodi lisää oman)."""
+    lines = text.rstrip().splitlines()
+    for i in range(len(lines) - 1, max(-1, len(lines) - 6), -1):
+        if _SIGN_OFF_RE.match(lines[i]) or "[nimesi]" in lines[i].lower():
+            lines = lines[:i]
+    return "\n".join(lines).rstrip()
+
+
+def finalize_email_body(text: str, profile: SenderProfile) -> str:
+    return f"{strip_model_sign_off(text)}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
+
+
+EMAIL_SYSTEM_PROMPT = f"""Kirjoitat suomeksi lyhyen ensimmäisen yhteydenoton sähköpostin paikalliselle yritykselle.
+Lähettäjä on yksityinen tekijä (tiedot LÄHETTÄJÄ-kohdassa). Viestin pitää kuulostaa oikealta ihmiseltä, joka on
+oikeasti katsonut yrityksen tiedot — ei markkinointiviestiltä.
+
+PAKOLLISET SÄÄNNÖT:
+1. Te-muoto johdonmukaisesti koko viestissä (teidän, teille, sivunne, voitte). Ei koskaan sinä-muotoa.
+2. Aloita "Hei," ja heti ensimmäinen lause kertoo kuka olen ja miten löysin yrityksen,
+   esim. "Olen Palin ja teen nettisivuja paikallisille yrityksille. Etsin parturi-kampaamoja Kauniaisista ja huomasin, että..."
+   Käytä LÄHETTÄJÄ-kohdan nimeä ja esittelyä, toimialaa ja kaupunkia (taivuta luontevasti).
+3. HAVAINTO kerrotaan omana, varmana havaintona konkreettisesti (esim. "Kun avasin sivunne, selain varoitti...",
+   "Googlen kautta löytyvä osoitteenne ei avaudu", "Löysin teidät vain Facebookista").
+   Älä arvaile ("saattaa", "voi olla") kun havainto on annettu.
+   Jos havaintoa ei ole annettu, älä keksi ongelmaa.
+4. Yksi lause siitä, miksi sillä on väliä heidän asiakkailleen (käytä vihjettä). Ei pelottelua, ei liioittelua.
+5. Tarjous: käytä TARJOUS-kohdan lausetta (voit muotoilla hieman). Pieni ja konkreettinen.
+   Älä ehdota "keskustelua tarkemmin" tai palaveria.
+6. Lopeta yhteen kevyeen kysymykseen tai toteamukseen (esim. "Kiinnostaisiko?").
+7. Jäänmurtaja VERKKOSIVUN SISÄLLÖSTÄ vain, jos sieltä löytyy jotain konkreettista ja erityistä
+   (esim. tietty palvelu, merkki, historia). Muuten EI jäänmurtajaa ollenkaan. Älä kehu yritystä yleisesti.
+8. Pituus: enintään noin {MAX_EMAIL_WORDS} sanaa. Lyhyet kappaleet.
+9. KIELLETYT sanat ja fraasit: ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen,
+   digitaalinen läsnäolo, nostaa seuraavalle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia,
+   liiketoiminnan kasvu, keskustella tarkemmin. Ei teknistä jargonia (SSL, HTTPS, DNS, sertifikaatti, domain, viewport, virhekoodit).
+10. Älä lupaa hintoja tai aikatauluja.
+11. ÄLÄ kirjoita lopputervehdystä, allekirjoitusta tai "jos ei kiinnosta" -riviä — ne lisätään automaattisesti.
+12. Palauta VAIN viestin teksti (ei subject-riviä)."""
+
+CALL_SCRIPT_SYSTEM_PROMPT = """Kirjoitat suomeksi lyhyen (n. 30 sekuntia puhuttuna) puhelinrungon soittajalle, joka soittaa
+paikalliselle yritykselle ensimmäistä kertaa. Kuulostaa tavalliselta ihmiseltä, ei myyntikoulutukselta.
 
 RAKENNE (käytä täsmälleen näitä otsikoita):
-1. Esittely: yksi lause. Käytä paikkamerkkejä [Nimesi] ja [Yrityksesi].
-2. Havainto: yksi lause havaitusta ongelmasta selkokielellä. Jos havaittua ongelmaa ei ole annettu, älä keksi sitä — kerro lyhyesti miksi soitat (esim. paikallisten yritysten verkkonäkyvyys).
-3. Kysymys: yksi avoin kysymys yrityksen nykytilanteesta.
-4. Ehdotus: ehdota lyhyttä 15 minuutin tapaamista tai demoa, kysy sopiiko.
-5. Jos "ei kiinnosta": kohtelias, lyhyt lopetus ilman painostusta; kiitä ajasta ja kerro ettet soita uudelleen.
+1. Avaus: "Hei, [nimi] täällä" + yksi lause kuka olen (LÄHETTÄJÄ-kohdasta) + "Onko teillä hetki, vai soitanko myöhemmin?"
+2. Havainto: yksi arkikielinen lause HAVAINTO-kohdasta omana havaintona, yhtä konkreettisesti kuin sähköpostissa.
+   Jos havaintoa ei ole annettu, älä keksi ongelmaa — sano lyhyesti miksi soitat.
+3. Tarjous: TARJOUS-kohdan lause puhekielisesti + yksi suora kysymys (esim. "Kiinnostaisiko?").
+   EI konsulttimaisia kysymyksiä ("miten olette huolehtineet...", "mitkä ovat tavoitteenne...").
+4. Jos "ei kiinnosta": käytä täsmälleen: "Selvä, kiitos ajastanne, mukavaa päivää!"
+5. Jos kysyvät hintaa: yksi tai kaksi lausetta: hinta riippuu siitä mitä tarvitsette, ja ehdota ilmaista luonnosta
+   tai lyhyttä tapaamista. ÄLÄ mainitse mitään euromääriä.
 
 SÄÄNNÖT:
-- Kieli: suomi, luonteva puhekieli (ei kirjakieltä, ei mainosjargonia)
-- EI teknistä jargonia (SSL, HTTPS, DNS, sertifikaatti, viewport, domain, virhekoodit)
-- EI liioittelua eikä pelottelua
-- Älä lupaa hintoja tai aikatauluja
-- Palauta vain runko otsikoineen"""
+- Te-muoto johdonmukaisesti. Lyhyitä lauseita, luonteva puhekieli.
+- Käytä LÄHETTÄJÄ-kohdan oikeaa nimeä (ei paikkamerkkejä).
+- Ei teknistä jargonia, ei liioittelua, ei pelottelua, ei kiellettyjä sanoja
+  (ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen, digitaalinen läsnäolo, seuraavalle tasolle).
+- Palauta vain runko otsikoineen."""
 
 
 class EmailGenerateRequest(BaseModel):
@@ -861,45 +962,51 @@ class CallScriptResponse(BaseModel):
     model: str
 
 
-def _lead_facts(lead: Lead) -> list[str]:
-    parts = [f"Yritys: {lead.name}", f"Kaupunki: {lead.city}"]
+def _prompt_facts(lead: Lead, profile: SenderProfile) -> list[str]:
+    parts = [
+        "LÄHETTÄJÄ (minä):",
+        f"- Nimi: {profile.name}",
+        f"- Yritys: {profile.company_name or '(ei yritysnimeä, esiinny omalla nimellä)'}",
+        f"- Esittely: {profile.short_intro}",
+        "",
+        "VASTAANOTTAJA:",
+        f"- Yritys: {lead.name}",
+        f"- Kaupunki: {lead.city}",
+    ]
     if lead.primary_type:
-        parts.append(f"Toimiala (Google): {lead.primary_type}")
+        parts.append(f"- Toimiala (Googlen luokka englanniksi, käännä luontevasti suomeksi): {lead.primary_type}")
     if lead.review_count:
-        parts.append(f"Google-arvostelut: {lead.rating} / 5 ({lead.review_count} kpl)")
-    problem = describe_website_problem(lead.website_status, lead.website_issue)
-    if problem:
-        parts.append(f"Havaittu ongelma: {problem}")
-    else:
-        parts.append("Havaittu ongelma: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki)")
+        parts.append(f"- Google-arvostelut: {lead.rating} / 5 ({lead.review_count} kpl)")
     if lead.notes:
-        parts.append(f"Muistiinpanot: {lead.notes}")
+        parts.append(f"- Muistiinpanot: {lead.notes}")
+
+    problem = describe_website_problem(lead.website_status, lead.website_issue)
+    parts.append("")
+    if problem:
+        parts.append(f"HAVAINTO (varma, tein sen itse): {problem}")
+        why = WHY_IT_MATTERS.get(lead.website_status or "")
+        if why:
+            parts.append(f"MIKSI SILLÄ ON VÄLIÄ (vihje): {why}")
+    else:
+        parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
+    parts.append(f"TARJOUS: {OFFERS.get(lead.website_status or '', DEFAULT_OFFER)}")
     return parts
 
 
-def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> str:
-    parts = _lead_facts(lead)
+def build_email_user_prompt(lead: Lead, profile: SenderProfile, instruction: Optional[str] = None) -> str:
+    parts = _prompt_facts(lead, profile)
     if lead.website_context:
-        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan):\n{lead.website_context}")
-
+        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan, käytä vain jos jotain konkreettista ja erityistä):\n{lead.website_context}")
     parts.append("\nKirjoita sähköposti tämän perusteella.")
-
     if instruction:
         parts.append(f"\nLisäohje: {instruction}")
-
     return "\n".join(parts)
 
 
-def build_call_script_prompt(lead: Lead) -> str:
-    parts = _lead_facts(lead)
-    if lead.website_context:
-        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (lyhennelmä):\n{lead.website_context[:600]}")
+def build_call_script_prompt(lead: Lead, profile: SenderProfile) -> str:
+    parts = _prompt_facts(lead, profile)
     parts.append("\nKirjoita puhelinrunko tämän perusteella.")
     return "\n".join(parts)
-
-
-def append_opt_out(body: str) -> str:
-    return f"{body.rstrip()}\n\n{OPT_OUT_LINE}"
 
 
 def _get_contactable_lead(session: Session, lead_id: int, user: AuthUser) -> Lead:
@@ -909,6 +1016,14 @@ def _get_contactable_lead(session: Session, lead_id: int, user: AuthUser) -> Lea
     if db_lead.do_not_contact:
         raise HTTPException(409, "Lead is marked do not contact")
     return db_lead
+
+
+def _require_sender_profile(session: Session, user: AuthUser) -> SenderProfile:
+    profile = get_sender_profile(session, user.id)
+    if profile is None:
+        # 428 Precondition Required: UI ohjaa täyttämään Settings-näkymän
+        raise HTTPException(428, "Sender profile missing: fill in Settings before generating drafts")
+    return profile
 
 
 async def _chat_completion(system_prompt: str, user_prompt: str, max_tokens: int) -> tuple[str, str]:
@@ -940,6 +1055,7 @@ async def generate_email(
     user: AuthUser = Depends(verify_token),
 ):
     db_lead = _get_contactable_lead(session, lead_id, user)
+    profile = _require_sender_profile(session, user)
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
 
@@ -958,21 +1074,13 @@ async def generate_email(
             logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
     text, model = await _chat_completion(
-        EMAIL_SYSTEM_PROMPT, build_email_user_prompt(db_lead, req.instruction), max_tokens=500
+        EMAIL_SYSTEM_PROMPT, build_email_user_prompt(db_lead, profile, req.instruction), max_tokens=500
     )
-    body = append_opt_out(text)
+    text = strip_model_sign_off(text)
+    check_generated_text(text, kind="sähköposti", lead_id=lead_id, model=model, max_words=MAX_EMAIL_WORDS)
+    body = finalize_email_body(text, profile)
+    subject = email_subject(db_lead)
 
-    # Generoi subject-rivi liidin tietojen perusteella
-    status_subjects = {
-        "NO WEBSITE": f"Nettisivut yritykselle {db_lead.name}?",
-        "BROKEN WEBSITE": f"Huomasimme ongelman sivuillanne — {db_lead.name}",
-        "INSECURE": f"Sivujenne suojattu yhteys — {db_lead.name}",
-        "NOT MOBILE": f"Mobiiliystävällisyys — {db_lead.name}",
-        "WEBSITE OK": f"Nettinäkyvyyden kehittäminen — {db_lead.name}",
-    }
-    subject = status_subjects.get(db_lead.website_status or "", f"Yhteistyöehdotus — {db_lead.name}")
-
-    # Tallenna draft kantaan
     session.add(EmailDraft(user_id=user.id, lead_id=lead_id, subject=subject, body=body, model=model))
     session.commit()
 
@@ -987,11 +1095,15 @@ async def generate_call_script(
     user: AuthUser = Depends(verify_token),
 ):
     db_lead = _get_contactable_lead(session, lead_id, user)
+    profile = _require_sender_profile(session, user)
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
 
-    # Ei scrapingia tässä: käytetään Deep Scan -kontekstia vain jos se on jo cachessa
-    script, model = await _chat_completion(CALL_SCRIPT_SYSTEM_PROMPT, build_call_script_prompt(db_lead), max_tokens=400)
+    # Ei scrapingia: puhelu ei tarvitse jäänmurtajaa sivun sisällöstä
+    script, model = await _chat_completion(
+        CALL_SCRIPT_SYSTEM_PROMPT, build_call_script_prompt(db_lead, profile), max_tokens=450
+    )
+    check_generated_text(script, kind="puhelinskripti", lead_id=lead_id, model=model)
     return CallScriptResponse(script=script, model=model)
 
 

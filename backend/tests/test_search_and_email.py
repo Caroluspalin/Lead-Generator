@@ -36,16 +36,16 @@ def test_search_mock_mode_returns_results_and_saves_history(client_a: TestClient
 
 
 def test_generate_email_saves_draft(
-    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], session: Session
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any], session: Session
 ) -> None:
     lead = make_lead(website_status="NO WEBSITE")
 
     res = client_a.post(f"/leads/{lead['id']}/generate-email", json={"instruction": "lyhyempi"})
     assert res.status_code == 200
     body = res.json()
-    assert body["body"] == "Hei, testiviesti.\n\n" + OPT_OUT_LINE
+    assert body["body"] == "Hei, testiviesti.\n\nTerveisin,\nPalin\n040 123 4567\nhttps://palin.fi\n\n" + OPT_OUT_LINE
     assert body["model"] == "gpt-4o-mini-test"
-    assert lead["name"] in body["subject"]
+    assert body["subject"] == "Kysymys nettisivuista"
 
     drafts = session.exec(select(EmailDraft)).all()
     assert len(drafts) == 1
@@ -60,7 +60,7 @@ def test_generate_email_saves_draft(
 def test_generate_email_caches_deep_scan_context(
     client_a: TestClient,
     make_lead: Any,
-    fake_openai: type[FakeOpenAI],
+    fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
     session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -77,14 +77,14 @@ def test_generate_email_caches_deep_scan_context(
 
 
 def test_generate_email_survives_scrape_failure(
-    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI]
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
 ) -> None:
     # Oletus-mock (block_network) heittää poikkeuksen -> meili generoidaan ilman personointia
     lead = make_lead(website="www.example.fi", website_status="BROKEN WEBSITE")
     assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 200
 
 
-def test_generate_email_without_api_key(client_a: TestClient, make_lead: Any) -> None:
+def test_generate_email_without_api_key(client_a: TestClient, make_lead: Any, sender_profile: dict[str, Any]) -> None:
     lead = make_lead()
     assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 500
 
@@ -171,12 +171,12 @@ def test_search_live_path_with_no_places_still_reports_usage(
 
 
 def test_email_prompt_includes_website_issue(
-    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI]
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
 ) -> None:
     lead = make_lead(website_status="INSECURE", website_issue="SSL certificate expired")
     assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 200
     user_prompt = fake_openai.calls[0]["messages"][1]["content"]
-    assert "Havaittu ongelma: selain näyttää kävijöille turvallisuusvaroituksen" in user_prompt
+    assert "HAVAINTO (varma, tein sen itse): kun avasin sivunne, selain varoitti" in user_prompt
     assert "SSL" not in user_prompt
     system_prompt = fake_openai.calls[0]["messages"][0]["content"]
-    assert "HAVAITTU ONGELMA" in system_prompt
+    assert "Te-muoto" in system_prompt

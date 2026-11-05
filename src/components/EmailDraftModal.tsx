@@ -55,6 +55,10 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
         setError('This lead is marked do not contact.');
         return;
       }
+      if (res.status === 428) {
+        setError('Add your sender profile in Settings (sidebar) before generating drafts and call scripts.');
+        return;
+      }
       if (!res.ok) {
         throw new Error(`Server error: ${res.status}`);
       }
