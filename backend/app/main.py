@@ -5,6 +5,7 @@ import io
 import logging
 import smtplib
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -168,6 +169,45 @@ def normalize_place(place: Dict) -> Dict:
     }
 
 
+def _normalize_name(name: str) -> str:
+    text = unicodedata.normalize("NFKC", name).casefold()
+    text = "".join(ch if ch.isalnum() else " " for ch in text)
+    return " ".join(text.split())
+
+
+def _normalize_phone(phone: Optional[str]) -> str:
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if digits.startswith("00358"):
+        digits = "0" + digits[5:]
+    elif digits.startswith("358"):
+        digits = "0" + digits[3:]
+    return digits
+
+
+def merge_duplicates(places: List[Dict]) -> List[Dict]:
+    """Google listaa joskus saman yrityksen kahdella place id:llä.
+
+    Yhdistetään vain kun normalisoitu nimi JA puhelinnumero täsmäävät: pelkkä nimi ei riitä,
+    koska ketjuilla on useita toimipisteitä. Säilytetään se, jolla on enemmän arvosteluja.
+    """
+    kept: Dict[tuple[str, str], Dict] = {}
+    passthrough: List[Dict] = []
+    for place in places:
+        phone = _normalize_phone(place.get("phone"))
+        name = _normalize_name(place.get("name") or "")
+        if not phone or not name:
+            passthrough.append(place)
+            continue
+        key = (name, phone)
+        current = kept.get(key)
+        if current is None or (place.get("review_count") or 0) > (current.get("review_count") or 0):
+            kept[key] = place
+    merged = list(kept.values()) + passthrough
+    # Säilytetään alkuperäinen järjestys
+    order = {id(p): i for i, p in enumerate(places)}
+    return sorted(merged, key=lambda p: order[id(p)])
+
+
 def drop_permanently_closed(places: List[Dict]) -> List[Dict]:
     # CLOSED_TEMPORARILY jätetään näkyviin (merkitään UI:ssa ja pisteytyksessä)
     return [p for p in places if p.get("business_status") != "CLOSED_PERMANENTLY"]
@@ -327,11 +367,13 @@ class GooglePlacesService:
             if saturated and depth < MAX_SPLIT_DEPTH:
                 queue.extend((q, depth + 1) for q in self.split_rectangle(rect))
 
-        results = drop_permanently_closed(list(unique.values()))
+        open_places = drop_permanently_closed(list(unique.values()))
+        results = merge_duplicates(open_places)
         usage = self.usage()
         logger.info(
             f"Haku valmis: '{keyword}' / '{city}': {len(results)} yritystä "
-            f"({len(unique) - len(results)} pysyvästi suljettua pois), {areas} aluetta, "
+            f"({len(unique) - len(open_places)} pysyvästi suljettua pois, "
+            f"{len(open_places) - len(results)} duplikaattia yhdistetty), {areas} aluetta, "
             f"{usage.api_calls}/{MAX_SEARCH_CALLS} kutsua "
             f"(geocode {usage.geocode_calls}, text search {usage.text_search_calls}), "
             f"~${usage.estimated_cost_usd:.3f}"

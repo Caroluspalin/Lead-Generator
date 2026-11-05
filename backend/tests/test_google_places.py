@@ -11,6 +11,7 @@ from app.main import (
     PLACES_FIELD_MASK,
     PLACES_TEXT_SEARCH_URL,
     GooglePlacesService,
+    merge_duplicates,
     normalize_place,
 )
 
@@ -350,3 +351,68 @@ def test_search_cap_holds_under_concurrency(google: Callable[[AreaCount], _FakeG
 
     assert len(fake.posts) == MAX_SEARCH_CALLS
     assert service.calls_used == MAX_SEARCH_CALLS
+
+
+# --- Duplikaattien yhdistäminen ---
+
+
+def _r(pid: str, name: str, phone: str | None, reviews: int | None) -> dict[str, Any]:
+    return {"place_id": pid, "name": name, "phone": phone, "review_count": reviews}
+
+
+def test_merge_keeps_one_with_more_reviews() -> None:
+    # Live-havainto Kauniaisista: sama yritys kahdella place id:llä
+    places = [
+        _r("ChIJ4x", "Klippateljén", "09 5051601", None),
+        _r("ChIJrW", "Klippateljén", "09 5051601", 9),
+    ]
+    assert [p["place_id"] for p in merge_duplicates(places)] == ["ChIJrW"]
+
+
+def test_merge_normalizes_name_and_phone() -> None:
+    places = [
+        _r("a", "Parturi-Kampaamo  Elmi!", "+358 9 123 4567", 40),
+        _r("b", "parturi kampaamo elmi", "09-1234567", 3),
+        _r("c", "PARTURI–KAMPAAMO ELMI.", "00358 9 1234567", 1),
+    ]
+    assert [p["place_id"] for p in merge_duplicates(places)] == ["a"]
+
+
+def test_same_name_different_phone_is_not_merged() -> None:
+    # Ketjun eri toimipisteet
+    places = [
+        _r("a", "Hiusketju Oy", "09 111 1111", 50),
+        _r("b", "Hiusketju Oy", "09 222 2222", 80),
+    ]
+    assert len(merge_duplicates(places)) == 2
+
+
+def test_same_phone_different_name_is_not_merged() -> None:
+    places = [_r("a", "Salon Sense", "09 505 1601", 11), _r("b", "Klippateljén", "09 505 1601", 9)]
+    assert len(merge_duplicates(places)) == 2
+
+
+def test_missing_phone_is_never_merged() -> None:
+    places = [_r("a", "Clipso", None, None), _r("b", "Clipso", "", None)]
+    assert len(merge_duplicates(places)) == 2
+
+
+def test_merge_preserves_order_and_tie_keeps_first() -> None:
+    places = [
+        _r("x", "Eka", "040 1", 5),
+        _r("a", "Sama", "040 2", 7),
+        _r("y", "Toka", None, 1),
+        _r("b", "Sama", "040 2", 7),
+    ]
+    assert [p["place_id"] for p in merge_duplicates(places)] == ["x", "a", "y"]
+
+
+def test_search_grid_merges_duplicates(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(0))
+    fake.override_places[_area_key(ROOT)] = [
+        _place("dup1", displayName={"text": "Klippateljén"}, nationalPhoneNumber="09 5051601"),
+        _place("dup2", displayName={"text": "Klippateljén"}, nationalPhoneNumber="09 5051601", userRatingCount=9),
+        _place("other", displayName={"text": "Salon Sense"}, nationalPhoneNumber="09 5051602"),
+    ]
+    results = GooglePlacesService("AIza-test").search_grid("Kauniainen", "parturi")
+    assert sorted(r["place_id"] for r in results) == ["dup2", "other"]
