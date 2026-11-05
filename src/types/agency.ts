@@ -15,7 +15,13 @@ export const PIPELINE_STATUSES: PipelineStatus[] = [
 
 export type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history';
 
-export type WebsiteStatus = 'NO WEBSITE' | 'BROKEN WEBSITE' | 'NOT MOBILE' | 'WEBSITE OK';
+export type WebsiteStatus =
+  | 'NO WEBSITE'
+  | 'BROKEN WEBSITE'
+  | 'INSECURE'
+  | 'NOT MOBILE'
+  | 'WEBSITE OK'
+  | 'UNKNOWN';
 
 // Places API (New) businessStatus; CLOSED_PERMANENTLY suodatetaan jo backendissä
 export type BusinessStatus = 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
@@ -28,6 +34,7 @@ export interface SearchResult {
   phone: string | null;
   website: string | null;
   website_status: string;
+  website_issue: string | null;
   discovery_method: string;
   rating: number | null;
   review_count: number | null;
@@ -36,6 +43,19 @@ export interface SearchResult {
   maps_url: string | null;
   lead_score: number;
   already_saved: boolean;
+}
+
+export interface SearchUsage {
+  api_calls: number;
+  geocode_calls: number;
+  text_search_calls: number;
+  estimated_cost_usd: number;
+}
+
+// GET /search -vastaus
+export interface SearchResponse {
+  results: SearchResult[];
+  usage: SearchUsage;
 }
 
 // Hakutulos UI:ssa (ei persistoida viela)
@@ -47,6 +67,7 @@ export interface Agency {
   phone?: string;
   website?: string;
   website_status: string;
+  website_issue?: string;
   discovery_method?: string;
   rating?: number;
   review_count?: number;
@@ -67,6 +88,7 @@ export interface SavedAgency {
   phone?: string;
   website?: string;
   website_status?: string;
+  website_issue?: string | null;
   rating?: number | null;
   review_count?: number | null;
   business_status?: BusinessStatus | null;

@@ -8,7 +8,7 @@ import type { NavTab } from './types/agency';
 import PipelineBoard from './components/PipelineBoard';
 import DashboardView from './components/DashboardView';
 import SearchHistoryView from './components/SearchHistoryView';
-import type { Agency, SearchResult } from './types/agency';
+import type { Agency, SearchResponse, SearchUsage } from './types/agency';
 import { usePipeline } from './context/PipelineContext';
 import { useAuth } from './context/AuthContext';
 import { apiFetch } from './lib/api';
@@ -36,6 +36,7 @@ function AppShell() {
   const [businessType, setBusinessType] = useState('autokorjaamo');
   const [city, setCity] = useState('Tampere');
   const [leads, setLeads] = useState<Agency[]>([]);
+  const [usage, setUsage] = useState<SearchUsage | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingSeconds, setLoadingSeconds] = useState(0);
   const loadingTimerRef = useRef<number | null>(null);
@@ -85,6 +86,7 @@ function AppShell() {
     setLoading(true);
     setError('');
     setLeads([]);
+    setUsage(null);
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
@@ -104,9 +106,9 @@ function AppShell() {
         throw new Error(`Virhe palvelimella: ${response.statusText}`);
       }
 
-      const raw = (await response.json()) as SearchResult[];
+      const data = (await response.json()) as SearchResponse;
 
-      const mapped: Agency[] = raw.map((item) => ({
+      const mapped: Agency[] = data.results.map((item) => ({
         id: item.place_id,
         name: item.name,
         city: ct,
@@ -114,6 +116,7 @@ function AppShell() {
         phone: item.phone ?? undefined,
         website: item.website ?? undefined,
         website_status: item.website_status,
+        website_issue: item.website_issue ?? undefined,
         discovery_method: item.discovery_method,
         rating: item.rating ?? undefined,
         review_count: item.review_count ?? undefined,
@@ -125,6 +128,7 @@ function AppShell() {
       }));
 
       setLeads(mapped);
+      setUsage(data.usage);
     } catch (err) {
       console.error(err);
       if ((err as DOMException).name === 'AbortError') {
@@ -265,6 +269,16 @@ function AppShell() {
                     : 'Show all'}
                 </button>
               </div>
+              {usage && (
+                <span
+                  className="text-xs text-slate-500 tabular-nums"
+                  title={`Geocoding ${usage.geocode_calls}, Text Search ${usage.text_search_calls} (list price, before free tier)`}
+                >
+                  {usage.api_calls === 0
+                    ? 'Mock data, 0 API calls'
+                    : `${usage.api_calls} API calls, ~$${usage.estimated_cost_usd.toFixed(2)}`}
+                </span>
+              )}
             </div>
 
             <LeadTable leads={filteredLeads} loading={loading} onSaveLead={handleSaveLead} />

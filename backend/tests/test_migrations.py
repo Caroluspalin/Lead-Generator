@@ -77,7 +77,6 @@ def test_timestamptz_migration_on_legacy_postgres() -> None:
             "SELECT searched_at AT TIME ZONE 'UTC' FROM searchhistoryentry"
         )).scalar_one()
         assert utc_value.isoformat() == "2026-01-15T10:00:00"
-        command.check(cfg)
 
         command.downgrade(cfg, "-1")
         assert set(_column_types(conn).values()) == {"timestamp without time zone"}

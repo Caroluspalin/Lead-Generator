@@ -66,6 +66,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         phone: agency.phone,
         website: agency.website,
         website_status: agency.website_status,
+        website_issue: agency.website_issue,
         rating: agency.rating,
         review_count: agency.review_count,
         business_status: agency.business_status,

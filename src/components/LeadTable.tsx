@@ -12,7 +12,7 @@ import {
   Map as MapIcon,
   PauseCircle,
 } from 'lucide-react';
-import type { Agency } from '../types/agency';
+import type { Agency, WebsiteStatus } from '../types/agency';
 import { ScoreBadge, RatingDisplay } from './ScoreBadge';
 
 interface LeadTableProps {
@@ -25,12 +25,16 @@ type SortKey = 'score' | 'name' | 'rating' | 'reviews' | 'website';
 type SortDir = 'asc' | 'desc';
 
 // Huonoin sivu ensin, kun järjestetään laskevasti (sama järjestys kuin pisteytyksessä)
-const WEBSITE_SEVERITY: Record<string, number> = {
-  'NO WEBSITE': 4,
-  'BROKEN WEBSITE': 3,
-  'NOT MOBILE': 2,
+const WEBSITE_SEVERITY: Record<WebsiteStatus, number> = {
+  'NO WEBSITE': 6,
+  'BROKEN WEBSITE': 5,
+  INSECURE: 4,
+  'NOT MOBILE': 3,
+  UNKNOWN: 2,
   'WEBSITE OK': 1,
 };
+
+const isWebsiteStatus = (status: string): status is WebsiteStatus => status in WEBSITE_SEVERITY;
 
 const sortValue = (lead: Agency, key: SortKey): number | string => {
   switch (key) {
@@ -43,7 +47,7 @@ const sortValue = (lead: Agency, key: SortKey): number | string => {
     case 'reviews':
       return lead.review_count ?? 0;
     case 'website':
-      return WEBSITE_SEVERITY[lead.website_status] ?? 0;
+      return isWebsiteStatus(lead.website_status) ? WEBSITE_SEVERITY[lead.website_status] : 0;
   }
 };
 
@@ -254,6 +258,11 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
 
                 <td className="px-6 py-4">
                   <StatusBadge status={lead.website_status} />
+                  {lead.website_issue && (
+                    <span className="block text-[11px] text-slate-500 mt-1 whitespace-nowrap">
+                      {lead.website_issue}
+                    </span>
+                  )}
                 </td>
 
                 <td className="px-6 py-4 text-right">
@@ -289,6 +298,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 
   if (status === "NO WEBSITE") styles = "bg-rose-50 text-rose-700 border-rose-100";
   else if (status === "BROKEN WEBSITE") styles = "bg-orange-50 text-orange-700 border-orange-100";
+  else if (status === "INSECURE") styles = "bg-amber-50 text-amber-700 border-amber-100";
   else if (status === "NOT MOBILE") styles = "bg-yellow-50 text-yellow-700 border-yellow-100";
   else if (status === "WEBSITE OK") styles = "bg-emerald-50 text-emerald-700 border-emerald-100";
 

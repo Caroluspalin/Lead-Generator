@@ -13,7 +13,7 @@ def utc_now() -> datetime:
 PIPELINE_STATUSES = ["Shortlisted", "Contacted", "Proposal Received", "Hired", "Rejected"]
 
 # Nettisivu-statukset (tekninen tila, backendin analyze_website palauttaa naita)
-WEBSITE_STATUSES = ["NO WEBSITE", "BROKEN WEBSITE", "NOT MOBILE", "WEBSITE OK"]
+WEBSITE_STATUSES = ["NO WEBSITE", "BROKEN WEBSITE", "INSECURE", "NOT MOBILE", "WEBSITE OK", "UNKNOWN"]
 
 class SearchHistoryEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -48,7 +48,8 @@ class Lead(SQLModel, table=True):
     address: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None
-    website_status: Optional[str] = None  # NO WEBSITE | BROKEN WEBSITE | WEBSITE OK
+    website_status: Optional[str] = None  # ks. WEBSITE_STATUSES
+    website_issue: Optional[str] = None   # lyhyt syy, esim. "SSL certificate expired", "HTTP 500"
 
     # Deep Scan: skraapattu verkkosivun konteksti personointia varten
     website_context: Optional[str] = None
@@ -77,6 +78,7 @@ class LeadCreate(SQLModel):
     phone: Optional[str] = None
     website: Optional[str] = None
     website_status: Optional[str] = None
+    website_issue: Optional[str] = None
     rating: Optional[float] = None
     review_count: Optional[int] = None
     business_status: Optional[str] = None

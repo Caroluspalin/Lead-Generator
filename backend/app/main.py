@@ -8,6 +8,7 @@ import threading
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from collections import deque
 from typing import AsyncIterator, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
@@ -19,12 +20,12 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from pydantic import BaseModel
 import requests
-from bs4 import BeautifulSoup
 
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
 from .models import Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, utc_now
 from .utils.scraper import scrape_website_text
+from .utils.website_check import analyze_website
 from .scoring import lead_score
 from .auth import verify_token, AuthUser
 
@@ -51,9 +52,18 @@ SMTP_FROM = os.getenv("SMTP_FROM", "")
 
 # Safety Limits
 MAX_SEARCH_CALLS = 15      # Geocode + Text Search -sivut yhteensä, ehdoton raja per haku
-GRID_SIZE = 3              # 3x3 = 9 ruutua
 MAX_PAGES_PER_CELL = 3     # Text Search (New): max 20/sivu, max 60 tulosta per kysely
+PAGE_SIZE = 20
+MAX_RESULTS_PER_QUERY = PAGE_SIZE * MAX_PAGES_PER_CELL  # täysi tulos -> alue voi sisältää enemmän
+MAX_SPLIT_DEPTH = 2        # koko alue -> 4 -> 16 ruutua, vain täyttyneet ruudut jaetaan
 MAX_WORKERS_WEBSITE = 5
+
+# Listahinnat per kutsu (Googlen hinnasto 11/2026, 0-100k-taso, ilman ilmaiskiintiötä).
+# Text Search -hinta on Enterprise, koska field maskissa on Enterprise-kenttiä.
+PRICE_PER_CALL_USD: Dict[str, float] = {
+    "geocode": 5.00 / 1000,
+    "text_search": 35.00 / 1000,
+}
 
 # URL Config
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -112,6 +122,13 @@ app.add_middleware(
 # --- GOOGLE SEARCH LOGIC (Scraper) ---
 
 # Tämä on se vanha "Lead" malli pelkkää hakua varten (ei tallennu kantaan)
+class SearchUsage(BaseModel):
+    api_calls: int = 0
+    geocode_calls: int = 0
+    text_search_calls: int = 0
+    estimated_cost_usd: float = 0.0
+
+
 class GoogleSearchResult(BaseModel):
     name: str
     place_id: str
@@ -119,6 +136,7 @@ class GoogleSearchResult(BaseModel):
     phone: Optional[str] = None
     website: Optional[str] = None
     website_status: str
+    website_issue: Optional[str] = None
     discovery_method: str
     rating: Optional[float] = None
     review_count: Optional[int] = None
@@ -127,6 +145,11 @@ class GoogleSearchResult(BaseModel):
     maps_url: Optional[str] = None
     lead_score: int = 0
     already_saved: bool = False
+
+
+class SearchResponse(BaseModel):
+    results: List[GoogleSearchResult]
+    usage: SearchUsage
 
 
 def normalize_place(place: Dict) -> Dict:
@@ -153,25 +176,36 @@ def drop_permanently_closed(places: List[Dict]) -> List[Dict]:
 class GooglePlacesService:
     def __init__(self, api_key: str):
         self.key = api_key
-        self._search_call_count = 0
+        self._calls: Dict[str, int] = {kind: 0 for kind in PRICE_PER_CALL_USD}
         self._lock = threading.Lock()
 
-    def _reserve_call(self) -> bool:
+    def _reserve_call(self, kind: str) -> bool:
         """Varaa yhden kutsun budjetista. Lukko pitää rajan myös rinnakkaisissa kutsuissa."""
         with self._lock:
-            if self._search_call_count >= MAX_SEARCH_CALLS:
+            if sum(self._calls.values()) >= MAX_SEARCH_CALLS:
                 logger.warning(f"Search-kutsujen raja ({MAX_SEARCH_CALLS}) saavutettu — ohitetaan kutsu")
                 return False
-            self._search_call_count += 1
+            self._calls[kind] += 1
             return True
 
     @property
     def calls_used(self) -> int:
         with self._lock:
-            return self._search_call_count
+            return sum(self._calls.values())
+
+    def usage(self) -> SearchUsage:
+        with self._lock:
+            calls = dict(self._calls)
+        cost = sum(PRICE_PER_CALL_USD[kind] * n for kind, n in calls.items())
+        return SearchUsage(
+            api_calls=sum(calls.values()),
+            geocode_calls=calls["geocode"],
+            text_search_calls=calls["text_search"],
+            estimated_cost_usd=round(cost, 4),
+        )
 
     def _get_json(self, url: str, params: Dict) -> Dict:
-        if not self._reserve_call():
+        if not self._reserve_call("geocode"):
             return {}
         try:
             r = requests.get(url, params={**params, "key": self.key}, timeout=10)
@@ -182,7 +216,7 @@ class GooglePlacesService:
             return {}
 
     def _post_json(self, url: str, body: Dict) -> Dict:
-        if not self._reserve_call():
+        if not self._reserve_call("text_search"):
             return {}
         headers = {
             "Content-Type": "application/json",
@@ -210,38 +244,36 @@ class GooglePlacesService:
         return data["results"][0]["geometry"].get("viewport")
 
     @staticmethod
-    def generate_grid_cells(viewport: Dict, grid_size: int = GRID_SIZE) -> List[Dict]:
-        """Jakaa viewportin grid_size x grid_size suorakaiteeseen (locationRestriction.rectangle).
+    def viewport_to_rectangle(viewport: Dict) -> Dict:
+        """Geocoding-viewport -> Text Search locationRestriction.rectangle."""
+        return {
+            "low": {"latitude": viewport["southwest"]["lat"], "longitude": viewport["southwest"]["lng"]},
+            "high": {"latitude": viewport["northeast"]["lat"], "longitude": viewport["northeast"]["lng"]},
+        }
 
-        Ruudut eivät limity: locationRestriction on tiukka raja, joten vierekkäiset
-        suorakaiteet kattavat koko viewportin ilman aukkoja.
+    @staticmethod
+    def split_rectangle(rectangle: Dict) -> List[Dict]:
+        """Jakaa suorakaiteen 2x2 neljännekseen ilman aukkoja tai limitystä.
+
+        locationRestriction on tiukka raja, joten vierekkäiset ruudut kattavat koko alueen.
         """
-        ne = viewport["northeast"]
-        sw = viewport["southwest"]
-        lat_step = (ne["lat"] - sw["lat"]) / grid_size
-        lng_step = (ne["lng"] - sw["lng"]) / grid_size
-
-        cells: List[Dict] = []
-        for row in range(grid_size):
-            for col in range(grid_size):
-                cells.append({
-                    "low": {
-                        "latitude": sw["lat"] + lat_step * row,
-                        "longitude": sw["lng"] + lng_step * col,
-                    },
-                    "high": {
-                        "latitude": sw["lat"] + lat_step * (row + 1),
-                        "longitude": sw["lng"] + lng_step * (col + 1),
-                    },
-                })
-        return cells
+        low, high = rectangle["low"], rectangle["high"]
+        mid_lat = (low["latitude"] + high["latitude"]) / 2
+        mid_lng = (low["longitude"] + high["longitude"]) / 2
+        lats = [(low["latitude"], mid_lat), (mid_lat, high["latitude"])]
+        lngs = [(low["longitude"], mid_lng), (mid_lng, high["longitude"])]
+        return [
+            {"low": {"latitude": la0, "longitude": lo0}, "high": {"latitude": la1, "longitude": lo1}}
+            for la0, la1 in lats
+            for lo0, lo1 in lngs
+        ]
 
     def search_cell(self, rectangle: Dict, keyword: str) -> List[Dict]:
         """Text Search (New) yhdelle ruudulle, max MAX_PAGES_PER_CELL sivua."""
         base_body: Dict = {
             "textQuery": keyword,
             "locationRestriction": {"rectangle": rectangle},
-            "pageSize": 20,
+            "pageSize": PAGE_SIZE,
             "languageCode": "fi",
             "regionCode": "FI",
         }
@@ -261,69 +293,68 @@ class GooglePlacesService:
         return all_places
 
     def search_grid(self, city: str, keyword: str) -> List[Dict]:
-        """Geocode → ruudukko → Text Search per ruutu → deduplikaatio → suljettujen suodatus."""
+        """Mukautuva ruudukko: koko kaupunki yhdellä kyselyllä, jaetaan vain täyttyneet alueet.
+
+        Text Search palauttaa max 60 tulosta per kysely. Jos alue täyttyy, siellä voi olla
+        lisää yrityksiä -> jaetaan 2x2 ja haetaan neljännekset (leveyshaku, max MAX_SPLIT_DEPTH).
+        MAX_SEARCH_CALLS katkaisee haun aina.
+        """
         viewport = self.get_city_bounds(city)
         if not viewport:
             logger.warning(f"Kaupungin '{city}' viewport-rajoja ei löytynyt")
             return []
 
-        cells = self.generate_grid_cells(viewport)
-        logger.info(f"Grid-haku: {len(cells)} ruutua, kaupunki='{city}', keyword='{keyword}'")
-
         unique: Dict[str, Dict] = {}
-        for i, cell in enumerate(cells):
-            places = self.search_cell(cell, keyword)
+        queue: deque[tuple[Dict, int]] = deque([(self.viewport_to_rectangle(viewport), 0)])
+        areas = 0
+        while queue:
+            if self.calls_used >= MAX_SEARCH_CALLS:
+                logger.warning(f"Kutsuraja täynnä, {len(queue)} aluetta jäi hakematta")
+                break
+            rect, depth = queue.popleft()
+            places = self.search_cell(rect, keyword)
+            areas += 1
             before = len(unique)
             for place in places:
                 normalized = normalize_place(place)
                 if normalized["place_id"]:
                     unique[normalized["place_id"]] = normalized
+            saturated = len(places) >= MAX_RESULTS_PER_QUERY
             logger.info(
-                f"  Ruutu {i+1}/{len(cells)}: {len(places)} tulosta, "
-                f"{len(unique) - before} uutta (yhteensä {len(unique)} uniikkia)"
+                f"  Alue {areas} (taso {depth}): {len(places)} tulosta, {len(unique) - before} uutta"
+                f"{' — täynnä, jaetaan' if saturated and depth < MAX_SPLIT_DEPTH else ''}"
             )
+            if saturated and depth < MAX_SPLIT_DEPTH:
+                queue.extend((q, depth + 1) for q in self.split_rectangle(rect))
 
         results = drop_permanently_closed(list(unique.values()))
+        usage = self.usage()
         logger.info(
-            f"Grid-haku valmis: {len(results)} yritystä "
-            f"({len(unique) - len(results)} pysyvästi suljettua pois), "
-            f"kutsuja käytetty: {self.calls_used}/{MAX_SEARCH_CALLS}"
+            f"Haku valmis: '{keyword}' / '{city}': {len(results)} yritystä "
+            f"({len(unique) - len(results)} pysyvästi suljettua pois), {areas} aluetta, "
+            f"{usage.api_calls}/{MAX_SEARCH_CALLS} kutsua "
+            f"(geocode {usage.geocode_calls}, text search {usage.text_search_calls}), "
+            f"~${usage.estimated_cost_usd:.3f}"
         )
         return results
-
-def analyze_website(url: str) -> str:
-    if not url: return "NO WEBSITE"
-    try:
-        if not url.startswith("http"): url = f"http://{url}"
-        r = requests.get(url, timeout=4, headers={'User-Agent': 'Googlebot/2.1'})
-        if r.status_code >= 400: return "BROKEN WEBSITE"
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        viewport = soup.find("meta", attrs={"name": "viewport"})
-        if not viewport:
-            return "NOT MOBILE"
-
-        return "WEBSITE OK"
-    except:
-        return "BROKEN WEBSITE"
 
 # --- ENDPOINTS ---
 
 def _mock_places(business_type: str, city: str) -> List[Dict]:
-    """Dev-data: vaihtelevat arvot jotta pisteytys ja merkinnät näkyvät UI:ssa ilman API-kutsuja.
-
-    (nimi, website, website_status, rating, review_count, business_status)
-    """
+    """Dev-data: vaihtelevat arvot jotta pisteytys ja merkinnät näkyvät UI:ssa ilman API-kutsuja."""
     bt = business_type.title()
+    # (nimi, website, website_status, website_issue, rating, review_count, business_status)
     rows: List[tuple] = [
-        (f"{bt} Keskusta", None, "NO WEBSITE", 4.7, 132, "OPERATIONAL"),
-        (f"{bt} Studio Aino", "www.example-aino.fi", "BROKEN WEBSITE", 4.4, 58, "OPERATIONAL"),
-        (f"{bt} & Co", "www.example-co.fi", "NOT MOBILE", 4.1, 21, "OPERATIONAL"),
-        (f"{bt} Express", "www.example-express.fi", "WEBSITE OK", 3.9, 240, "OPERATIONAL"),
-        (f"Uusi {business_type}", None, "NO WEBSITE", None, 0, "OPERATIONAL"),
-        (f"{bt} Kulma", None, "NO WEBSITE", 4.9, 12, "CLOSED_TEMPORARILY"),
-        (f"Vanha {business_type}", None, "NO WEBSITE", 3.2, 7, "CLOSED_PERMANENTLY"),
-        (f"{bt} Premium", "www.example-premium.fi", "WEBSITE OK", 4.8, 410, "OPERATIONAL"),
+        (f"{bt} Keskusta", None, "NO WEBSITE", None, 4.7, 132, "OPERATIONAL"),
+        (f"{bt} Studio Aino", "www.example-aino.fi", "BROKEN WEBSITE", "HTTP 500", 4.4, 58, "OPERATIONAL"),
+        (f"{bt} Vanhatalo", "www.example-vanhatalo.fi", "INSECURE", "SSL certificate expired", 4.6, 87, "OPERATIONAL"),
+        (f"{bt} & Co", "www.example-co.fi", "NOT MOBILE", "no viewport meta", 4.1, 21, "OPERATIONAL"),
+        (f"{bt} Express", "www.example-express.fi", "WEBSITE OK", None, 3.9, 240, "OPERATIONAL"),
+        (f"Uusi {business_type}", None, "NO WEBSITE", None, None, 0, "OPERATIONAL"),
+        (f"{bt} Kulma", None, "NO WEBSITE", None, 4.9, 12, "CLOSED_TEMPORARILY"),
+        (f"Vanha {business_type}", None, "NO WEBSITE", None, 3.2, 7, "CLOSED_PERMANENTLY"),
+        (f"{bt} Premium", "www.example-premium.fi", "WEBSITE OK", None, 4.8, 410, "OPERATIONAL"),
+        (f"{bt} Linna", "www.example-linna.fi", "UNKNOWN", "HTTP 403", 4.5, 64, "OPERATIONAL"),
     ]
     return [
         {
@@ -333,13 +364,14 @@ def _mock_places(business_type: str, city: str) -> List[Dict]:
             "phone": f"040 123 45{i:02d}" if i % 3 else None,
             "website": website,
             "website_status": status,
+            "website_issue": issue,
             "rating": rating,
             "review_count": reviews,
             "business_status": business_status,
             "primary_type": None,
             "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus(f'{name} {city}')}",
         }
-        for i, (name, website, status, rating, reviews, business_status) in enumerate(rows, start=1)
+        for i, (name, website, status, issue, rating, reviews, business_status) in enumerate(rows, start=1)
     ]
 
 
@@ -349,7 +381,8 @@ def _finalize_search(
     city: str,
     session: Session,
     user: AuthUser,
-) -> List[GoogleSearchResult]:
+    usage: SearchUsage,
+) -> SearchResponse:
     """Pisteyttää, merkitsee jo tallennetut, järjestää (paras ensin) ja tallentaa hakuhistorian."""
     saved_ids = set(session.exec(
         select(Lead.google_place_id).where(
@@ -364,12 +397,12 @@ def _finalize_search(
 
     session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
     session.commit()
-    return results
+    return SearchResponse(results=results, usage=usage)
 
 
 # 1. HAKU (Stateless, Google API)
 # HUOM: Muutettu polku /leads -> /search, jotta /leads jää tietokannalle
-@app.get("/search", response_model=List[GoogleSearchResult])
+@app.get("/search", response_model=SearchResponse)
 async def search_google(
     business_type: str = Query(..., min_length=2),
     city: str = Query(..., min_length=2),
@@ -379,7 +412,7 @@ async def search_google(
     if not USE_LIVE_GOOGLE:
         places = drop_permanently_closed(_mock_places(business_type, city))
         results = [GoogleSearchResult(**p, discovery_method="DEV-MOCK") for p in places]
-        return _finalize_search(results, business_type, city, session, user)
+        return _finalize_search(results, business_type, city, session, user, SearchUsage())
 
     if "AIza" not in GOOGLE_API_KEY:
         raise HTTPException(500, "API Key missing")
@@ -388,23 +421,23 @@ async def search_google(
 
     # Google-kutsut ja website-analyysi blokkaavat -> taustasäikeeseen, event loop ei jäädy
     places = await asyncio.to_thread(service.search_grid, city, business_type)
-    if not places:
-        return []
 
     def _blocking_website_analysis() -> List[GoogleSearchResult]:
         output = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS_WEBSITE) as ex:
             future_map = {ex.submit(analyze_website, p.get("website")): p for p in places}
             for f in as_completed(future_map):
+                check = f.result()
                 output.append(GoogleSearchResult(
                     **future_map[f],
-                    website_status=f.result(),
+                    website_status=check.status,
+                    website_issue=check.issue,
                     discovery_method="API",
                 ))
         return output
 
-    results = await asyncio.to_thread(_blocking_website_analysis)
-    return _finalize_search(results, business_type, city, session, user)
+    results = await asyncio.to_thread(_blocking_website_analysis) if places else []
+    return _finalize_search(results, business_type, city, session, user, service.usage())
 
 # 2. TALLENNA LIIDI (Database)
 @app.post("/leads", response_model=Lead)
@@ -582,9 +615,12 @@ SÄÄNNÖT:
 
 ONGELMIEN KUVAUKSET:
 - NO WEBSITE: yrityksellä ei ole nettisivuja lainkaan
-- BROKEN WEBSITE: nettisivu ei toimi tai antaa virheen
+- BROKEN WEBSITE: nettisivu ei toimi (ei aukea, virhesivu tai domain on parkissa/myynnissä)
+- INSECURE: sivu toimii, mutta ilman suojattua yhteyttä (ei HTTPS:ää tai SSL-sertifikaatti on vanhentunut/virheellinen) — selaimet varoittavat kävijöitä
 - NOT MOBILE: nettisivu toimii mutta ei skaalaudu mobiililaitteille
 - WEBSITE OK: sivu toimii hyvin — keskity muuhun lisäarvoon (esim. näkyvyys, päivitys)
+- UNKNOWN: sivun tilaa ei saatu tarkistettua — ÄLÄ väitä sivun olevan rikki tai puutteellinen, keskity yleiseen lisäarvoon
+- Jos "Havaittu ongelma" on annettu, voit viitata siihen konkreettisesti mutta selkokielellä (ei teknistä jargonia)
 
 DEEP SCAN (jos VERKKOSIVUN SISÄLTÖ on annettu):
 - Aloita sähköposti lyhyellä, personoidulla jäänmurtajalla (1-2 lausetta) joka viittaa suoraan yrityksen verkkosivulta löytyneeseen konkreettiseen asiaan (esim. palvelu, arvo, saavutus, erikoisuus)
@@ -609,6 +645,8 @@ def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> st
         parts.append(f"Nettisivu: {lead.website}")
     if lead.website_status:
         parts.append(f"Nettisivun tila: {lead.website_status}")
+    if lead.website_issue:
+        parts.append(f"Havaittu ongelma: {lead.website_issue}")
     if lead.website_context:
         parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan):\n{lead.website_context}")
     if lead.notes:
@@ -673,6 +711,7 @@ async def generate_email(
     status_subjects = {
         "NO WEBSITE": f"Nettisivut yritykselle {db_lead.name}?",
         "BROKEN WEBSITE": f"Huomasimme ongelman sivuillanne — {db_lead.name}",
+        "INSECURE": f"Sivujenne tietoturvavaroitus — {db_lead.name}",
         "NOT MOBILE": f"Mobiiliystävällisyys — {db_lead.name}",
         "WEBSITE OK": f"Nettinäkyvyyden kehittäminen — {db_lead.name}",
     }

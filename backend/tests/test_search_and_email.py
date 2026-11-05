@@ -5,14 +5,18 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.main import GooglePlacesService
 from app.models import EmailDraft, Lead
+from app.utils.website_check import WebsiteCheck
 
 
 def test_search_mock_mode_returns_results_and_saves_history(client_a: TestClient) -> None:
     res = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"})
     assert res.status_code == 200
-    results = res.json()
-    assert len(results) == 7
+    body = res.json()
+    assert body["usage"] == {"api_calls": 0, "geocode_calls": 0, "text_search_calls": 0, "estimated_cost_usd": 0.0}
+    results = body["results"]
+    assert len(results) == 9
     assert all(r["discovery_method"] == "DEV-MOCK" for r in results)
     assert all("Espoo" in r["address"] for r in results)
     assert all(r["maps_url"].startswith("https://www.google.com/maps/") for r in results)
@@ -20,12 +24,15 @@ def test_search_mock_mode_returns_results_and_saves_history(client_a: TestClient
     statuses = {r["business_status"] for r in results}
     assert "CLOSED_PERMANENTLY" not in statuses
     assert "CLOSED_TEMPORARILY" in statuses
+    website_statuses = {r["website_status"] for r in results}
+    assert {"INSECURE", "UNKNOWN", "BROKEN WEBSITE"} <= website_statuses
+    assert next(r for r in results if r["website_status"] == "INSECURE")["website_issue"] == "SSL certificate expired"
 
     history = client_a.get("/search-history").json()
     assert len(history) == 1
     assert history[0]["business_type"] == "parturi"
     assert history[0]["city"] == "Espoo"
-    assert history[0]["result_count"] == 7
+    assert history[0]["result_count"] == 9
 
 
 class _FakeOpenAI:
@@ -119,13 +126,24 @@ def test_search_live_path_wires_service_and_website_analysis(
          "rating": None, "review_count": None, "business_status": "CLOSED_TEMPORARILY", "primary_type": None,
          "maps_url": None},
     ]
-    monkeypatch.setattr("app.main.GooglePlacesService.search_grid", lambda self, city, keyword: places)
-    monkeypatch.setattr("app.main.analyze_website", lambda url: "NOT MOBILE" if url else "NO WEBSITE")
+    def _fake_search_grid(self: GooglePlacesService, city: str, keyword: str) -> list[dict[str, Any]]:
+        self._calls = {"geocode": 1, "text_search": 1}
+        return places
+
+    monkeypatch.setattr("app.main.GooglePlacesService.search_grid", _fake_search_grid)
+    monkeypatch.setattr(
+        "app.main.analyze_website",
+        lambda url: WebsiteCheck("INSECURE", "no HTTPS") if url else WebsiteCheck("NO WEBSITE"),
+    )
 
     res = client_a.get("/search", params={"business_type": "parturi", "city": "Kauniainen"})
     assert res.status_code == 200
-    by_id = {r["place_id"]: r for r in res.json()}
-    assert by_id["ChIJ1"]["website_status"] == "NOT MOBILE"
+    body = res.json()
+    assert body["usage"]["api_calls"] == 2
+    assert body["usage"]["estimated_cost_usd"] == pytest.approx(0.04)
+    by_id = {r["place_id"]: r for r in body["results"]}
+    assert by_id["ChIJ1"]["website_status"] == "INSECURE"
+    assert by_id["ChIJ1"]["website_issue"] == "no HTTPS"
     assert by_id["ChIJ1"]["discovery_method"] == "API"
     assert by_id["ChIJ1"]["review_count"] == 30
     assert by_id["ChIJ2"]["website_status"] == "NO WEBSITE"
@@ -133,7 +151,7 @@ def test_search_live_path_wires_service_and_website_analysis(
 
 
 def test_search_results_sorted_by_score_desc(client_a: TestClient) -> None:
-    results = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    results = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
     scores = [r["lead_score"] for r in results]
     assert scores == sorted(scores, reverse=True)
     assert all(0 <= s <= 100 for s in scores)
@@ -145,16 +163,42 @@ def test_search_results_sorted_by_score_desc(client_a: TestClient) -> None:
 def test_search_marks_already_saved_instead_of_hiding(
     client_a: TestClient, client_b: TestClient, make_lead: Any
 ) -> None:
-    first = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    first = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
     assert not any(r["already_saved"] for r in first)
     target = first[2]
     make_lead(name=target["name"], google_place_id=target["place_id"])
 
-    again = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    again = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
     assert len(again) == len(first)
     saved = [r["place_id"] for r in again if r["already_saved"]]
     assert saved == [target["place_id"]]
 
     # Toisen käyttäjän pipeline ei vaikuta
-    other = client_b.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    other = client_b.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
     assert not any(r["already_saved"] for r in other)
+
+
+def test_search_live_path_with_no_places_still_reports_usage(
+    client_a: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.main.USE_LIVE_GOOGLE", True)
+    monkeypatch.setattr("app.main.GOOGLE_API_KEY", "AIza-test")
+
+    def _empty(self: GooglePlacesService, city: str, keyword: str) -> list[dict[str, Any]]:
+        self._calls = {"geocode": 1, "text_search": 1}
+        return []
+
+    monkeypatch.setattr("app.main.GooglePlacesService.search_grid", _empty)
+    body = client_a.get("/search", params={"business_type": "parturi", "city": "Kauniainen"}).json()
+    assert body["results"] == []
+    assert body["usage"]["api_calls"] == 2
+
+
+def test_email_prompt_includes_website_issue(
+    client_a: TestClient, make_lead: Any, fake_openai: type[_FakeOpenAI]
+) -> None:
+    lead = make_lead(website_status="NO WEBSITE", website_issue="SSL certificate expired")
+    assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 200
+    assert "Havaittu ongelma: SSL certificate expired" in fake_openai.calls[0]["messages"][1]["content"]
+    system_prompt = fake_openai.calls[0]["messages"][0]["content"]
+    assert "UNKNOWN" in system_prompt and "INSECURE" in system_prompt

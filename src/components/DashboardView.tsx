@@ -6,6 +6,8 @@ import {
   Smartphone,
   CheckCircle2,
   TrendingUp,
+  ShieldAlert,
+  HelpCircle,
 } from 'lucide-react';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { PipelineStatus } from '../types/agency';
@@ -30,8 +32,10 @@ const STAGE_BG: Record<PipelineStatus, string> = {
 const WEBSITE_STATUS_CONFIG = [
   { key: 'NO WEBSITE', label: 'No Website', color: 'bg-rose-500', icon: AlertTriangle },
   { key: 'BROKEN WEBSITE', label: 'Broken', color: 'bg-orange-500', icon: AlertTriangle },
+  { key: 'INSECURE', label: 'Insecure', color: 'bg-amber-500', icon: ShieldAlert },
   { key: 'NOT MOBILE', label: 'Not Mobile', color: 'bg-yellow-500', icon: Smartphone },
   { key: 'WEBSITE OK', label: 'Website OK', color: 'bg-emerald-500', icon: CheckCircle2 },
+  { key: 'UNKNOWN', label: 'Unknown', color: 'bg-slate-400', icon: HelpCircle },
 ] as const;
 
 const DashboardView: React.FC = () => {
@@ -66,7 +70,8 @@ const DashboardView: React.FC = () => {
   }));
 
   const opportunityCount = savedAgencies.filter(
-    (a) => a.website_status && a.website_status !== 'WEBSITE OK',
+    // UNKNOWN ei ole varmistettu myyntipaikka
+    (a) => a.website_status && a.website_status !== 'WEBSITE OK' && a.website_status !== 'UNKNOWN',
   ).length;
 
   const conversionRate =

@@ -28,8 +28,10 @@ const AddBusinessModal: React.FC<AddBusinessModalProps> = ({
   const statusOptions = [
     'NO WEBSITE',
     'BROKEN WEBSITE',
+    'INSECURE',
     'NOT MOBILE',
     'WEBSITE OK',
+    'UNKNOWN',
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {

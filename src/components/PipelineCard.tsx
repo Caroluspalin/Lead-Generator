@@ -54,6 +54,8 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       return 'bg-rose-50 text-rose-700 border-rose-200';
     if (status === 'BROKEN WEBSITE')
       return 'bg-orange-50 text-orange-700 border-orange-200';
+    if (status === 'INSECURE')
+      return 'bg-amber-50 text-amber-700 border-amber-200';
     if (status === 'NOT MOBILE')
       return 'bg-yellow-50 text-yellow-700 border-yellow-200';
     if (status === 'WEBSITE OK')
@@ -106,6 +108,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           <ScoreBadge score={agency.lead_score} />
           {agency.website_status && (
             <span
+              title={agency.website_issue ?? undefined}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${getStatusColor(
                 agency.website_status,
               )}`}
@@ -115,6 +118,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           )}
           <RatingDisplay rating={agency.rating} reviewCount={agency.review_count} />
         </div>
+        {agency.website_issue && (
+          <p className="mt-2 text-xs text-slate-500">{agency.website_issue}</p>
+        )}
       </div>
 
       {/* Contact Info Section */}

@@ -1,6 +1,6 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -18,12 +18,16 @@ KAUNIAINEN_VIEWPORT = {
     "northeast": {"lat": 60.2260, "lng": 24.7480},
     "southwest": {"lat": 60.2000, "lng": 24.6990},
 }
+ROOT = GooglePlacesService.viewport_to_rectangle(KAUNIAINEN_VIEWPORT)
 
 EXPECTED_FIELD_MASK = (
     "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,"
     "places.websiteUri,places.rating,places.userRatingCount,places.businessStatus,"
     "places.primaryType,places.googleMapsUri,nextPageToken"
 )
+
+# Montako tulosta alue palauttaa yhteensä (kaikki sivut); rect -> määrä
+AreaCount = Callable[[dict[str, Any]], int]
 
 
 class _FakeResponse:
@@ -43,16 +47,24 @@ def _place(pid: str, status: str = "OPERATIONAL", **extra: Any) -> dict[str, Any
     return {"id": pid, "displayName": {"text": f"Yritys {pid}"}, "businessStatus": status, **extra}
 
 
-class _FakeGoogle:
-    """Mockattu requests.get (Geocoding) + requests.post (Text Search). Kirjaa kaikki kutsut."""
+def _area_key(rect: dict[str, Any]) -> str:
+    lo, hi = rect["low"], rect["high"]
+    return f"{lo['latitude']:.5f},{lo['longitude']:.5f},{hi['latitude']:.5f},{hi['longitude']:.5f}"
 
-    def __init__(self, pages_per_cell: int | None = None) -> None:
-        # pages_per_cell=None -> jokaisessa vastauksessa aina nextPageToken (loputon sivutus)
-        self.pages_per_cell = pages_per_cell
+
+class _FakeGoogle:
+    """Mockattu requests.get (Geocoding) + requests.post (Text Search). Kirjaa kaikki kutsut.
+
+    area_count(rect) kertoo montako yritystä alueella on; vastaus sivutetaan 20 kpl/sivu
+    ja katkaistaan 60:een kuten oikea API.
+    """
+
+    def __init__(self, area_count: AreaCount) -> None:
+        self.area_count = area_count
         self.gets: list[dict[str, Any]] = []
         self.posts: list[dict[str, Any]] = []
+        self.override_places: dict[str, list[dict[str, Any]]] = {}
         self._lock = threading.Lock()
-        self.places_by_call: list[list[dict[str, Any]]] = []
 
     def get(self, url: str, params: dict[str, Any], timeout: int) -> _FakeResponse:
         with self._lock:
@@ -62,104 +74,203 @@ class _FakeGoogle:
     def post(self, url: str, json: dict[str, Any], headers: dict[str, str], timeout: int) -> _FakeResponse:
         with self._lock:
             self.posts.append({"url": url, "json": json, "headers": headers})
-            n = len(self.posts)
+        rect = json["locationRestriction"]["rectangle"]
+        key = _area_key(rect)
         page = int(json.get("pageToken", "page-1").split("-")[1])
-        if self.places_by_call:
-            places = self.places_by_call.pop(0)
-        else:
-            places = [_place(f"p{n}")]
+
+        if key in self.override_places:
+            return _FakeResponse({"places": self.override_places[key]})
+
+        total = min(60, self.area_count(rect))
+        start = (page - 1) * 20
+        places = [_place(f"{key}#{i}") for i in range(start, min(start + 20, total))]
         data: dict[str, Any] = {"places": places}
-        if self.pages_per_cell is None or page < self.pages_per_cell:
+        if start + 20 < total:
             data["nextPageToken"] = f"page-{page + 1}"
         return _FakeResponse(data)
 
+    def text_search_areas(self) -> list[str]:
+        return [_area_key(p["json"]["locationRestriction"]["rectangle"]) for p in self.posts if "pageToken" not in p["json"]]
+
 
 @pytest.fixture
-def fake_google(monkeypatch: pytest.MonkeyPatch) -> _FakeGoogle:
-    fake = _FakeGoogle()
-    monkeypatch.setattr("requests.get", fake.get)
-    monkeypatch.setattr("requests.post", fake.post)
-    return fake
+def google(monkeypatch: pytest.MonkeyPatch) -> Callable[[AreaCount], _FakeGoogle]:
+    def _install(area_count: AreaCount) -> _FakeGoogle:
+        fake = _FakeGoogle(area_count)
+        monkeypatch.setattr("requests.get", fake.get)
+        monkeypatch.setattr("requests.post", fake.post)
+        return fake
+
+    return _install
 
 
-# --- Grid ---
-
-def test_grid_cells_cover_viewport_without_gaps() -> None:
-    cells = GooglePlacesService.generate_grid_cells(KAUNIAINEN_VIEWPORT)
-    assert len(cells) == 9
-
-    sw, ne = KAUNIAINEN_VIEWPORT["southwest"], KAUNIAINEN_VIEWPORT["northeast"]
-    assert min(c["low"]["latitude"] for c in cells) == pytest.approx(sw["lat"])
-    assert min(c["low"]["longitude"] for c in cells) == pytest.approx(sw["lng"])
-    assert max(c["high"]["latitude"] for c in cells) == pytest.approx(ne["lat"])
-    assert max(c["high"]["longitude"] for c in cells) == pytest.approx(ne["lng"])
-
-    for c in cells:
-        assert c["low"]["latitude"] < c["high"]["latitude"]
-        assert c["low"]["longitude"] < c["high"]["longitude"]
-
-    # Vierekkäiset ruudut jakavat reunan (ei aukkoja eikä limitystä)
-    assert cells[0]["high"]["longitude"] == pytest.approx(cells[1]["low"]["longitude"])
-    assert cells[0]["high"]["latitude"] == pytest.approx(cells[3]["low"]["latitude"])
+def _always(n: int) -> AreaCount:
+    return lambda _rect: n
 
 
-@pytest.mark.parametrize("grid_size", [1, 2, 4])
-def test_grid_cells_custom_size(grid_size: int) -> None:
-    assert len(GooglePlacesService.generate_grid_cells(KAUNIAINEN_VIEWPORT, grid_size)) == grid_size**2
+# --- Suorakaiteet ---
+
+def test_viewport_to_rectangle() -> None:
+    assert ROOT == {
+        "low": {"latitude": 60.2000, "longitude": 24.6990},
+        "high": {"latitude": 60.2260, "longitude": 24.7480},
+    }
+
+
+def test_split_rectangle_covers_area_without_gaps() -> None:
+    quads = GooglePlacesService.split_rectangle(ROOT)
+    assert len(quads) == 4
+    assert min(q["low"]["latitude"] for q in quads) == pytest.approx(ROOT["low"]["latitude"])
+    assert min(q["low"]["longitude"] for q in quads) == pytest.approx(ROOT["low"]["longitude"])
+    assert max(q["high"]["latitude"] for q in quads) == pytest.approx(ROOT["high"]["latitude"])
+    assert max(q["high"]["longitude"] for q in quads) == pytest.approx(ROOT["high"]["longitude"])
+    for q in quads:
+        assert q["low"]["latitude"] < q["high"]["latitude"]
+        assert q["low"]["longitude"] < q["high"]["longitude"]
+    # Vierekkäiset jakavat reunan
+    assert quads[0]["high"]["longitude"] == pytest.approx(quads[1]["low"]["longitude"])
+    assert quads[0]["high"]["latitude"] == pytest.approx(quads[2]["low"]["latitude"])
+    area = lambda r: (r["high"]["latitude"] - r["low"]["latitude"]) * (r["high"]["longitude"] - r["low"]["longitude"])  # noqa: E731
+    assert sum(area(q) for q in quads) == pytest.approx(area(ROOT))
 
 
 # --- Text Search -pyynnön muoto ---
 
-def test_text_search_sends_field_mask_and_key_headers(fake_google: _FakeGoogle) -> None:
-    fake_google.pages_per_cell = 1
+def test_text_search_sends_field_mask_and_key_headers(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(5))
     service = GooglePlacesService("AIza-test")
-    rect = service.generate_grid_cells(KAUNIAINEN_VIEWPORT)[0]
+    service.search_cell(ROOT, "parturi")
 
-    service.search_cell(rect, "parturi")
-
-    assert len(fake_google.posts) == 1
-    call = fake_google.posts[0]
+    assert len(fake.posts) == 1
+    call = fake.posts[0]
     assert call["url"] == PLACES_TEXT_SEARCH_URL == "https://places.googleapis.com/v1/places:searchText"
     assert call["headers"]["X-Goog-FieldMask"] == EXPECTED_FIELD_MASK == PLACES_FIELD_MASK
     assert " " not in call["headers"]["X-Goog-FieldMask"]
     assert call["headers"]["X-Goog-Api-Key"] == "AIza-test"
     assert call["json"]["textQuery"] == "parturi"
-    assert call["json"]["locationRestriction"] == {"rectangle": rect}
+    assert call["json"]["locationRestriction"] == {"rectangle": ROOT}
+    assert call["json"]["pageSize"] == 20
     assert "key" not in call["json"]
 
 
-def test_geocode_uses_geocoding_api(fake_google: _FakeGoogle) -> None:
+def test_geocode_uses_geocoding_api(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(0))
     service = GooglePlacesService("AIza-test")
     assert service.get_city_bounds("Kauniainen") == KAUNIAINEN_VIEWPORT
-    assert fake_google.gets[0]["url"] == GEOCODE_URL
-    assert fake_google.gets[0]["params"]["address"] == "Kauniainen, Finland"
+    assert fake.gets[0]["url"] == GEOCODE_URL
+    assert fake.gets[0]["params"]["address"] == "Kauniainen, Finland"
 
 
 # --- Paginointi ---
 
-def test_pagination_stops_at_max_pages(fake_google: _FakeGoogle) -> None:
-    service = GooglePlacesService("AIza-test")
-    places = service.search_cell(service.generate_grid_cells(KAUNIAINEN_VIEWPORT)[0], "parturi")
-
-    assert len(fake_google.posts) == MAX_PAGES_PER_CELL == 3
-    assert len(places) == 3
-
-
-def test_pagination_stops_without_next_token(fake_google: _FakeGoogle) -> None:
-    fake_google.pages_per_cell = 2
-    service = GooglePlacesService("AIza-test")
-    service.search_cell(service.generate_grid_cells(KAUNIAINEN_VIEWPORT)[0], "parturi")
-    assert len(fake_google.posts) == 2
+def test_pagination_stops_at_max_pages(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(500))
+    places = GooglePlacesService("AIza-test").search_cell(ROOT, "parturi")
+    assert len(fake.posts) == MAX_PAGES_PER_CELL == 3
+    assert len(places) == 60
 
 
-def test_page_token_request_keeps_other_params_identical(fake_google: _FakeGoogle) -> None:
-    service = GooglePlacesService("AIza-test")
-    service.search_cell(service.generate_grid_cells(KAUNIAINEN_VIEWPORT)[0], "parturi")
+def test_pagination_stops_without_next_token(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(35))
+    places = GooglePlacesService("AIza-test").search_cell(ROOT, "parturi")
+    assert len(fake.posts) == 2
+    assert len(places) == 35
 
-    first, second = fake_google.posts[0]["json"], fake_google.posts[1]["json"]
+
+def test_page_token_request_keeps_other_params_identical(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(60))
+    GooglePlacesService("AIza-test").search_cell(ROOT, "parturi")
+    first, second = fake.posts[0]["json"], fake.posts[1]["json"]
     assert "pageToken" not in first
     assert second["pageToken"] == "page-2"
     assert {k: v for k, v in second.items() if k != "pageToken"} == first
+
+
+# --- Mukautuva ruudukko ---
+
+def test_small_city_uses_one_text_search(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(20))
+    service = GooglePlacesService("AIza-test")
+    results = service.search_grid("Kauniainen", "parturi")
+
+    assert len(results) == 20
+    assert len(fake.gets) == 1
+    assert len(fake.posts) == 1
+    assert service.calls_used == 2
+    assert fake.text_search_areas() == [_area_key(ROOT)]
+
+
+def test_small_city_with_two_pages_does_not_split(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(45))
+    service = GooglePlacesService("AIza-test")
+    assert len(service.search_grid("Kauniainen", "parturi")) == 45
+    assert len(fake.posts) == 3  # 3 sivua mutta ei täynnä (45 < 60)
+    assert fake.text_search_areas() == [_area_key(ROOT)]
+
+
+def test_big_city_splits_saturated_area_into_quadrants(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    root_key = _area_key(ROOT)
+    fake = google(lambda rect: 200 if _area_key(rect) == root_key else 25)
+    service = GooglePlacesService("AIza-test")
+    service.search_grid("Kauniainen", "parturi")
+
+    areas = fake.text_search_areas()
+    assert areas[0] == root_key
+    assert sorted(areas[1:]) == sorted(_area_key(q) for q in GooglePlacesService.split_rectangle(ROOT))
+    # 1 geocode + 3 sivua koko alueelle + 4 neljännestä * 2 sivua
+    assert service.calls_used == 1 + 3 + 4 * 2
+
+
+def test_only_saturated_quadrants_split_further(
+    google: Callable[[AreaCount], _FakeGoogle], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.main.MAX_SEARCH_CALLS", 1000)
+    quads = GooglePlacesService.split_rectangle(ROOT)
+    dense = {_area_key(ROOT), _area_key(quads[3])}
+    fake = google(lambda rect: 200 if _area_key(rect) in dense else 10)
+    GooglePlacesService("AIza-test").search_grid("Kauniainen", "parturi")
+
+    areas = fake.text_search_areas()
+    assert len(areas) == 1 + 4 + 4
+    assert sorted(areas[5:]) == sorted(_area_key(q) for q in GooglePlacesService.split_rectangle(quads[3]))
+
+
+def test_split_depth_is_limited(
+    google: Callable[[AreaCount], _FakeGoogle], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.main.MAX_SEARCH_CALLS", 1000)
+    fake = google(_always(1000))
+    GooglePlacesService("AIza-test").search_grid("Helsinki", "parturi")
+    assert len(fake.text_search_areas()) == 1 + 4 + 16  # MAX_SPLIT_DEPTH = 2
+
+
+def test_dense_city_stops_at_max_search_calls(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(1000))
+    service = GooglePlacesService("AIza-test")
+    results = service.search_grid("Helsinki", "parturi")
+
+    assert len(fake.gets) + len(fake.posts) == MAX_SEARCH_CALLS == 15
+    assert service.calls_used == MAX_SEARCH_CALLS
+    assert len(results) > 60
+
+
+def test_usage_reports_calls_and_cost(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    google(_always(20))
+    service = GooglePlacesService("AIza-test")
+    service.search_grid("Kauniainen", "parturi")
+
+    usage = service.usage()
+    assert usage.api_calls == 2
+    assert usage.geocode_calls == 1
+    assert usage.text_search_calls == 1
+    assert usage.estimated_cost_usd == pytest.approx(0.005 + 0.035)
+
+
+def test_usage_cost_for_previous_kauniainen_grid() -> None:
+    # Edellinen 3x3-grid: 1 geocode + 9 text search -> ~$0.32
+    service = GooglePlacesService("AIza-test")
+    service._calls = {"geocode": 1, "text_search": 9}
+    assert service.usage().estimated_cost_usd == pytest.approx(0.32)
 
 
 # --- Tulokset ---
@@ -199,19 +310,18 @@ def test_normalize_place_handles_missing_fields() -> None:
     assert result["review_count"] is None
 
 
-def test_search_grid_dedupes_and_drops_permanently_closed(fake_google: _FakeGoogle) -> None:
-    fake_google.pages_per_cell = 1
-    fake_google.places_by_call = [
-        [_place("a"), _place("closed", status="CLOSED_PERMANENTLY")],
-        [_place("a"), _place("temp", status="CLOSED_TEMPORARILY")],
+def test_search_grid_dedupes_and_drops_permanently_closed(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(0))
+    fake.override_places[_area_key(ROOT)] = [
+        _place("a"),
+        _place("a"),
+        _place("closed", status="CLOSED_PERMANENTLY"),
+        _place("temp", status="CLOSED_TEMPORARILY"),
     ]
-    service = GooglePlacesService("AIza-test")
-    results = service.search_grid("Kauniainen", "parturi")
+    results = GooglePlacesService("AIza-test").search_grid("Kauniainen", "parturi")
 
-    ids = {r["place_id"] for r in results}
-    assert "closed" not in ids
-    assert {"a", "temp"} <= ids
-    assert [r["place_id"] for r in results].count("a") == 1
+    ids = [r["place_id"] for r in results]
+    assert sorted(ids) == ["a", "temp"]
     assert next(r for r in results if r["place_id"] == "temp")["business_status"] == "CLOSED_TEMPORARILY"
 
 
@@ -220,34 +330,23 @@ def test_places_api_error_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None
         "requests.post",
         lambda *a, **k: _FakeResponse({"error": {"status": "PERMISSION_DENIED"}}, status_code=403),
     )
+    assert GooglePlacesService("AIza-test").search_cell(ROOT, "parturi") == []
+
+
+# --- Turvakytkin rinnakkain ---
+
+def test_search_cap_holds_under_concurrency(google: Callable[[AreaCount], _FakeGoogle]) -> None:
+    fake = google(_always(5))
     service = GooglePlacesService("AIza-test")
-    assert service.search_cell(service.generate_grid_cells(KAUNIAINEN_VIEWPORT)[0], "parturi") == []
-
-
-# --- Turvakytkin ---
-
-def test_search_calls_capped(fake_google: _FakeGoogle) -> None:
-    # Ilman rajaa: 1 geocode + 9 ruutua * 3 sivua = 28 kutsua
-    service = GooglePlacesService("AIza-test")
-    results = service.search_grid("Kauniainen", "parturi")
-
-    assert len(fake_google.gets) + len(fake_google.posts) == MAX_SEARCH_CALLS
-    assert service.calls_used == MAX_SEARCH_CALLS
-    assert len(results) == MAX_SEARCH_CALLS - 1
-
-
-def test_search_cap_holds_under_concurrency(fake_google: _FakeGoogle) -> None:
-    service = GooglePlacesService("AIza-test")
-    rect = service.generate_grid_cells(KAUNIAINEN_VIEWPORT)[0]
     barrier = threading.Barrier(20)
 
     def _call(_i: int) -> None:
         barrier.wait()
         for _ in range(5):
-            service._post_json(PLACES_TEXT_SEARCH_URL, {"textQuery": "x", "locationRestriction": {"rectangle": rect}})
+            service._post_json(PLACES_TEXT_SEARCH_URL, {"textQuery": "x", "locationRestriction": {"rectangle": ROOT}})
 
     with ThreadPoolExecutor(max_workers=20) as ex:
         list(ex.map(_call, range(20)))
 
-    assert len(fake_google.posts) == MAX_SEARCH_CALLS
+    assert len(fake.posts) == MAX_SEARCH_CALLS
     assert service.calls_used == MAX_SEARCH_CALLS
