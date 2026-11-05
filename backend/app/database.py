@@ -1,6 +1,7 @@
 # FILE: backend/app/database.py
 import os
 from pathlib import Path
+from typing import Any
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session
 
@@ -28,19 +29,23 @@ DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///agenc
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 _echo = os.getenv("SQL_ECHO", "false").lower() == "true"
 
-connect_args = {"check_same_thread": False} if _is_sqlite else {}
 
-# Postgres tarvitsee poolin + pre_ping estaakseen timeoutatut yhteydet
-if _is_sqlite:
-    engine = create_engine(DATABASE_URL, echo=_echo, connect_args=connect_args)
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        echo=_echo,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-    )
+def engine_options(url: str) -> dict[str, Any]:
+    """create_engine-argumentit URL:n mukaan (erillään, jotta testattavissa ilman yhteyttä)."""
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    return {
+        # Supabase transaction pooler (6543) ei tue prepared statementeja; psycopg3
+        # alkaa käyttää niitä automaattisesti 5. toistetun kyselyn jälkeen
+        "connect_args": {"prepare_threshold": None},
+        # Pool + pre_ping estää timeoutatut yhteydet
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+    }
+
+
+engine = create_engine(DATABASE_URL, echo=_echo, **engine_options(DATABASE_URL))
 
 
 def get_session():
