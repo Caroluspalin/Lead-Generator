@@ -35,6 +35,10 @@ HEADERS = {
     "Accept-Language": "fi,en;q=0.8",
 }
 
+# Pelkkä somesivu ei ole oma nettisivu -> NO WEBSITE. Näihin ei tehdä pyyntöä lainkaan.
+SOCIAL_MEDIA_HOSTS = ("facebook.com", "fb.com", "fb.me", "instagram.com", "linktr.ee")
+SOCIAL_MEDIA_ISSUE = "social media only"
+
 BROKEN_HTTP_STATUSES = {404, 410}
 BOT_BLOCK_HTTP_STATUSES = {401, 403, 429}
 
@@ -135,6 +139,11 @@ def _host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
 
 
+def is_social_media_url(url: str) -> bool:
+    host = _host(url if "://" in url else f"//{url}")
+    return any(host == h or host.endswith("." + h) for h in SOCIAL_MEDIA_HOSTS)
+
+
 def _is_parked(response: requests.Response) -> bool:
     final_host = _host(response.url)
     if any(final_host == h or final_host.endswith("." + h) for h in PARKING_HOSTS):
@@ -189,6 +198,8 @@ def analyze_website(url: Optional[str]) -> WebsiteCheck:
     if not url or not url.strip():
         return WebsiteCheck(NO_WEBSITE)
     url = url.strip()
+    if is_social_media_url(url):
+        return WebsiteCheck(NO_WEBSITE, SOCIAL_MEDIA_ISSUE)
 
     # 1) HTTPS ensin (moni Google-websiteUri on http:// vaikka https toimii)
     https_url = _with_scheme(url, "https")

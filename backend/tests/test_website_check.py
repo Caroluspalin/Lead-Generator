@@ -235,3 +235,36 @@ def test_other_4xx_is_unknown_not_broken(web: Callable[..., _FakeWeb]) -> None:
 def test_constants_match_expected_values() -> None:
     assert wc.TIMEOUT_SECONDS == 8
     assert wc.TIMEOUT_RETRIES == 1
+
+
+# --- Somesivu ---
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.facebook.com/T%C3%A4hti-Paplari-240400222678777/",
+        "http://facebook.com/parturi",
+        "https://m.facebook.com/parturi",
+        "facebook.com/parturi",
+        "https://fb.com/parturi",
+        "https://fb.me/parturi",
+        "https://www.instagram.com/parturi/",
+        "instagram.com/parturi",
+        "https://linktr.ee/parturi",
+        "HTTPS://WWW.FACEBOOK.COM/Parturi",
+    ],
+)
+def test_social_media_url_is_no_website_without_request(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("requests.get", lambda u, **_k: calls.append(u))
+    assert analyze_website(url) == WebsiteCheck("NO WEBSITE", "social media only")
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://notfacebook.com/", "https://facebook.com.example.fi/", "https://parturi-instagram.fi/"],
+)
+def test_lookalike_domains_are_not_social_media(url: str, web: Callable[..., _FakeWeb]) -> None:
+    web({("https", True): _Resp(url=url)})
+    assert analyze_website(url).status == "WEBSITE OK"
