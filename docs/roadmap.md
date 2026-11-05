@@ -76,8 +76,21 @@
   - Puhelinskripti uusiksi: "onko teillä hetki", suora tarjous, kiinteä "ei kiinnosta" -vastaus, hintakysymys ilman euromääriä
   - Malli konfiguroitavaksi (`EMAIL_MODEL`, `EMAIL_REASONING_EFFORT`); live-vertailu gpt-4o-mini vs gpt-6.1-terra
   - Korjaus: Alembic `fileConfig(disable_existing_loggers=False)`
+- **Phase 13a**: Demosivugeneraattori (Vaihe A: generointi + paikallinen esikatselu):
+  - Pikakorjaukset: puhelinskripti ilman markdownia (prompti + `strip_markdown`), ei yrityksen pitkää virallista nimeä avauksessa
+  - AI tuottaa vain validoidun JSON-sisällön, HTML Jinja2-pohjista (beauty / restaurant / services, 3 värimaailmaa), ei JS:ää eikä ulkoisia resursseja
+  - Keksityt hinnat, numerot, sitaatit, arvostelut, palkinnot, historia ja nimet hylätään; yksi uudelleenyritys
+  - Aukioloajat yhdellä Place Details (New) -kutsulla generointihetkellä
+  - Demo-banneri + noindex (meta + X-Robots-Tag), tiukka CSP, arvaamaton public_token
+  - Demo-malli + CRUD-endpointit, julkinen `/demo/{token}`, DemoModal UI:ssa
+  - Sähköposti käyttää demolinkkiä tarjouksena, linkki lisätään koodissa
 
 ## Seuraavaksi
+
+### Phase 13b: Demojen julkaisu (suunnitelma, odottaa hyväksyntää)
+
+- Hosting-vertailu ja suositus tehty (ks. Phase 13a -raportti), toteutus vasta hyväksynnän jälkeen
+- Julkaisu ja poisto API:lla backendistä, automaattinen vanheneminen 30 pv jos liidi ei ole Hired, oma domain myöhemmin
 
 ### Phase 11b: Supabase RLS -policyt (tulevaisuudessa)
 
@@ -88,7 +101,7 @@ Jos PostgREST-pääsy Supabaseen avataan frontille ohi FastAPI-backendin, sovell
 - Huom: `user_id` on tällä hetkellä `str` (Supabase UUID string-muodossa), ei `uuid` — casting `auth.uid()::text` vaaditaan. Vaihtoehto: migroi `user_id` PostgreSQL `uuid`-tyypiksi tuotantoa varten
 - Nyt backend on ainoa reitti dataan → sovellustason suodatus riittää, RLS on defense-in-depth
 
-### Phase 13: Pilvideployaus (Myöhemmin)
+### Phase 14: Pilvideployaus (Myöhemmin)
 
 - Backend deployaus pilveen (Render / Fly.io / Railway)
 - Frontend deployaus (Vercel / Netlify / Cloudflare Pages)
