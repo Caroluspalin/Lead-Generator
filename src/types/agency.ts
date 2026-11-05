@@ -13,7 +13,23 @@ export const PIPELINE_STATUSES: PipelineStatus[] = [
   'Rejected',
 ];
 
-export type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history';
+export type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history' | 'settings';
+
+// PUT /sender-profile -runko
+export interface SenderProfileInput {
+  name: string;
+  company_name: string | null;
+  phone: string | null;
+  website: string | null;
+  short_intro: string;
+}
+
+// GET /sender-profile
+export interface SenderProfile extends SenderProfileInput {
+  id: number;
+  user_id: string;
+  updated_at: string;
+}
 
 export type WebsiteStatus =
   | 'NO WEBSITE'

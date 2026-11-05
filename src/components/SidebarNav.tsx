@@ -6,6 +6,7 @@ import {
   Layers,
   BarChart2,
   History,
+  Settings,
   Plus,
   LogOut,
 } from 'lucide-react';
@@ -43,6 +44,7 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
       label: 'Dashboard',
     },
     { id: 'history' as NavTab, icon: History, label: 'Search History' },
+    { id: 'settings' as NavTab, icon: Settings, label: 'Settings' },
   ];
 
   return (

@@ -34,6 +34,26 @@ class EmailDraft(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class SenderProfile(SQLModel, table=True):
+    # Yksi per käyttäjä: lähettäjän tiedot sähköposti- ja puhelinprompteihin + allekirjoitus
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True, unique=True)
+    name: str
+    company_name: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None  # portfolio
+    short_intro: str  # esim. "teen nettisivuja paikallisille yrityksille Espoossa"
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class SenderProfileUpdate(SQLModel):
+    name: str = Field(min_length=1, max_length=100)
+    company_name: Optional[str] = Field(default=None, max_length=100)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    website: Optional[str] = Field(default=None, max_length=200)
+    short_intro: str = Field(min_length=5, max_length=200)
+
+
 class Lead(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("google_place_id", "user_id", name="uq_lead_place_user"),

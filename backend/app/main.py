@@ -25,7 +25,9 @@ import requests
 
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
-from .models import Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, utc_now
+from .models import (
+    Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate, utc_now,
+)
 from .utils.scraper import scrape_website_text
 from .utils.website_check import analyze_website
 from .utils.contact_finder import find_contact_email
@@ -615,6 +617,52 @@ def export_leads_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=leads_export.csv"},
     )
+
+# --- SENDER PROFILE ---
+
+def get_sender_profile(session: Session, user_id: str) -> Optional[SenderProfile]:
+    return session.exec(select(SenderProfile).where(SenderProfile.user_id == user_id)).first()
+
+
+def _clean(value: Optional[str]) -> Optional[str]:
+    value = (value or "").strip()
+    return value or None
+
+
+@app.get("/sender-profile", response_model=SenderProfile)
+def read_sender_profile(
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> SenderProfile:
+    profile = get_sender_profile(session, user.id)
+    if profile is None:
+        raise HTTPException(404, "Sender profile not set")
+    return profile
+
+
+@app.put("/sender-profile", response_model=SenderProfile)
+def upsert_sender_profile(
+    data: SenderProfileUpdate,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> SenderProfile:
+    name = data.name.strip()
+    intro = data.short_intro.strip()
+    if not name or not intro:
+        raise HTTPException(422, "name and short_intro are required")
+
+    profile = get_sender_profile(session, user.id) or SenderProfile(user_id=user.id, name=name, short_intro=intro)
+    profile.name = name
+    profile.short_intro = intro
+    profile.company_name = _clean(data.company_name)
+    profile.phone = _clean(data.phone)
+    profile.website = _clean(data.website)
+    profile.updated_at = utc_now()
+    session.add(profile)
+    session.commit()
+    session.refresh(profile)
+    return profile
+
 
 # --- SEARCH HISTORY ---
 

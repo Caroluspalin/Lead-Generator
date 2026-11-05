@@ -8,6 +8,7 @@ import type { NavTab } from './types/agency';
 import PipelineBoard from './components/PipelineBoard';
 import DashboardView from './components/DashboardView';
 import SearchHistoryView from './components/SearchHistoryView';
+import SettingsView from './components/SettingsView';
 import type { Agency, SearchResponse, SearchUsage } from './types/agency';
 import { usePipeline } from './context/PipelineContext';
 import { useAuth } from './context/AuthContext';
@@ -287,6 +288,7 @@ function AppShell() {
 
         {activeTab === 'pipeline' && <PipelineBoard />}
         {activeTab === 'dashboard' && <DashboardView />}
+        {activeTab === 'settings' && <SettingsView />}
         {activeTab === 'history' && (
           <SearchHistoryView
             onReSearch={(bt, c) => {
