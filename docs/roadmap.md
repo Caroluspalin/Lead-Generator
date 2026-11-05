@@ -61,6 +61,13 @@
   - Pisteytys: suosio kerrotaan sivun tilan painolla (WEBSITE OK max 20), NO_REVIEWS_PENALTY 15, INSECURE = NOT MOBILE -taso, UNKNOWN neutraali 50
   - Mukautuva ruudukko: ensin koko kaupunki yhdellä kyselyllä, vain täyttyneet alueet jaetaan 2x2 (max syvyys 2); Kauniainen 10 → 3 kutsua (~$0.32 → ~$0.075)
   - `/search` palauttaa `usage`-tiedot (kutsut + kustannusarvio), UI näyttää ne hakutulosten yläpuolella
+- **Phase 12c**: Yhteystiedot ja parempi outreach:
+  - Korjaukset: `prepare_threshold=None` Postgres-enginelle (Supabase transaction pooler), somesivut (Facebook/Instagram/linktr.ee) → NO WEBSITE "social media only" ilman pyyntöä, hakutulosten duplikaattien yhdistäminen (nimi + puhelin)
+  - Yhteystietohaku sivustolta (`contact_finder.py`): etusivu + max 3 yhteystietosivua, mailto/teksti/peitetyt/Cloudflare, oma domain ja yleiset osoitteet ensin, ei arvailua; automaattisesti taustalla pipelineen lisättäessä + Find email -nappi
+  - Lead: email, email_source, do_not_contact (migraatio `af5c0e76b864`)
+  - Sähköposti: havaittu ongelma selkokielellä (ei jargonia, ei pelottelua), opt-out-rivi aina lopussa
+  - do_not_contact estää draftin, puhelinskriptin ja lähetyksen (409)
+  - `POST /leads/{id}/generate-call-script` + CallScriptModal
 
 ## Seuraavaksi
 
