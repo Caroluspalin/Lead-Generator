@@ -13,6 +13,7 @@ interface PipelineContextValue {
   updateNotes: (id: number, notes: string) => Promise<void>;
   removeFromPipeline: (id: number) => Promise<void>;
   findEmail: (id: number) => Promise<SavedAgency>;
+  setDoNotContact: (id: number, value: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -125,6 +126,19 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     return updated;
   };
 
+  const setDoNotContact = async (id: number, value: boolean) => {
+    const res = await apiFetch(`/leads/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ do_not_contact: value }),
+    });
+    if (!res.ok) {
+      throw new Error(`Update failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  };
+
   const removeFromPipeline = async (id: number) => {
     const res = await apiFetch(`/leads/${id}`, {
       method: 'DELETE',
@@ -146,6 +160,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         updateNotes,
         removeFromPipeline,
         findEmail,
+        setDoNotContact,
         refresh,
       }}
     >

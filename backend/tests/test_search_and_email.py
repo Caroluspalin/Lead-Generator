@@ -1,11 +1,11 @@
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.main import GooglePlacesService
+from app.main import OPT_OUT_LINE, GooglePlacesService
+from tests.conftest import FakeOpenAI
 from app.models import EmailDraft, Lead
 from app.utils.website_check import WebsiteCheck
 
@@ -35,39 +35,15 @@ def test_search_mock_mode_returns_results_and_saves_history(client_a: TestClient
     assert history[0]["result_count"] == 9
 
 
-class _FakeOpenAI:
-    """Korvaa openai.OpenAI:n. Tallentaa saadut viestit tarkistusta varten."""
-
-    calls: list[dict[str, Any]] = []
-
-    def __init__(self, api_key: str) -> None:
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, **kwargs: Any) -> SimpleNamespace:
-        _FakeOpenAI.calls.append(kwargs)
-        return SimpleNamespace(
-            model="gpt-4o-mini-test",
-            choices=[SimpleNamespace(message=SimpleNamespace(content="  Hei, testiviesti.  "))],
-        )
-
-
-@pytest.fixture
-def fake_openai(monkeypatch: pytest.MonkeyPatch) -> type[_FakeOpenAI]:
-    _FakeOpenAI.calls = []
-    monkeypatch.setattr("app.main.OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
-    return _FakeOpenAI
-
-
 def test_generate_email_saves_draft(
-    client_a: TestClient, make_lead: Any, fake_openai: type[_FakeOpenAI], session: Session
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], session: Session
 ) -> None:
     lead = make_lead(website_status="NO WEBSITE")
 
     res = client_a.post(f"/leads/{lead['id']}/generate-email", json={"instruction": "lyhyempi"})
     assert res.status_code == 200
     body = res.json()
-    assert body["body"] == "Hei, testiviesti."
+    assert body["body"] == "Hei, testiviesti.\n\n" + OPT_OUT_LINE
     assert body["model"] == "gpt-4o-mini-test"
     assert lead["name"] in body["subject"]
 
@@ -75,7 +51,7 @@ def test_generate_email_saves_draft(
     assert len(drafts) == 1
     assert drafts[0].user_id == "user-a"
     assert drafts[0].lead_id == lead["id"]
-    assert drafts[0].body == "Hei, testiviesti."
+    assert drafts[0].body == body["body"]
 
     assert len(client_a.get(f"/leads/{lead['id']}/drafts").json()) == 1
     assert "lyhyempi" in fake_openai.calls[0]["messages"][1]["content"]
@@ -84,7 +60,7 @@ def test_generate_email_saves_draft(
 def test_generate_email_caches_deep_scan_context(
     client_a: TestClient,
     make_lead: Any,
-    fake_openai: type[_FakeOpenAI],
+    fake_openai: type[FakeOpenAI],
     session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,7 +77,7 @@ def test_generate_email_caches_deep_scan_context(
 
 
 def test_generate_email_survives_scrape_failure(
-    client_a: TestClient, make_lead: Any, fake_openai: type[_FakeOpenAI]
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI]
 ) -> None:
     # Oletus-mock (block_network) heittää poikkeuksen -> meili generoidaan ilman personointia
     lead = make_lead(website="www.example.fi", website_status="BROKEN WEBSITE")
@@ -195,10 +171,12 @@ def test_search_live_path_with_no_places_still_reports_usage(
 
 
 def test_email_prompt_includes_website_issue(
-    client_a: TestClient, make_lead: Any, fake_openai: type[_FakeOpenAI]
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI]
 ) -> None:
-    lead = make_lead(website_status="NO WEBSITE", website_issue="SSL certificate expired")
+    lead = make_lead(website_status="INSECURE", website_issue="SSL certificate expired")
     assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 200
-    assert "Havaittu ongelma: SSL certificate expired" in fake_openai.calls[0]["messages"][1]["content"]
+    user_prompt = fake_openai.calls[0]["messages"][1]["content"]
+    assert "Havaittu ongelma: selain näyttää kävijöille turvallisuusvaroituksen" in user_prompt
+    assert "SSL" not in user_prompt
     system_prompt = fake_openai.calls[0]["messages"][0]["content"]
-    assert "UNKNOWN" in system_prompt and "INSECURE" in system_prompt
+    assert "HAVAITTU ONGELMA" in system_prompt

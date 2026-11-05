@@ -14,6 +14,7 @@ for _smtp_var in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"):
     os.environ[_smtp_var] = ""
 
 from collections.abc import Iterator  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 from typing import Any  # noqa: E402
 
 import pytest  # noqa: E402
@@ -108,3 +109,29 @@ def make_lead(client_a: TestClient) -> Any:
         return res.json()
 
     return _make
+
+
+class FakeOpenAI:
+    """Korvaa openai.OpenAI:n. Tallentaa saadut viestit tarkistusta varten."""
+
+    calls: list[dict[str, Any]] = []
+    reply: str = "  Hei, testiviesti.  "
+
+    def __init__(self, api_key: str) -> None:
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs: Any) -> SimpleNamespace:
+        FakeOpenAI.calls.append(kwargs)
+        return SimpleNamespace(
+            model="gpt-4o-mini-test",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=FakeOpenAI.reply))],
+        )
+
+
+@pytest.fixture
+def fake_openai(monkeypatch: pytest.MonkeyPatch) -> type[FakeOpenAI]:
+    FakeOpenAI.calls = []
+    FakeOpenAI.reply = "  Hei, testiviesti.  "
+    monkeypatch.setattr("app.main.OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    return FakeOpenAI

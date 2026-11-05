@@ -18,7 +18,7 @@ from urllib.parse import quote_plus, urlparse
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from sqlalchemy import Engine
+from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 from pydantic import BaseModel
 import requests
@@ -700,6 +700,53 @@ def delete_lead(
 
 # --- AI EMAIL SERVICE ---
 
+OPENAI_MODEL = "gpt-4o-mini"
+
+# Lisätään koodissa jokaisen viestin loppuun, jotta se on aina mukana (ei luoteta malliin)
+OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastaa vain "ei kiitos", niin en ota enää yhteyttä.'
+
+# website_issue (tekninen, website_check.py) -> selkokielinen havainto asiakkaalle.
+# Avain täsmätään issue-tekstin alkuun; yhdistetyt syyt ("no HTTPS; no viewport meta") pilkotaan.
+ISSUE_DESCRIPTIONS: list[tuple[str, str]] = [
+    ("social media only", "yrityksellä on vain somesivu (esim. Facebook), ei omaa nettisivua"),
+    ("DNS not resolving", "Googlen kautta löytyvä nettisivuosoite ei enää avaudu"),
+    ("connection refused", "nettisivu ei tällä hetkellä avaudu"),
+    ("connection failed", "nettisivu ei tällä hetkellä avaudu"),
+    ("parked domain", "nettisivuosoitteessa ei ole enää yrityksen omaa sivua"),
+    ("HTTP 404", "Googlessa oleva linkki nettisivuille johtaa sivulle, jota ei löydy"),
+    ("HTTP 410", "Googlessa oleva linkki nettisivuille johtaa sivulle, jota ei löydy"),
+    ("HTTP 5", "nettisivu näyttää tällä hetkellä virheilmoituksen"),
+    ("SSL certificate", "selain näyttää kävijöille turvallisuusvaroituksen ennen sivulle pääsyä"),
+    ("no HTTPS", 'sivustolla ei ole suojattua yhteyttä, joten selain merkitsee sen "ei turvallinen"'),
+    ("redirects to HTTP", 'sivustolla ei ole suojattua yhteyttä, joten selain merkitsee sen "ei turvallinen"'),
+    ("no viewport meta", "sivusto ei mukaudu puhelimen näytölle"),
+]
+STATUS_DESCRIPTIONS: Dict[str, str] = {
+    "NO WEBSITE": "yrityksellä ei ole nettisivuja",
+    "BROKEN WEBSITE": "nettisivu ei tällä hetkellä toimi",
+    "INSECURE": 'sivustolla ei ole suojattua yhteyttä, joten selain merkitsee sen "ei turvallinen"',
+    "NOT MOBILE": "sivusto ei mukaudu puhelimen näytölle",
+}
+
+
+def describe_website_problem(website_status: Optional[str], website_issue: Optional[str]) -> Optional[str]:
+    """Selkokielinen kuvaus havaitusta ongelmasta, tai None jos ongelmaa ei saa mainita.
+
+    UNKNOWN ja WEBSITE OK -> None: emme väitä ongelmaa jota ei ole varmistettu.
+    """
+    if website_status in (None, "UNKNOWN", "WEBSITE OK"):
+        return None
+    descriptions: list[str] = []
+    for part in (website_issue or "").split(";"):
+        part = part.strip()
+        match = next((text for key, text in ISSUE_DESCRIPTIONS if part.startswith(key)), None)
+        if match and match not in descriptions:
+            descriptions.append(match)
+    if not descriptions:
+        return STATUS_DESCRIPTIONS.get(website_status)
+    return " ja ".join(descriptions)
+
+
 EMAIL_SYSTEM_PROMPT = """Olet B2B-myyntiavustaja suomalaiselle web-kehitysyritykselle.
 
 Kirjoita lyhyt, rento ja suora sähköposti potentiaaliselle asiakkaalle.
@@ -711,48 +758,81 @@ SÄÄNNÖT:
 - Sävy: ystävällinen, asiantunteva, EI painostava
 - Älä käytä sanoja "ainutlaatuinen", "mahtava", "upea" tai muuta kliseistä mainosjargonia
 - Älä lupaa mitään konkreettista (hintaa, aikataulua) — tavoite on saada vastaus
-- Mainitse löydetty ongelma luontevasti, älä haukkuen
 - Allekirjoitus: jätä pois, käyttäjä lisää oman
+- Älä kirjoita omaa "jos ei kiinnosta" -lopetusriviä, se lisätään automaattisesti
 - Palauta VAIN sähköpostin teksti, ei subject-riviä erikseen
 
-ONGELMIEN KUVAUKSET:
-- NO WEBSITE: yrityksellä ei ole nettisivuja lainkaan
-- BROKEN WEBSITE: nettisivu ei toimi (ei aukea, virhesivu tai domain on parkissa/myynnissä)
-- INSECURE: sivu toimii, mutta ilman suojattua yhteyttä (ei HTTPS:ää tai SSL-sertifikaatti on vanhentunut/virheellinen) — selaimet varoittavat kävijöitä
-- NOT MOBILE: nettisivu toimii mutta ei skaalaudu mobiililaitteille
-- WEBSITE OK: sivu toimii hyvin — keskity muuhun lisäarvoon (esim. näkyvyys, päivitys)
-- UNKNOWN: sivun tilaa ei saatu tarkistettua — ÄLÄ väitä sivun olevan rikki tai puutteellinen, keskity yleiseen lisäarvoon
-- Jos "Havaittu ongelma" on annettu, voit viitata siihen konkreettisesti mutta selkokielellä (ei teknistä jargonia)
+HAVAITTU ONGELMA:
+- Jos "Havaittu ongelma" on annettu, kerro se yhdellä konkreettisella lauseella omin sanoin, esim.
+  "huomasin, että Googlen kautta löytyvä osoitteenne ei enää avaudu" tai
+  "selain näyttää kävijöille turvallisuusvaroituksen sivuillenne tullessa" tai
+  "huomasin, että teillä on vain Facebook-sivu"
+- EI teknistä jargonia: älä sano SSL, HTTPS, DNS, sertifikaatti, viewport, domain tai HTTP-virhekoodi
+- EI liioittelua eikä pelottelua: älä puhu hakkereista, tietovuodoista, sakoista tai menetetyistä asiakkaista
+- Kerro havainto ystävällisesti vinkkinä, älä moitteena
+- Jos havaittua ongelmaa EI ole annettu, älä keksi ongelmaa — keskity yleiseen lisäarvoon (esim. näkyvyys, ajanvaraus verkossa)
 
 DEEP SCAN (jos VERKKOSIVUN SISÄLTÖ on annettu):
 - Aloita sähköposti lyhyellä, personoidulla jäänmurtajalla (1-2 lausetta) joka viittaa suoraan yrityksen verkkosivulta löytyneeseen konkreettiseen asiaan (esim. palvelu, arvo, saavutus, erikoisuus)
 - Jäänmurtajan pitää osoittaa että olet oikeasti tutustunut yritykseen — ei geneerisiä fraaseja
-- Siirry sen jälkeen luontevasti varsinaiseen asiaan (nettisivujen ongelma tai kehitysehdotus)
+- Siirry sen jälkeen luontevasti varsinaiseen asiaan
 - Jos verkkosivun sisältö ei ole saatavilla, kirjoita meili normaalisti ilman jäänmurtajaa"""
+
+CALL_SCRIPT_SYSTEM_PROMPT = """Olet B2B-myyntivalmentaja suomalaiselle web-kehitysyritykselle.
+
+Kirjoita noin 30 sekunnin puhelinrunko (puhuttuna max ~90 sanaa kohdissa 1-4) myyjälle,
+joka soittaa paikalliselle yritykselle ensimmäistä kertaa.
+
+RAKENNE (käytä täsmälleen näitä otsikoita):
+1. Esittely: yksi lause. Käytä paikkamerkkejä [Nimesi] ja [Yrityksesi].
+2. Havainto: yksi lause havaitusta ongelmasta selkokielellä. Jos havaittua ongelmaa ei ole annettu, älä keksi sitä — kerro lyhyesti miksi soitat (esim. paikallisten yritysten verkkonäkyvyys).
+3. Kysymys: yksi avoin kysymys yrityksen nykytilanteesta.
+4. Ehdotus: ehdota lyhyttä 15 minuutin tapaamista tai demoa, kysy sopiiko.
+5. Jos "ei kiinnosta": kohtelias, lyhyt lopetus ilman painostusta; kiitä ajasta ja kerro ettet soita uudelleen.
+
+SÄÄNNÖT:
+- Kieli: suomi, luonteva puhekieli (ei kirjakieltä, ei mainosjargonia)
+- EI teknistä jargonia (SSL, HTTPS, DNS, sertifikaatti, viewport, domain, virhekoodit)
+- EI liioittelua eikä pelottelua
+- Älä lupaa hintoja tai aikatauluja
+- Palauta vain runko otsikoineen"""
+
 
 class EmailGenerateRequest(BaseModel):
     instruction: Optional[str] = None
+
 
 class EmailGenerateResponse(BaseModel):
     subject: str
     body: str
     model: str
 
-def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> str:
-    parts = [
-        f"Yritys: {lead.name}",
-        f"Kaupunki: {lead.city}",
-    ]
-    if lead.website:
-        parts.append(f"Nettisivu: {lead.website}")
-    if lead.website_status:
-        parts.append(f"Nettisivun tila: {lead.website_status}")
-    if lead.website_issue:
-        parts.append(f"Havaittu ongelma: {lead.website_issue}")
-    if lead.website_context:
-        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan):\n{lead.website_context}")
+
+class CallScriptResponse(BaseModel):
+    script: str
+    model: str
+
+
+def _lead_facts(lead: Lead) -> list[str]:
+    parts = [f"Yritys: {lead.name}", f"Kaupunki: {lead.city}"]
+    if lead.primary_type:
+        parts.append(f"Toimiala (Google): {lead.primary_type}")
+    if lead.review_count:
+        parts.append(f"Google-arvostelut: {lead.rating} / 5 ({lead.review_count} kpl)")
+    problem = describe_website_problem(lead.website_status, lead.website_issue)
+    if problem:
+        parts.append(f"Havaittu ongelma: {problem}")
+    else:
+        parts.append("Havaittu ongelma: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki)")
     if lead.notes:
         parts.append(f"Muistiinpanot: {lead.notes}")
+    return parts
+
+
+def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> str:
+    parts = _lead_facts(lead)
+    if lead.website_context:
+        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan):\n{lead.website_context}")
 
     parts.append("\nKirjoita sähköposti tämän perusteella.")
 
@@ -760,6 +840,48 @@ def build_email_user_prompt(lead: Lead, instruction: Optional[str] = None) -> st
         parts.append(f"\nLisäohje: {instruction}")
 
     return "\n".join(parts)
+
+
+def build_call_script_prompt(lead: Lead) -> str:
+    parts = _lead_facts(lead)
+    if lead.website_context:
+        parts.append(f"\nVERKKOSIVUN SISÄLTÖ (lyhennelmä):\n{lead.website_context[:600]}")
+    parts.append("\nKirjoita puhelinrunko tämän perusteella.")
+    return "\n".join(parts)
+
+
+def append_opt_out(body: str) -> str:
+    return f"{body.rstrip()}\n\n{OPT_OUT_LINE}"
+
+
+def _get_contactable_lead(session: Session, lead_id: int, user: AuthUser) -> Lead:
+    db_lead = session.get(Lead, lead_id)
+    if not db_lead or db_lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+    if db_lead.do_not_contact:
+        raise HTTPException(409, "Lead is marked do not contact")
+    return db_lead
+
+
+async def _chat_completion(system_prompt: str, user_prompt: str, max_tokens: int) -> tuple[str, str]:
+    """Palauttaa (teksti, malli). OpenAI-kutsu blokkaa -> taustasäikeeseen."""
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    def _call():
+        return client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=max_tokens,
+            temperature=0.7,
+        )
+
+    response = await asyncio.to_thread(_call)
+    return (response.choices[0].message.content or "").strip(), response.model
+
 
 # 6. GENEROI SÄHKÖPOSTI (AI)
 @app.post("/leads/{lead_id}/generate-email", response_model=EmailGenerateResponse)
@@ -769,12 +891,9 @@ async def generate_email(
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
 ):
+    db_lead = _get_contactable_lead(session, lead_id, user)
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
-
-    db_lead = session.get(Lead, lead_id)
-    if not db_lead or db_lead.user_id != user.id:
-        raise HTTPException(404, "Lead not found")
 
     # Deep Scan: skraapataan verkkosivun teksti jos ei vielä cachessa
     if not db_lead.website_context and db_lead.website and db_lead.website_status != "NO WEBSITE":
@@ -790,44 +909,43 @@ async def generate_email(
         except Exception as e:
             logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-    user_prompt = build_email_user_prompt(db_lead, req.instruction)
-
-    def _call_openai():
-        return client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": EMAIL_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=500,
-            temperature=0.7,
-        )
-
-    response = await asyncio.to_thread(_call_openai)
-    body = response.choices[0].message.content.strip()
+    text, model = await _chat_completion(
+        EMAIL_SYSTEM_PROMPT, build_email_user_prompt(db_lead, req.instruction), max_tokens=500
+    )
+    body = append_opt_out(text)
 
     # Generoi subject-rivi liidin tietojen perusteella
     status_subjects = {
         "NO WEBSITE": f"Nettisivut yritykselle {db_lead.name}?",
         "BROKEN WEBSITE": f"Huomasimme ongelman sivuillanne — {db_lead.name}",
-        "INSECURE": f"Sivujenne tietoturvavaroitus — {db_lead.name}",
+        "INSECURE": f"Sivujenne suojattu yhteys — {db_lead.name}",
         "NOT MOBILE": f"Mobiiliystävällisyys — {db_lead.name}",
         "WEBSITE OK": f"Nettinäkyvyyden kehittäminen — {db_lead.name}",
     }
     subject = status_subjects.get(db_lead.website_status or "", f"Yhteistyöehdotus — {db_lead.name}")
 
     # Tallenna draft kantaan
-    session.add(EmailDraft(user_id=user.id, lead_id=lead_id, subject=subject, body=body, model=response.model))
+    session.add(EmailDraft(user_id=user.id, lead_id=lead_id, subject=subject, body=body, model=model))
     session.commit()
 
-    return EmailGenerateResponse(
-        subject=subject,
-        body=body,
-        model=response.model,
-    )
+    return EmailGenerateResponse(subject=subject, body=body, model=model)
+
+
+# 6b. PUHELINSKRIPTI (AI)
+@app.post("/leads/{lead_id}/generate-call-script", response_model=CallScriptResponse)
+async def generate_call_script(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    db_lead = _get_contactable_lead(session, lead_id, user)
+    if not OPENAI_API_KEY:
+        raise HTTPException(500, "OPENAI_API_KEY not configured")
+
+    # Ei scrapingia tässä: käytetään Deep Scan -kontekstia vain jos se on jo cachessa
+    script, model = await _chat_completion(CALL_SCRIPT_SYSTEM_PROMPT, build_call_script_prompt(db_lead), max_tokens=400)
+    return CallScriptResponse(script=script, model=model)
+
 
 # 7. LÄHETÄ SÄHKÖPOSTI (SMTP)
 
@@ -835,16 +953,33 @@ class SendEmailRequest(BaseModel):
     to: str
     subject: str
     body: str
+    lead_id: Optional[int] = None
+
 
 class SendEmailResponse(BaseModel):
     ok: bool
     message: str
 
+
 @app.post("/send-email", response_model=SendEmailResponse)
 async def send_email(
     req: SendEmailRequest,
-    _user: AuthUser = Depends(verify_token),
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
 ):
+    if req.lead_id is not None:
+        _get_contactable_lead(session, req.lead_id, user)
+    # Estää lähetyksen myös ilman lead_id:tä, jos osoite kuuluu do-not-contact-liidille
+    blocked = session.exec(
+        select(Lead.id).where(
+            Lead.user_id == user.id,
+            Lead.do_not_contact == True,  # noqa: E712 (SQL-lauseke)
+            func.lower(Lead.email) == req.to.strip().lower(),
+        )
+    ).first()
+    if blocked is not None:
+        raise HTTPException(409, "Recipient is marked do not contact")
+
     if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM]):
         raise HTTPException(500, "SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD and SMTP_FROM in .env")
 

@@ -13,12 +13,15 @@ import {
   Mail,
   Search,
   Loader2,
+  PhoneCall,
+  Ban,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
+import CallScriptModal from './CallScriptModal';
 import { ScoreBadge, RatingDisplay } from './ScoreBadge';
 
 interface PipelineCardProps {
@@ -42,7 +45,18 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [findingEmail, setFindingEmail] = useState(false);
-  const { findEmail } = usePipeline();
+  const [callScriptOpen, setCallScriptOpen] = useState(false);
+  const { findEmail, setDoNotContact } = usePipeline();
+
+  const handleToggleDoNotContact = async () => {
+    const next = !agency.do_not_contact;
+    try {
+      await setDoNotContact(agency.id, next);
+      toast.success(next ? `${agency.name} marked do not contact` : `${agency.name} can be contacted again`);
+    } catch {
+      toast.error('Failed to update contact status');
+    }
+  };
 
   // Sama ehto kuin backendin EMAIL_SEARCH_STATUSES
   const canSearchEmail =
@@ -280,20 +294,48 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           />
         </div>
 
-        {/* AI Draft Button */}
+        {/* Outreach: AI Draft + Call script (estetty jos do not contact) */}
+        {agency.do_not_contact && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+            <Ban size={14} className="shrink-0" />
+            Do not contact
+          </div>
+        )}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setEmailModalOpen(true)}
+            disabled={agency.do_not_contact}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-purple-700 bg-gradient-to-r from-purple-50 to-indigo-50 hover:from-purple-100 hover:to-indigo-100 border-2 border-purple-200 hover:border-purple-300 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Sparkles size={15} />
+            AI Draft
+          </button>
+          <button
+            onClick={() => setCallScriptOpen(true)}
+            disabled={agency.do_not_contact}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 hover:border-emerald-300 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <PhoneCall size={15} />
+            Call script
+          </button>
+        </div>
         <button
-          onClick={() => setEmailModalOpen(true)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-purple-700 bg-gradient-to-r from-purple-50 to-indigo-50 hover:from-purple-100 hover:to-indigo-100 border-2 border-purple-200 hover:border-purple-300 rounded-lg transition-all"
+          onClick={handleToggleDoNotContact}
+          className="w-full text-xs font-medium text-slate-500 hover:text-rose-700 py-1 transition-colors"
         >
-          <Sparkles size={15} />
-          AI Draft
+          {agency.do_not_contact ? 'Allow contact again' : 'Mark do not contact'}
         </button>
       </div>
 
-      {/* Email Modal */}
+      {/* Modals */}
       <EmailDraftModal
         isOpen={emailModalOpen}
         onClose={() => setEmailModalOpen(false)}
+        agency={agency}
+      />
+      <CallScriptModal
+        isOpen={callScriptOpen}
+        onClose={() => setCallScriptOpen(false)}
         agency={agency}
       />
     </motion.div>

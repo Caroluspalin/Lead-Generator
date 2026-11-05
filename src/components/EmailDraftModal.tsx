@@ -51,6 +51,10 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
           }),
         },
       );
+      if (res.status === 409) {
+        setError('This lead is marked do not contact.');
+        return;
+      }
       if (!res.ok) {
         throw new Error(`Server error: ${res.status}`);
       }
@@ -109,6 +113,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
           to: recipientEmail,
           subject: draft.subject,
           body: draft.body,
+          lead_id: agency.id,
         }),
       });
       if (!res.ok) {
