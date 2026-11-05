@@ -54,6 +54,14 @@ class Lead(SQLModel, table=True):
     website_context: Optional[str] = None
     scraped_at: Optional[datetime] = None
 
+    # Places API (New) -tiedot hakuhetkeltä + pisteytys (app/scoring.py)
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    business_status: Optional[str] = None  # OPERATIONAL | CLOSED_TEMPORARILY
+    primary_type: Optional[str] = None
+    maps_url: Optional[str] = None
+    lead_score: Optional[int] = Field(default=None, index=True)
+
     pipeline_status: str = Field(default="Shortlisted", index=True)
     source: str = Field(default="API")  # API tai MANUAL
     notes: Optional[str] = None
@@ -69,6 +77,11 @@ class LeadCreate(SQLModel):
     phone: Optional[str] = None
     website: Optional[str] = None
     website_status: Optional[str] = None
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    business_status: Optional[str] = None
+    primary_type: Optional[str] = None
+    maps_url: Optional[str] = None
     pipeline_status: str = "Shortlisted"
     source: str = "API"
 

@@ -47,6 +47,14 @@
   - Bugi: `PipelineContext.refresh` käytti vanhentunutta `session`-arvoa (tyhjä `useCallback`-deps) → liidilista saattoi jäädä tyhjäksi kirjautumisen jälkeen
   - Bugi: `EmailDraftModal.fetchDraft` `useCallback`-hookiin oikeilla riippuvuuksilla
   - GitHub Actions CI (`.github/workflows/ci.yml`): pytest + npm lint + build push/PR-eventeillä
+- **Phase 12a**: Places API (New) + pisteytys:
+  - Alembic käyttöön (`alembic==1.20.1`): alkumigraatio nykyskeemalle, `create_all` enää vain dev-SQLitessä, migraatiotesti CI:hin
+  - Nearby Search + Place Details → Places API (New) Text Search (`places:searchText`), field mask 10 kenttää + nextPageToken, grid `locationRestriction.rectangle` -ruuduilla, max 3 sivua/ruutu
+  - MAX_SEARCH_CALLS säieturvalliseksi, MAX_DETAIL_CALLS ja ScannedPlace-cache poistettu (migraatio pudottaa taulun)
+  - CLOSED_PERMANENTLY suodatetaan, CLOSED_TEMPORARILY merkitään
+  - `lead_score()` (0–100) omaan moduuliin + yksikkötestit; Lead-tauluun rating, review_count, business_status, primary_type, maps_url, lead_score
+  - `/search`: score-järjestys + `already_saved`-merkintä
+  - UI: score-badge, rating, Maps-linkki, In pipeline, järjestettävät sarakkeet; PipelineCard score + rating
 
 ## Seuraavaksi
 
@@ -56,11 +64,10 @@ Jos PostgREST-pääsy Supabaseen avataan frontille ohi FastAPI-backendin, sovell
 
 - Ota RLS käyttöön: `ALTER TABLE lead ENABLE ROW LEVEL SECURITY;` (sama `email_draft`, `search_history_entry`)
 - Policy per taulu: `CREATE POLICY "users see own rows" ON lead FOR ALL USING (user_id = auth.uid()::text) WITH CHECK (user_id = auth.uid()::text);`
-- `ScannedPlace` pysyy RLS:ttä (tai policy `USING (true)` lukuun, ei kirjoitusta clientille)
 - Huom: `user_id` on tällä hetkellä `str` (Supabase UUID string-muodossa), ei `uuid` — casting `auth.uid()::text` vaaditaan. Vaihtoehto: migroi `user_id` PostgreSQL `uuid`-tyypiksi tuotantoa varten
 - Nyt backend on ainoa reitti dataan → sovellustason suodatus riittää, RLS on defense-in-depth
 
-### Phase 12: Pilvideployaus (Myöhemmin)
+### Phase 13: Pilvideployaus (Myöhemmin)
 
 - Backend deployaus pilveen (Render / Fly.io / Railway)
 - Frontend deployaus (Vercel / Netlify / Cloudflare Pages)

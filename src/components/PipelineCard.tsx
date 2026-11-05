@@ -14,6 +14,7 @@ import {
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
+import { ScoreBadge, RatingDisplay } from './ScoreBadge';
 
 interface PipelineCardProps {
   agency: SavedAgency;
@@ -100,9 +101,10 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           </button>
         </div>
 
-        {/* Website Status Badge */}
-        {agency.website_status && (
-          <div className="flex items-center gap-2">
+        {/* Score, Website Status ja Rating */}
+        <div className="flex flex-wrap items-center gap-2">
+          <ScoreBadge score={agency.lead_score} />
+          {agency.website_status && (
             <span
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${getStatusColor(
                 agency.website_status,
@@ -110,8 +112,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             >
               {agency.website_status}
             </span>
-          </div>
-        )}
+          )}
+          <RatingDisplay rating={agency.rating} reviewCount={agency.review_count} />
+        </div>
       </div>
 
       {/* Contact Info Section */}

@@ -8,7 +8,7 @@ import type { NavTab } from './types/agency';
 import PipelineBoard from './components/PipelineBoard';
 import DashboardView from './components/DashboardView';
 import SearchHistoryView from './components/SearchHistoryView';
-import type { Agency } from './types/agency';
+import type { Agency, SearchResult } from './types/agency';
 import { usePipeline } from './context/PipelineContext';
 import { useAuth } from './context/AuthContext';
 import { apiFetch } from './lib/api';
@@ -66,6 +66,9 @@ function AppShell() {
   const handleSaveLead = async (agency: Agency) => {
     try {
       await addToPipeline(agency);
+      setLeads((prev) =>
+        prev.map((l) => (l.id === agency.id ? { ...l, already_saved: true } : l)),
+      );
       toast.success(`${agency.name} saved to pipeline`);
     } catch {
       toast.error('Failed to save lead');
@@ -101,25 +104,24 @@ function AppShell() {
         throw new Error(`Virhe palvelimella: ${response.statusText}`);
       }
 
-      const raw = (await response.json()) as Array<{
-        name: string;
-        place_id: string;
-        address: string;
-        phone?: string;
-        website?: string;
-        website_status: string;
-        discovery_method: string;
-      }>;
+      const raw = (await response.json()) as SearchResult[];
 
       const mapped: Agency[] = raw.map((item) => ({
         id: item.place_id,
         name: item.name,
         city: ct,
         address: item.address,
-        phone: item.phone,
+        phone: item.phone ?? undefined,
         website: item.website ?? undefined,
         website_status: item.website_status,
         discovery_method: item.discovery_method,
+        rating: item.rating ?? undefined,
+        review_count: item.review_count ?? undefined,
+        business_status: item.business_status ?? undefined,
+        primary_type: item.primary_type ?? undefined,
+        maps_url: item.maps_url ?? undefined,
+        lead_score: item.lead_score,
+        already_saved: item.already_saved,
       }));
 
       setLeads(mapped);

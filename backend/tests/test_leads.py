@@ -6,6 +6,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.scoring import lead_score
+
 
 def test_create_lead_sets_owner_and_defaults(client_a: TestClient) -> None:
     res = client_a.post(
@@ -87,3 +89,29 @@ def test_csv_export_only_own_leads(client_a: TestClient, client_b: TestClient, m
 
 def test_csv_export_requires_valid_ids(client_a: TestClient) -> None:
     assert client_a.get("/leads/export?ids=abc").status_code == 400
+
+
+def test_create_lead_stores_places_fields_and_server_side_score(client_a: TestClient) -> None:
+    res = client_a.post("/leads", json={
+        "name": "Parturi Pisteet",
+        "city": "Kauniainen",
+        "google_place_id": "ChIJ-score",
+        "website_status": "NO WEBSITE",
+        "rating": 4.6,
+        "review_count": 120,
+        "business_status": "OPERATIONAL",
+        "primary_type": "hair_salon",
+        "maps_url": "https://maps.google.com/?cid=9",
+        "lead_score": 1,
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["rating"] == 4.6
+    assert body["review_count"] == 120
+    assert body["business_status"] == "OPERATIONAL"
+    assert body["primary_type"] == "hair_salon"
+    assert body["maps_url"] == "https://maps.google.com/?cid=9"
+    # Clientin lähettämä lead_score ohitetaan, serveri laskee
+    assert body["lead_score"] == lead_score("NO WEBSITE", 4.6, 120, "OPERATIONAL")
+    assert body["lead_score"] > 1
+    assert client_a.get("/leads").json()[0]["lead_score"] == body["lead_score"]

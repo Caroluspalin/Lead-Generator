@@ -130,3 +130,31 @@ def test_search_live_path_wires_service_and_website_analysis(
     assert by_id["ChIJ1"]["review_count"] == 30
     assert by_id["ChIJ2"]["website_status"] == "NO WEBSITE"
     assert client_a.get("/search-history").json()[0]["result_count"] == 2
+
+
+def test_search_results_sorted_by_score_desc(client_a: TestClient) -> None:
+    results = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    scores = [r["lead_score"] for r in results]
+    assert scores == sorted(scores, reverse=True)
+    assert all(0 <= s <= 100 for s in scores)
+    assert results[0]["website_status"] == "NO WEBSITE"
+    temp_closed = next(r for r in results if r["business_status"] == "CLOSED_TEMPORARILY")
+    assert temp_closed["lead_score"] < results[0]["lead_score"]
+
+
+def test_search_marks_already_saved_instead_of_hiding(
+    client_a: TestClient, client_b: TestClient, make_lead: Any
+) -> None:
+    first = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    assert not any(r["already_saved"] for r in first)
+    target = first[2]
+    make_lead(name=target["name"], google_place_id=target["place_id"])
+
+    again = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    assert len(again) == len(first)
+    saved = [r["place_id"] for r in again if r["already_saved"]]
+    assert saved == [target["place_id"]]
+
+    # Toisen käyttäjän pipeline ei vaikuta
+    other = client_b.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()
+    assert not any(r["already_saved"] for r in other)

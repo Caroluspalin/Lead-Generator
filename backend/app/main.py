@@ -25,6 +25,7 @@ from bs4 import BeautifulSoup
 from .database import create_db_and_tables, get_session
 from .models import Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, utc_now
 from .utils.scraper import scrape_website_text
+from .scoring import lead_score
 from .auth import verify_token, AuthUser
 
 # --- CONFIGURATION ---
@@ -124,6 +125,8 @@ class GoogleSearchResult(BaseModel):
     business_status: Optional[str] = None
     primary_type: Optional[str] = None
     maps_url: Optional[str] = None
+    lead_score: int = 0
+    already_saved: bool = False
 
 
 def normalize_place(place: Dict) -> Dict:
@@ -306,8 +309,6 @@ def analyze_website(url: str) -> str:
 
 # --- ENDPOINTS ---
 
-# 1. HAKU (Stateless, Google API)
-# HUOM: Muutettu polku /leads -> /search, jotta /leads jää tietokannalle
 def _mock_places(business_type: str, city: str) -> List[Dict]:
     """Dev-data: vaihtelevat arvot jotta pisteytys ja merkinnät näkyvät UI:ssa ilman API-kutsuja.
 
@@ -342,6 +343,30 @@ def _mock_places(business_type: str, city: str) -> List[Dict]:
     ]
 
 
+def _finalize_search(
+    results: List[GoogleSearchResult],
+    business_type: str,
+    city: str,
+    session: Session,
+    user: AuthUser,
+) -> List[GoogleSearchResult]:
+    """Pisteyttää, merkitsee jo tallennetut, järjestää (paras ensin) ja tallentaa hakuhistorian."""
+    saved_ids = set(session.exec(
+        select(Lead.google_place_id).where(
+            Lead.user_id == user.id,
+            Lead.google_place_id.in_([r.place_id for r in results]),
+        )
+    ).all())
+    for r in results:
+        r.lead_score = lead_score(r.website_status, r.rating, r.review_count, r.business_status)
+        r.already_saved = r.place_id in saved_ids
+    results.sort(key=lambda r: (-r.lead_score, r.name))
+
+    session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
+    session.commit()
+    return results
+
+
 # 1. HAKU (Stateless, Google API)
 # HUOM: Muutettu polku /leads -> /search, jotta /leads jää tietokannalle
 @app.get("/search", response_model=List[GoogleSearchResult])
@@ -354,9 +379,7 @@ async def search_google(
     if not USE_LIVE_GOOGLE:
         places = drop_permanently_closed(_mock_places(business_type, city))
         results = [GoogleSearchResult(**p, discovery_method="DEV-MOCK") for p in places]
-        session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
-        session.commit()
-        return results
+        return _finalize_search(results, business_type, city, session, user)
 
     if "AIza" not in GOOGLE_API_KEY:
         raise HTTPException(500, "API Key missing")
@@ -381,9 +404,7 @@ async def search_google(
         return output
 
     results = await asyncio.to_thread(_blocking_website_analysis)
-    session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
-    session.commit()
-    return results
+    return _finalize_search(results, business_type, city, session, user)
 
 # 2. TALLENNA LIIDI (Database)
 @app.post("/leads", response_model=Lead)
@@ -403,7 +424,9 @@ def create_lead(
         if existing:
             raise HTTPException(status_code=400, detail="Lead already exists")
 
-    db_lead = Lead.model_validate(lead, update={"user_id": user.id})
+    # Pisteet lasketaan serverissä, ei luoteta clientin arvoon
+    score = lead_score(lead.website_status, lead.rating, lead.review_count, lead.business_status)
+    db_lead = Lead.model_validate(lead, update={"user_id": user.id, "lead_score": score})
     session.add(db_lead)
     session.commit()
     session.refresh(db_lead)
