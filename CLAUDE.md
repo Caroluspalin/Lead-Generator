@@ -28,4 +28,10 @@ npm run dev
 
 # Backend (backend/-kansiosta, venv aktiivisena)
 cd backend && source venv/bin/activate && uvicorn app.main:app --reload
+
+# Backend-testit (backend/-kansiosta, venv aktiivisena)
+cd backend && source venv/bin/activate && pip install -r requirements-dev.txt && pytest
+
+# Frontend-tarkistukset (samat kuin CI:ssä)
+npm run lint && npm run build
 ```

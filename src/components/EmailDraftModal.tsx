@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, RefreshCw, Sparkles, Send, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -31,7 +31,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
   const [recipientEmail, setRecipientEmail] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const fetchDraft = async (extraInstruction?: string) => {
+  const fetchDraft = useCallback(async (extraInstruction?: string) => {
     setLoading(true);
     setLoadingPhase(agency.website ? 'scan' : 'generate');
     setError('');
@@ -63,7 +63,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       if (phaseTimer) clearTimeout(phaseTimer);
       setLoading(false);
     }
-  };
+  }, [agency.id, agency.website]);
 
   useEffect(() => {
     if (isOpen) {
@@ -73,7 +73,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       setError('');
       fetchDraft();
     }
-  }, [isOpen, agency.id]);
+  }, [isOpen, fetchDraft]);
 
   const handleRegenerate = () => {
     fetchDraft(instruction);

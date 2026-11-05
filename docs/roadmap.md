@@ -40,6 +40,13 @@
   - `NavTab`-tyyppi siirretty `src/types/agency.ts`:ään, käyttämätön `Navbar.tsx` poistettu
   - ESLint: `react-refresh/only-export-components` ohitettu rivikohtaisesti `useAuth`/`usePipeline`-hookeille
   - `.gitignore`: `!.env.example` → `.env.example`-tiedostot ovat nyt oikeasti versionhallinnassa
+- **Phase 11d**: Testit ja CI:
+  - pytest-testipohja (`backend/tests/`, `requirements-dev.txt`): in-memory SQLite, auth-override user A / user B, kaikki ulkoiset kutsut mockattu
+  - Testit: Leads CRUD + duplikaattiesto, tenant-isolaatio (liidit, draftit, hakuhistoria → 404), /search mock-tila + hakuhistoria, generate-email mockatulla OpenAI:lla + Deep Scan -cache, CSV-export vain omat, grid-pisteet + 50 km säderaja, MAX_SEARCH_CALLS / MAX_DETAIL_CALLS -turvakytkimet
+  - Bugi: PATCH /leads/{id} päivittää nyt `updated_at`-kentän
+  - Bugi: `PipelineContext.refresh` käytti vanhentunutta `session`-arvoa (tyhjä `useCallback`-deps) → liidilista saattoi jäädä tyhjäksi kirjautumisen jälkeen
+  - Bugi: `EmailDraftModal.fetchDraft` `useCallback`-hookiin oikeilla riippuvuuksilla
+  - GitHub Actions CI (`.github/workflows/ci.yml`): pytest + npm lint + build push/PR-eventeillä
 
 ## Seuraavaksi
 

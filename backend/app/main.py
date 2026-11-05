@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
-from .models import Lead, LeadCreate, LeadUpdate, ScannedPlace, SearchHistoryEntry, EmailDraft
+from .models import Lead, LeadCreate, LeadUpdate, ScannedPlace, SearchHistoryEntry, EmailDraft, utc_now
 from .utils.scraper import scrape_website_text
 from .auth import verify_token, AuthUser
 
@@ -533,6 +533,7 @@ def update_lead(
     lead_data = lead_update.model_dump(exclude_unset=True)
     for key, value in lead_data.items():
         setattr(db_lead, key, value)
+    db_lead.updated_at = utc_now()
 
     session.add(db_lead)
     session.commit()

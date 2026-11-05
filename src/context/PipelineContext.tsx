@@ -48,11 +48,11 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     refresh();
-  }, [refresh, session]);
+  }, [refresh]);
 
   const addToPipeline = async (agency: Agency) => {
     const res = await apiFetch(`/leads`, {

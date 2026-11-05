@@ -81,7 +81,7 @@ Globaali cache (ei user_id:tä): place_id on julkista Google-dataa ja per-user c
 | POST | `/leads` | Tallenna liidi kantaan |
 | GET | `/leads` | Hae kaikki tallennetut liidit |
 | GET | `/leads/export?ids=1,2,3` | CSV-export valituille liideille |
-| PATCH | `/leads/{lead_id}` | Päivitä status, notes, phone, website |
+| PATCH | `/leads/{lead_id}` | Päivitä status, notes, phone, website (päivittää `updated_at`) |
 | DELETE | `/leads/{lead_id}` | Poista liidi |
 | POST | `/leads/{lead_id}/generate-email` | AI-sähköpostiluonnos (GPT-4o-mini), tallentaa draftin kantaan |
 | GET | `/leads/{lead_id}/drafts` | Hae liidin tallennetut sähköpostiluonnokset |
@@ -107,6 +107,8 @@ Globaali cache (ei user_id:tä): place_id on julkista Google-dataa ja per-user c
 - **Aikaleimat**: Kaikki datetime-kentät luodaan aikavyöhykkeellisinä (`models.utc_now()` = `datetime.now(timezone.utc)`). Uudet SQLModel-versiot hylkäävät naive-datetimet. Älä käytä `datetime.utcnow()`:ia
 - **Käynnistys**: DB-taulut luodaan FastAPI:n `lifespan`-handlerissa (ei vanhentunutta `@app.on_event("startup")`)
 - **Riippuvuudet**: `backend/requirements.txt` lukittu tarkkoihin versioihin (`==`), testattu Python 3.13:lla puhtaassa venvissä. Päivitä versioita tietoisesti, ei automaattisesti
+- **Testit**: pytest + FastAPI TestClient (`backend/tests/`, dev-riippuvuudet `backend/requirements-dev.txt`). `conftest.py` asettaa env-muuttujat ennen app-importtia (ei `backend/.env`:n oikeita avaimia/kantaa), käyttää in-memory SQLiteä (StaticPool) ja `dependency_overrides`-mekanismia `get_session`- ja `verify_token`-dependencyille. Käyttäjä valitaan `X-Test-User`-headerilla (`client_a` / `client_b` -fixturet) tenant-isolaation testaamiseen. Autouse-fixture estää oikeat kutsut (requests, OpenAI, scraping, SMTP); testit mockaavat tarvitsemansa
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`) push- ja pull_request-eventeillä: backend (Python 3.13, pytest) ja frontend (Node 22, `npm ci` + lint + build). Ei API-avaimia
 - **Tietokanta**: Dev SQLite, tuotanto PostgreSQL (Supabase). `DATABASE_URL` tukee `postgres://`- ja `postgresql://`-muotoja, Postgresissa pool_pre_ping + pool_size=5
 
 ## Ympäristömuuttujat (backend/.env)
@@ -153,6 +155,9 @@ backend/app/models.py          — Lead, LeadCreate, LeadUpdate, ScannedPlace, S
 backend/app/database.py        — DB-yhteys (SQLite dev, Postgres tuotannossa)
 backend/app/auth.py            — Supabase JWT -verifiointi (ES256/RS256 JWKS + HS256 legacy, verify_token FastAPI-dependency)
 backend/app/utils/scraper.py   — Deep Scan: verkkosivun leipätekstin scraping (5s timeout, max 2000 merkkiä)
+backend/tests/conftest.py      — Testifixturet: in-memory SQLite, auth-override (client_a/client_b), verkkoesto
+backend/tests/test_*.py        — Leads CRUD, tenant-isolaatio, haku + AI-email, grid + turvakytkimet
+.github/workflows/ci.yml       — CI: pytest + npm lint + build
 src/lib/supabaseClient.ts      — Supabase-client (VITE_SUPABASE_URL + ANON_KEY)
 src/lib/api.ts                 — apiFetch: lisää Authorization-Bearer-tokenin kaikkiin pyyntöihin
 src/context/AuthContext.tsx    — Sessionin hallinta (signIn/signUp/signOut)
