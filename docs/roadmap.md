@@ -55,6 +55,12 @@
   - `lead_score()` (0–100) omaan moduuliin + yksikkötestit; Lead-tauluun rating, review_count, business_status, primary_type, maps_url, lead_score
   - `/search`: score-järjestys + `already_saved`-merkintä
   - UI: score-badge, rating, Maps-linkki, In pipeline, järjestettävät sarakkeet; PipelineCard score + rating
+- **Phase 12b**: Pisteytyksen kalibrointi ja sivuanalyysi:
+  - Korjaukset: psycopg (v3) -ajuri + `normalize_database_url()`; migraatio `b128a7a9e0bd` muuntaa vanhan Supabasen naiivit TIMESTAMP-sarakkeet TIMESTAMPTZ:ksi (Postgres-testit `TEST_POSTGRES_URL`:lla)
+  - `analyze_website` uusiksi (`app/utils/website_check.py`): selaimen UA, redirectit, 8 s + 1 retry, uudet tilat INSECURE ja UNKNOWN, parkkisivujen tunnistus, `Lead.website_issue` (migraatio `11b71478b845`) UI:hin ja AI-promptiin
+  - Pisteytys: suosio kerrotaan sivun tilan painolla (WEBSITE OK max 20), NO_REVIEWS_PENALTY 15, INSECURE = NOT MOBILE -taso, UNKNOWN neutraali 50
+  - Mukautuva ruudukko: ensin koko kaupunki yhdellä kyselyllä, vain täyttyneet alueet jaetaan 2x2 (max syvyys 2); Kauniainen 10 → 3 kutsua (~$0.32 → ~$0.075)
+  - `/search` palauttaa `usage`-tiedot (kutsut + kustannusarvio), UI näyttää ne hakutulosten yläpuolella
 
 ## Seuraavaksi
 
