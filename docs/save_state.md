@@ -62,6 +62,19 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | result_count | int | Tulosten määrä |
 | searched_at | datetime | UTC-aikaleima |
 
+### SenderProfile
+
+| Kentta | Tyyppi | Huom |
+|---|---|---|
+| id | int, PK, auto | |
+| user_id | str, unique, index | Yksi profiili per käyttäjä |
+| name | str | Pakollinen. Allekirjoitus + "kuka olen" sähköposteissa ja puheluissa |
+| company_name | str? | Tyhjä → esiinnytään omalla nimellä |
+| phone | str? | Allekirjoitukseen |
+| website | str? | Portfolio, allekirjoitukseen |
+| short_intro | str | Pakollinen, esim. "teen nettisivuja paikallisille yrityksille Espoossa" |
+| updated_at | datetime | UTC |
+
 ### EmailDraft
 
 | Kentta | Tyyppi | Huom |
@@ -90,6 +103,8 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | GET | `/leads/{lead_id}/drafts` | Hae liidin tallennetut sähköpostiluonnokset |
 | GET | `/search-history` | 50 viimeisintä hakua |
 | DELETE | `/search-history/{entry_id}` | Poista hakumerkintä |
+| GET | `/sender-profile` | Käyttäjän lähettäjäprofiili (404 jos puuttuu) |
+| PUT | `/sender-profile` | Luo/päivitä profiili (name + short_intro pakollisia, tyhjät valinnaiset → null) |
 | POST | `/send-email` | Lähetä sähköposti SMTP:llä (`to`, `subject`, `body`, valinnainen `lead_id`). 409 jos `lead_id`:n liidi tai vastaanottajaosoite kuuluu käyttäjän do_not_contact-liidille |
 
 ## Tekniset valinnat
@@ -109,8 +124,12 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
   - `UNKNOWN`: 401/403/429, muu 4xx, Cloudflare/DDoS-haastesivu (tunnistus vain `<title>`/`cf-mitigated`-headerista — reCAPTCHA ja Cloudflaren challenge-platform-skripti ovat yleisiä toimivillakin sivuilla) tai timeout uudelleenyrityksen jälkeen. Ei koskaan pisteytetä rikkinäiseksi, eikä AI-meili saa väittää sivua rikki
   - `WEBSITE OK`
 - **Frontend timeout**: 60s AbortController, dynaaminen latausteksti sekuntilaskurilla
-- **AI-sähköpostit**: OpenAI GPT-4o-mini (`OPENAI_MODEL`), suomenkielinen system prompt, instruction-parametri iteroinnille, draftit tallentuvat kantaan. `describe_website_problem(status, issue)` muuntaa teknisen `website_issue`:n selkokieliseksi havainnoksi (`ISSUE_DESCRIPTIONS`, esim. DNS → "Googlen kautta löytyvä nettisivuosoite ei enää avaudu", SSL → "selain näyttää kävijöille turvallisuusvaroituksen", social → "vain somesivu"); malli saa vain selkokielisen version. UNKNOWN / WEBSITE OK → "ei varmistettua ongelmaa". System prompt kieltää jargonin, liioittelun ja pelottelun. `OPT_OUT_LINE` lisätään koodissa jokaisen viestin loppuun (ei luoteta malliin)
-- **Puhelinskripti**: sama malli ja sama selkokielinen havainto; rakenne Esittely ([Nimesi]/[Yrityksesi]) → Havainto → Kysymys → Ehdotus (15 min tapaaminen/demo) → "ei kiinnosta" -vastaus. Käyttää Deep Scan -kontekstia vain jos se on jo tallessa
+- **AI-sähköpostit**: malli `EMAIL_MODEL` (oletus gpt-4o-mini) + valinnainen `EMAIL_REASONING_EFFORT`; `chat_completion_params()` käyttää `max_completion_tokens`-parametria ja jättää `temperature`:n pois kun reasoning effort ≠ none (OpenAI: GPT-6-malleilla temperature vain effort none -tilassa), reasoningille +4000 tokenin vara. Vaatii lähettäjäprofiilin (428 jos puuttuu). Draftit tallentuvat kantaan.
+  - Prompti (`EMAIL_SYSTEM_PROMPT`): te-muoto johdonmukaisesti; 1. lause = kuka olen (profiili) + miten löysin yrityksen (toimiala + kaupunki); havainto omana varmana havaintona ilman "saattaa"-arvailua; yksi lause miksi sillä on väliä (`WHY_IT_MATTERS`-vihje, ei pelottelua); pieni konkreettinen tarjous (`OFFERS`: NO WEBSITE → ilmainen luonnos, BROKEN → katson mistä vika johtuu, INSECURE → "korjaus on yleensä nopea", NOT MOBILE → näytän miltä näyttäisi puhelimella, muut → `DEFAULT_OFFER`); jäänmurtaja Deep Scanista vain jos jotain konkreettista ja erityistä; max ~90 sanaa (`MAX_EMAIL_WORDS`)
+  - Havainto: `describe_website_problem(status, issue)` → te-muotoinen havainto (`ISSUE_DESCRIPTIONS`, esim. DNS → "Googlen kautta löytyvä nettisivuosoitteenne ei avaudu", SSL → "kun avasin sivunne, selain varoitti, ettei yhteys ole turvallinen", social → "löysin teidät vain Facebookista"); malli ei näe teknistä syytä. UNKNOWN / WEBSITE OK → "ei varmistettua ongelmaa"
+  - Koodissa: mallin oma lopputervehdys/[Nimesi] poistetaan (`strip_model_sign_off`), sitten "Terveisin," + allekirjoitus profiilista (`build_signature`: nimi, yritys, puhelin, sivusto) + `OPT_OUT_LINE`. Subject `email_subject()`: lyhyt ja luonnollinen ("Kysymys nettisivuista", "Löysin teidät Facebookista", "Nettisivunne ei aukea", "Huomasin jotain sivuistanne", "Sivunne puhelimella", "Kysymys nettisivuistanne")
+  - Laatuvahti `check_generated_text()` lokittaa WARNING-tason varoituksen (ei estä): kielletyt sanat (`FORBIDDEN_PATTERNS`: ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen, digitaalinen läsnäolo, seuraavalle/uudelle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia, liiketoiminnan kasvu, keskustella tarkemmin, saattaa), yli ~110 sanaa, euromäärät
+- **Puhelinskripti** (`CALL_SCRIPT_SYSTEM_PROMPT`): sama malli, profiili ja havainto; rakenne 1. Avaus (nimi + esittely + "Onko teillä hetki, vai soitanko myöhemmin?") → 2. Havainto (yksi arkikielinen lause) → 3. Tarjous + yksi suora kysymys (ei konsulttimaisia kysymyksiä) → 4. Jos "ei kiinnosta": täsmälleen "Selvä, kiitos ajastanne, mukavaa päivää!" → 5. Jos kysyvät hintaa: riippuu tarpeesta + ehdota luonnosta/tapaamista, ei euromääriä. Ei scrapingia eikä Deep Scan -sisältöä
 - **Do not contact**: `Lead.do_not_contact` estää generate-email, generate-call-script ja send-email (409). UI: "Mark do not contact" / "Allow contact again" PipelineCardissa, AI Draft ja Call script disabloitu
 - **Yhteystietohaku** (`app/utils/contact_finder.py`, `find_contact_email(website) -> ContactEmail(email, source) | None`): `website_check.fetch_page()` samoilla UA/timeout/retry/SSL-säännöillä kuin sivuanalyysi. Etusivu + max 3 samalla sivustolla olevaa linkkiä, joiden teksti tai polku sisältää `CONTACT_KEYWORDS` (yhteystiedot, ota-yhteytta, contact, kontakt...). Ei muuta crawlausta. Poimii mailto-linkit, tekstin, peitetyt muodot (`(at)`, `[at]`, `{at}`, `(ät)`, `(dot)`, `(piste)`) ja Cloudflare Email Protectionin. Scriptit/style ohitetaan; kuvatiedostonimet, esimerkkiosoitteet (example.*, domain.fi, nimi@...), noreply ja sentry/wixpress pois. Järjestys: oma domain > yleinen osoite (`GENERIC_LOCAL_PARTS`: info, asiakaspalvelu, myynti...) > löytöjärjestys. Ei arvailua eikä ulkoisia palveluita. Ajetaan aina taustasäikeessä (`asyncio.to_thread`); POST /leads käyttää `BackgroundTasks`:ia, jotta tallennus ei odota (pahimmillaan 4 sivua × 8 s × 2)
 - **SMTP-lähetys**: Suora sähköpostin lähetys EmailDraftModalista, konfiguroidaan .env:ssä
@@ -121,7 +140,7 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 - **Multi-tenancy**: Lead, EmailDraft ja SearchHistoryEntry sisältävät `user_id`-kentän (Supabase UUID, indexed). Kaikki endpointit suodattavat `user_id == current_user.id`: GET-listat `.where(user_id)`, PATCH/DELETE/single-GET palauttavat 404:n (ei 403:a) jos toisen käyttäjän resurssia yritetään käyttää — ei paljasta resurssien olemassaoloa. POST-operaatiot asettavat `user_id` serverissä `AuthUser.id`:stä (ei clientin syötteestä). `Lead.google_place_id` ei ole enää globaalisti unique — `UniqueConstraint("google_place_id", "user_id")` sallii saman yrityksen useammalle käyttäjälle.
 - **Aikaleimat**: Kaikki datetime-kentät luodaan aikavyöhykkeellisinä (`models.utc_now()` = `datetime.now(timezone.utc)`). Uudet SQLModel-versiot hylkäävät naive-datetimet. Älä käytä `datetime.utcnow()`:ia
 - **Käynnistys**: FastAPI:n `lifespan`-handler kutsuu `create_db_and_tables()`, joka ajaa `create_all`:n vain dev-SQLitessä
-- **Migraatiot (Alembic)**: `backend/alembic.ini` + `backend/migrations/` (`render_as_batch=True` SQLiteä varten, URL `app.database.engine`:stä eli `DATABASE_URL`:sta). Postgresissa skeema vain `alembic upgrade head`:lla. Ketju: `5c3252fb0873` alkuskeema → `a37cda0e085d` ScannedPlace pois → `ab965e378f8b` Lead Places-kentät + lead_score → `b128a7a9e0bd` datetime-sarakkeet TIMESTAMPTZ:ksi (vain Postgres, vain naiivit sarakkeet; SQLite no-op) → `11b71478b845` Lead.website_issue → `af5c0e76b864` Lead.email, email_source, do_not_contact (server_default false olemassa oleville riveille). `tests/test_migrations.py` ajaa upgrade + `alembic check` + downgrade/upgrade-kierroksen, joten unohtunut migraatio kaataa CI:n
+- **Migraatiot (Alembic)**: `backend/alembic.ini` + `backend/migrations/` (`render_as_batch=True` SQLiteä varten, URL `app.database.engine`:stä eli `DATABASE_URL`:sta). Postgresissa skeema vain `alembic upgrade head`:lla. Ketju: `5c3252fb0873` alkuskeema → `a37cda0e085d` ScannedPlace pois → `ab965e378f8b` Lead Places-kentät + lead_score → `b128a7a9e0bd` datetime-sarakkeet TIMESTAMPTZ:ksi (vain Postgres, vain naiivit sarakkeet; SQLite no-op) → `11b71478b845` Lead.website_issue → `af5c0e76b864` Lead.email, email_source, do_not_contact (server_default false olemassa oleville riveille) → `e0c769279b9e` SenderProfile-taulu. `tests/test_migrations.py` ajaa upgrade + `alembic check` + downgrade/upgrade-kierroksen, joten unohtunut migraatio kaataa CI:n
 - **Olemassa oleva Supabase-kanta** (luotu `create_all`:lla ennen Alembicia): aja kerran `alembic stamp 5c3252fb0873`, sitten `alembic upgrade head`, sitten `alembic check`. Vanhat taulut luotiin `timestamp without time zone` -sarakkeilla; migraatio `b128a7a9e0bd` muuntaa ne `timestamptz`:ksi (`USING col AT TIME ZONE 'UTC'`, arvot olivat naiiveja UTC-aikoja). Migraatio tarkistaa `information_schema`:sta ja muuntaa vain naiivit sarakkeet, koska jo-tz-sarakkeille sama USING siirtäisi arvoja session aikavyöhykkeen verran. Downgrade palauttaa `timestamp without time zone`
 - **Postgres-ajuri**: psycopg (v3). `normalize_database_url()` muuttaa `postgres://` ja `postgresql://` muotoon `postgresql+psycopg://`. `engine_options()` antaa Postgresille `connect_args={"prepare_threshold": None}`: Supabasen transaction pooler (portti 6543) ei tue prepared statementeja, joita psycopg3 muuten alkaa käyttää 5. toistetun kyselyn jälkeen
 - **Postgres-migraatiotestit**: `TEST_POSTGRES_URL=postgresql://... pytest tests/test_migrations.py` ajaa legacy-kanta-simulaation (naiivit sarakkeet, session TZ Europe/Helsinki) ja tuoreen kannan tarkistuksen. Ilman muuttujaa testit ohitetaan (CI). **Testit tyhjentävät `public`-skeeman — älä koskaan osoita niitä Supabaseen**, vain paikalliseen kertakäyttökantaan (esim. `docker run --rm -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:15`)
@@ -181,6 +200,8 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 GOOGLE_API_KEY=...
 USE_LIVE_GOOGLE=false
 OPENAI_API_KEY=...
+EMAIL_MODEL=gpt-4o-mini        # suositus: gpt-6.1-terra (gpt-4o-mini poistuu 14.1.2027)
+EMAIL_REASONING_EFFORT=        # GPT-6-malleille: none | low | medium | high (suositus terralle: low)
 SMTP_HOST=         # esim. smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=
@@ -230,7 +251,8 @@ src/components/CallScriptModal.tsx — Puhelinskriptimodaali (generoi, regeneroi
 src/components/DashboardView.tsx — Dashboard-analytiikka (KPI, funnel, website status)
 src/components/SearchHistoryView.tsx — Hakuhistoria + re-search
 src/components/AddBusinessModal.tsx — Manuaalinen liidin lisäys
-src/components/SidebarNav.tsx   — Sivupalkki-navigaatio
+src/components/SidebarNav.tsx   — Sivupalkki-navigaatio (search | pipeline | dashboard | history | settings)
+src/components/SettingsView.tsx — Lähettäjäprofiilin lomake (GET/PUT /sender-profile)
 src/components/LeadTable.tsx    — Hakutulosten taulukko (järjestettävät sarakkeet, score, rating, Maps, In pipeline, website_issue)
 src/components/ScoreBadge.tsx   — ScoreBadge + RatingDisplay (LeadTable ja PipelineCard)
 src/types/agency.ts            — SearchResponse, SearchUsage, SearchResult, Agency, SavedAgency, WebsiteStatus, BusinessStatus, PipelineStatus, NavTab

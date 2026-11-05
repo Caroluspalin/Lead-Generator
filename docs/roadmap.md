@@ -68,6 +68,14 @@
   - Sähköposti: havaittu ongelma selkokielellä (ei jargonia, ei pelottelua), opt-out-rivi aina lopussa
   - do_not_contact estää draftin, puhelinskriptin ja lähetyksen (409)
   - `POST /leads/{id}/generate-call-script` + CallScriptModal
+- **Phase 12d**: Sähköpostit ja puhelinskriptit, jotka kuulostavat ihmiseltä:
+  - SenderProfile (name, company_name, phone, website, short_intro) per käyttäjä, GET/PUT /sender-profile, Settings-näkymä; migraatio `e0c769279b9e`
+  - Allekirjoitus koodissa profiilista + opt-out; 428 jos profiili puuttuu
+  - Sähköpostiprompti uusiksi: te-muoto, kuka olen + miten löysin, varma havainto, miksi väliä, pieni konkreettinen tarjous, jäänmurtaja vain jos konkreettinen, max ~90 sanaa, luonnollinen subject
+  - Kielletyt sanat + pituus + hinta -varoitukset lokiin (`check_generated_text`)
+  - Puhelinskripti uusiksi: "onko teillä hetki", suora tarjous, kiinteä "ei kiinnosta" -vastaus, hintakysymys ilman euromääriä
+  - Malli konfiguroitavaksi (`EMAIL_MODEL`, `EMAIL_REASONING_EFFORT`); live-vertailu gpt-4o-mini vs gpt-6.1-terra
+  - Korjaus: Alembic `fileConfig(disable_existing_loggers=False)`
 
 ## Seuraavaksi
 
