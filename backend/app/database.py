@@ -37,10 +37,12 @@ def get_session():
         yield session
 
 
-def create_db_and_tables():
-    """Luo taulut tietokantaan automaattisesti kaynnistyksessa.
+def create_db_and_tables() -> None:
+    """Dev-SQLite: luo puuttuvat taulut käynnistyksessä kuten ennenkin.
 
-    Toimii tyhjaan Postgres-kantaan: SQLModel.metadata.create_all lisaa
-    vain puuttuvat taulut, ei muuta olemassaolevia.
+    Postgresissa (tuotanto) skeema hallitaan vain Alembicilla (`alembic upgrade head`),
+    koska create_all ei muuta olemassa olevia tauluja eikä jätä migraatiohistoriaa.
     """
+    if not _is_sqlite:
+        return
     SQLModel.metadata.create_all(engine)

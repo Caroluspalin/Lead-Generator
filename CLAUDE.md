@@ -18,7 +18,8 @@
 - Backend: `asyncio.to_thread()` kaikille blokkaaville kutsuille. Älä blokkaa event loopia.
 - UI-kieli: englanti. Koodikommentit: suomi tai englanti, ei väliä.
 - Turvakytkimet (MAX_SEARCH_CALLS, MAX_DETAIL_CALLS) ovat ehdottomia rajoja. Älä nosta niitä ilman lupaa.
-- Poista `agency_hunter.db` ennen uudelleenkäynnistystä jos malleja on muutettu (ei Alembicia).
+- Skeemamuutokset Alembicilla: jokaisesta mallimuutoksesta uusi migraatio (`alembic revision --autogenerate -m "..."`), tarkista generoitu tiedosto käsin ennen committia. Tuotannossa (Postgres) skeema luodaan ja päivitetään vain `alembic upgrade head` -komennolla; `create_db_and_tables` toimii vain dev-SQLitessä.
+- Dev-SQLite: aja `alembic upgrade head`. Jos kanta on luotu `create_all`:lla (ei `alembic_version`-taulua), joko poista `agency_hunter.db` ja aja `alembic upgrade head`, tai `alembic stamp head` jos skeema vastaa jo malleja.
 
 ## Komennot
 
@@ -28,6 +29,12 @@ npm run dev
 
 # Backend (backend/-kansiosta, venv aktiivisena)
 cd backend && source venv/bin/activate && uvicorn app.main:app --reload
+
+# Tietokantamigraatiot (backend/-kansiosta, venv aktiivisena, DATABASE_URL .env:stä)
+cd backend && alembic upgrade head                              # aja kaikki migraatiot
+cd backend && alembic revision --autogenerate -m "kuvaus"       # uusi migraatio mallimuutoksesta
+cd backend && alembic check                                     # mallit vs. kanta, ei saa löytää eroja
+cd backend && alembic downgrade -1                              # peru viimeisin migraatio
 
 # Backend-testit (backend/-kansiosta, venv aktiivisena)
 cd backend && source venv/bin/activate && pip install -r requirements-dev.txt && pytest
