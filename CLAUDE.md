@@ -17,7 +17,7 @@
 - Säilytä nykyinen tyyli: Tailwind-luokat inline, framer-motion animaatiot, sonner-toastit.
 - Backend: `asyncio.to_thread()` kaikille blokkaaville kutsuille. Älä blokkaa event loopia.
 - UI-kieli: englanti. Koodikommentit: suomi tai englanti, ei väliä.
-- Turvakytkimet (MAX_SEARCH_CALLS, MAX_DETAIL_CALLS) ovat ehdottomia rajoja. Älä nosta niitä ilman lupaa.
+- Turvakytkin MAX_SEARCH_CALLS on ehdoton raja (Geocoding + Places Text Search -kutsut per haku). Älä nosta sitä ilman lupaa. Älä lisää kenttiä Places API:n field maskiin (`PLACES_FIELD_MASK`) ilman lupaa: field mask määrää hinnan.
 - Skeemamuutokset Alembicilla: jokaisesta mallimuutoksesta uusi migraatio (`alembic revision --autogenerate -m "..."`), tarkista generoitu tiedosto käsin ennen committia. Tuotannossa (Postgres) skeema luodaan ja päivitetään vain `alembic upgrade head` -komennolla; `create_db_and_tables` toimii vain dev-SQLitessä.
 - Dev-SQLite: aja `alembic upgrade head`. Jos kanta on luotu `create_all`:lla (ei `alembic_version`-taulua), joko poista `agency_hunter.db` ja aja `alembic upgrade head`, tai `alembic stamp head` jos skeema vastaa jo malleja.
 

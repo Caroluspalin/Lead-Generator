@@ -34,14 +34,6 @@ class EmailDraft(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
-class ScannedPlace(SQLModel, table=True):
-    # Globaali cache Google Details API -kutsujen deduplikaatiolle.
-    # Ei user_id:ta — place_id on julkista dataa ja per-user cache kaksinkertaistaisi API-laskun.
-    id: Optional[int] = Field(default=None, primary_key=True)
-    google_place_id: str = Field(index=True, unique=True)
-    scanned_at: datetime = Field(default_factory=utc_now)
-
-
 class Lead(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("google_place_id", "user_id", name="uq_lead_place_user"),

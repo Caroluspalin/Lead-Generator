@@ -4,14 +4,14 @@ import csv
 import io
 import logging
 import smtplib
-import time
+import threading
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import AsyncIterator, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
-from .models import Lead, LeadCreate, LeadUpdate, ScannedPlace, SearchHistoryEntry, EmailDraft, utc_now
+from .models import Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, utc_now
 from .utils.scraper import scrape_website_text
 from .auth import verify_token, AuthUser
 
@@ -49,18 +49,31 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 
 # Safety Limits
-MAX_SEARCH_CALLS = 15    # Geocode + Nearby Search + paginointi yhteensä
-MAX_DETAIL_CALLS = 40    # Place Details -kutsut (1 per uniikki yritys)
+MAX_SEARCH_CALLS = 15      # Geocode + Text Search -sivut yhteensä, ehdoton raja per haku
 GRID_SIZE = 3              # 3x3 = 9 ruutua
-GRID_OVERLAP_FACTOR = 1.2  # 20% limittyminen ruutujen välillä
+MAX_PAGES_PER_CELL = 3     # Text Search (New): max 20/sivu, max 60 tulosta per kysely
 MAX_WORKERS_WEBSITE = 5
 
 # URL Config
-BASE_URL = "https://maps.googleapis.com/maps/api/place"
-TEXT_SEARCH_URL = f"{BASE_URL}/textsearch/json"
-NEARBY_SEARCH_URL = f"{BASE_URL}/nearbysearch/json"
-DETAILS_URL = f"{BASE_URL}/details/json"
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+
+# Field mask määrää hinnan (korkein SKU laskutetaan koko pyynnöstä): rating, userRatingCount,
+# websiteUri ja nationalPhoneNumber ovat Text Search Enterprise -kenttiä. Älä lisää kenttiä
+# tarkistamatta hinnoittelua.
+PLACES_FIELD_MASK = ",".join([
+    "places.id",
+    "places.displayName",
+    "places.formattedAddress",
+    "places.nationalPhoneNumber",
+    "places.websiteUri",
+    "places.rating",
+    "places.userRatingCount",
+    "places.businessStatus",
+    "places.primaryType",
+    "places.googleMapsUri",
+    "nextPageToken",
+])
 
 # Load USE_LIVE_GOOGLE from environment (defaults to False)
 USE_LIVE_GOOGLE = os.getenv("USE_LIVE_GOOGLE", "False").lower() == "true"
@@ -106,207 +119,174 @@ class GoogleSearchResult(BaseModel):
     website: Optional[str] = None
     website_status: str
     discovery_method: str
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    business_status: Optional[str] = None
+    primary_type: Optional[str] = None
+    maps_url: Optional[str] = None
+
+
+def normalize_place(place: Dict) -> Dict:
+    """Places API (New) -vastauksen place -> sisäinen dict (GoogleSearchResultin kentät)."""
+    return {
+        "place_id": place.get("id", ""),
+        "name": (place.get("displayName") or {}).get("text", ""),
+        "address": place.get("formattedAddress", ""),
+        "phone": place.get("nationalPhoneNumber"),
+        "website": place.get("websiteUri"),
+        "rating": place.get("rating"),
+        "review_count": place.get("userRatingCount"),
+        "business_status": place.get("businessStatus"),
+        "primary_type": place.get("primaryType"),
+        "maps_url": place.get("googleMapsUri"),
+    }
+
+
+def drop_permanently_closed(places: List[Dict]) -> List[Dict]:
+    # CLOSED_TEMPORARILY jätetään näkyviin (merkitään UI:ssa ja pisteytyksessä)
+    return [p for p in places if p.get("business_status") != "CLOSED_PERMANENTLY"]
+
 
 class GooglePlacesService:
     def __init__(self, api_key: str):
         self.key = api_key
         self._search_call_count = 0
-        self._detail_call_count = 0
+        self._lock = threading.Lock()
 
-    def _make_request(self, url: str, params: Dict, *, call_type: str = "search") -> Dict:
-        """Tekee API-kutsun ja tarkistaa turvarajan ennen kutsua.
-
-        call_type: "search" (geocode, nearby/text search) tai "detail" (place details).
-        """
-        if call_type == "search":
+    def _reserve_call(self) -> bool:
+        """Varaa yhden kutsun budjetista. Lukko pitää rajan myös rinnakkaisissa kutsuissa."""
+        with self._lock:
             if self._search_call_count >= MAX_SEARCH_CALLS:
                 logger.warning(f"Search-kutsujen raja ({MAX_SEARCH_CALLS}) saavutettu — ohitetaan kutsu")
-                return {}
+                return False
             self._search_call_count += 1
-        elif call_type == "detail":
-            if self._detail_call_count >= MAX_DETAIL_CALLS:
-                logger.warning(f"Detail-kutsujen raja ({MAX_DETAIL_CALLS}) saavutettu — ohitetaan kutsu")
-                return {}
-            self._detail_call_count += 1
+            return True
 
-        params["key"] = self.key
+    @property
+    def calls_used(self) -> int:
+        with self._lock:
+            return self._search_call_count
+
+    def _get_json(self, url: str, params: Dict) -> Dict:
+        if not self._reserve_call():
+            return {}
         try:
-            r = requests.get(url, params=params, timeout=10)
+            r = requests.get(url, params={**params, "key": self.key}, timeout=10)
             r.raise_for_status()
             return r.json()
         except Exception as e:
-            logger.error(f"API Error: {e}")
+            logger.error(f"API Error ({url}): {e}")
+            return {}
+
+    def _post_json(self, url: str, body: Dict) -> Dict:
+        if not self._reserve_call():
+            return {}
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": self.key,
+            "X-Goog-FieldMask": PLACES_FIELD_MASK,
+        }
+        try:
+            r = requests.post(url, json=body, headers=headers, timeout=10)
+            if r.status_code >= 400:
+                # Places API (New) palauttaa syyn JSON-bodyssa (esim. API ei käytössä projektissa)
+                logger.error(f"Places API {r.status_code}: {r.text[:500]}")
+                return {}
+            return r.json()
+        except Exception as e:
+            logger.error(f"API Error ({url}): {e}")
             return {}
 
     # --- Grid-haku ---
 
     def get_city_bounds(self, city_name: str) -> Optional[Dict]:
-        """Hakee kaupungin viewport-rajat Geocode API:lla (1 search-kutsu)."""
-        data = self._make_request(GEOCODE_URL, {"address": f"{city_name}, Finland"}, call_type="search")
+        """Hakee kaupungin viewport-rajat Geocoding API:lla (1 search-kutsu)."""
+        data = self._get_json(GEOCODE_URL, {"address": f"{city_name}, Finland"})
         if not data.get("results"):
             return None
         return data["results"][0]["geometry"].get("viewport")
 
     @staticmethod
-    def generate_grid_points(viewport: Dict, grid_size: int = GRID_SIZE) -> tuple:
-        """Jakaa viewportin grid_size x grid_size ruudukkoon.
+    def generate_grid_cells(viewport: Dict, grid_size: int = GRID_SIZE) -> List[Dict]:
+        """Jakaa viewportin grid_size x grid_size suorakaiteeseen (locationRestriction.rectangle).
 
-        Palauttaa (points, radius_meters):
-          - points: [{"lat": float, "lng": float}, ...]
-          - radius_meters: dynaaminen säde metreinä, laskettu viewportista
+        Ruudut eivät limity: locationRestriction on tiukka raja, joten vierekkäiset
+        suorakaiteet kattavat koko viewportin ilman aukkoja.
         """
-        import math
-
         ne = viewport["northeast"]
         sw = viewport["southwest"]
-
-        # Lasketaan viewportin fyysinen koko metreinä (Haversine-approksimaatio)
-        lat_mid = (ne["lat"] + sw["lat"]) / 2
-        lat_span_m = (ne["lat"] - sw["lat"]) * 111_320  # 1° lat ≈ 111.32 km
-        lng_span_m = (ne["lng"] - sw["lng"]) * 111_320 * math.cos(math.radians(lat_mid))
-
-        # Yhden ruudun diagonaalin puolikas = säde joka peittää ruudun
-        # Kerrotaan GRID_OVERLAP_FACTOR:lla niin ruudut limittyvät hieman
-        cell_lat_m = lat_span_m / grid_size
-        cell_lng_m = lng_span_m / grid_size
-        cell_diagonal = math.sqrt(cell_lat_m**2 + cell_lng_m**2)
-        radius_m = int((cell_diagonal / 2) * GRID_OVERLAP_FACTOR)
-
-        # Google Nearby Search max radius = 50 000 m
-        radius_m = min(radius_m, 50_000)
-
         lat_step = (ne["lat"] - sw["lat"]) / grid_size
         lng_step = (ne["lng"] - sw["lng"]) / grid_size
 
-        points = []
+        cells: List[Dict] = []
         for row in range(grid_size):
             for col in range(grid_size):
-                center_lat = sw["lat"] + lat_step * (row + 0.5)
-                center_lng = sw["lng"] + lng_step * (col + 0.5)
-                points.append({"lat": center_lat, "lng": center_lng})
+                cells.append({
+                    "low": {
+                        "latitude": sw["lat"] + lat_step * row,
+                        "longitude": sw["lng"] + lng_step * col,
+                    },
+                    "high": {
+                        "latitude": sw["lat"] + lat_step * (row + 1),
+                        "longitude": sw["lng"] + lng_step * (col + 1),
+                    },
+                })
+        return cells
 
-        return points, radius_m
+    def search_cell(self, rectangle: Dict, keyword: str) -> List[Dict]:
+        """Text Search (New) yhdelle ruudulle, max MAX_PAGES_PER_CELL sivua."""
+        base_body: Dict = {
+            "textQuery": keyword,
+            "locationRestriction": {"rectangle": rectangle},
+            "pageSize": 20,
+            "languageCode": "fi",
+            "regionCode": "FI",
+        }
+        all_places: List[Dict] = []
+        page_token: Optional[str] = None
 
-    def search_nearby_pagination(self, lat: float, lng: float, keyword: str, radius: int) -> List[Dict]:
-        """Nearby Search yhdelle ruudukon pisteelle, max 3 sivua paginointia."""
-        all_results: List[Dict] = []
-        next_token = None
+        for _ in range(MAX_PAGES_PER_CELL):
+            # Googlen ehto: sivutuspyynnön muiden parametrien pitää olla identtiset
+            body = {**base_body, "pageToken": page_token} if page_token else base_body
+            data = self._post_json(PLACES_TEXT_SEARCH_URL, body)
+            all_places.extend(data.get("places", []))
 
-        for _ in range(3):  # Googlen max 3 sivua = 60 tulosta
-            params: Dict = {
-                "location": f"{lat},{lng}",
-                "radius": radius,
-                "keyword": keyword,
-            }
-            if next_token:
-                params["pagetoken"] = next_token
-                time.sleep(2)  # Google vaatii ~2s viiveen next_page_token:lle
-
-            data = self._make_request(NEARBY_SEARCH_URL, params, call_type="search")
-            results = data.get("results", [])
-            all_results.extend(results)
-
-            next_token = data.get("next_page_token")
-            if not next_token:
+            page_token = data.get("nextPageToken")
+            if not page_token:
                 break
 
-        return all_results
+        return all_places
 
-    def search_grid(self, city: str, keyword: str) -> Dict[str, Dict]:
-        """Suorittaa koko grid-haun: geocode → ruudukko → nearby search → deduplikaatio.
-
-        Palauttaa: {place_id: place_dict} — deduplikoitu dict.
-        """
+    def search_grid(self, city: str, keyword: str) -> List[Dict]:
+        """Geocode → ruudukko → Text Search per ruutu → deduplikaatio → suljettujen suodatus."""
         viewport = self.get_city_bounds(city)
         if not viewport:
             logger.warning(f"Kaupungin '{city}' viewport-rajoja ei löytynyt")
-            return {}
+            return []
 
-        grid_points, radius_m = self.generate_grid_points(viewport)
-        logger.info(
-            f"Grid-haku: {len(grid_points)} ruutua, säde {radius_m}m, "
-            f"kaupunki='{city}', keyword='{keyword}'"
-        )
+        cells = self.generate_grid_cells(viewport)
+        logger.info(f"Grid-haku: {len(cells)} ruutua, kaupunki='{city}', keyword='{keyword}'")
 
-        unique_places: Dict[str, Dict] = {}
-
-        for i, point in enumerate(grid_points):
-            results = self.search_nearby_pagination(point["lat"], point["lng"], keyword, radius_m)
-            before = len(unique_places)
-            for place in results:
-                pid = place.get("place_id")
-                if pid:
-                    unique_places[pid] = place  # Deduplikaatio: sama place_id ylikirjoittaa
-            after = len(unique_places)
+        unique: Dict[str, Dict] = {}
+        for i, cell in enumerate(cells):
+            places = self.search_cell(cell, keyword)
+            before = len(unique)
+            for place in places:
+                normalized = normalize_place(place)
+                if normalized["place_id"]:
+                    unique[normalized["place_id"]] = normalized
             logger.info(
-                f"  Ruutu {i+1}/{len(grid_points)}: "
-                f"{len(results)} tulosta, {after - before} uutta "
-                f"(yhteensä {after} uniikkia)"
+                f"  Ruutu {i+1}/{len(cells)}: {len(places)} tulosta, "
+                f"{len(unique) - before} uutta (yhteensä {len(unique)} uniikkia)"
             )
 
+        results = drop_permanently_closed(list(unique.values()))
         logger.info(
-            f"Grid-haku valmis: {len(unique_places)} uniikkia yritystä, "
-            f"search-kutsuja käytetty: {self._search_call_count}/{MAX_SEARCH_CALLS}"
+            f"Grid-haku valmis: {len(results)} yritystä "
+            f"({len(unique) - len(results)} pysyvästi suljettua pois), "
+            f"kutsuja käytetty: {self.calls_used}/{MAX_SEARCH_CALLS}"
         )
-        return unique_places
-
-    # --- Details ---
-
-    def get_place_details(self, place_id: str) -> Dict:
-        """Hakee yksittäisen paikan lisätiedot (1 detail-kutsu)."""
-        fields = "name,formatted_address,formatted_phone_number,website"
-        return self._make_request(
-            DETAILS_URL, {"place_id": place_id, "fields": fields}, call_type="detail"
-        ).get("result", {})
-
-    def enrich_with_details(self, unique_places: Dict[str, Dict], session: Session) -> List[Dict]:
-        """Hakee Details-datan max MAX_DETAIL_CALLS yritykselle rinnakkain.
-
-        Ohittaa yritykset jotka on jo skannattu (ScannedPlace-taulu).
-        Uudet skannatut tallennetaan kantaan kutsun jälkeen.
-        """
-        already_scanned = set(
-            row.google_place_id
-            for row in session.exec(select(ScannedPlace)).all()
-        )
-
-        all_ids = list(unique_places.keys())
-        new_ids = [pid for pid in all_ids if pid not in already_scanned]
-        skipped = len(all_ids) - len(new_ids)
-
-        if skipped:
-            logger.info(f"ScannedPlace-cache: ohitetaan {skipped} jo skannattua yritystä")
-
-        place_ids = new_ids[:MAX_DETAIL_CALLS]
-
-        if len(new_ids) > MAX_DETAIL_CALLS:
-            logger.warning(
-                f"Uusia skannaamattomia yrityksiä {len(new_ids)}, "
-                f"haetaan Details vain ensimmäiselle {MAX_DETAIL_CALLS}:lle"
-            )
-
-        enriched: List[Dict] = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(self.get_place_details, pid): pid for pid in place_ids}
-            for future in as_completed(futures):
-                detail = future.result()
-                if detail:
-                    pid = futures[future]
-                    base = unique_places[pid].copy()
-                    base.update(detail)
-                    enriched.append(base)
-
-        # Tallennetaan skannatut place_id:t kantaan
-        for pid in place_ids:
-            session.add(ScannedPlace(google_place_id=pid))
-        session.commit()
-
-        logger.info(
-            f"Details-haku valmis: {len(enriched)} rikastettua tulosta, "
-            f"{len(place_ids)} uutta tallennettu ScannedPlace-tauluun, "
-            f"detail-kutsuja käytetty: {self._detail_call_count}/{MAX_DETAIL_CALLS}"
-        )
-        return enriched
+        return results
 
 def analyze_website(url: str) -> str:
     if not url: return "NO WEBSITE"
@@ -328,6 +308,42 @@ def analyze_website(url: str) -> str:
 
 # 1. HAKU (Stateless, Google API)
 # HUOM: Muutettu polku /leads -> /search, jotta /leads jää tietokannalle
+def _mock_places(business_type: str, city: str) -> List[Dict]:
+    """Dev-data: vaihtelevat arvot jotta pisteytys ja merkinnät näkyvät UI:ssa ilman API-kutsuja.
+
+    (nimi, website, website_status, rating, review_count, business_status)
+    """
+    bt = business_type.title()
+    rows: List[tuple] = [
+        (f"{bt} Keskusta", None, "NO WEBSITE", 4.7, 132, "OPERATIONAL"),
+        (f"{bt} Studio Aino", "www.example-aino.fi", "BROKEN WEBSITE", 4.4, 58, "OPERATIONAL"),
+        (f"{bt} & Co", "www.example-co.fi", "NOT MOBILE", 4.1, 21, "OPERATIONAL"),
+        (f"{bt} Express", "www.example-express.fi", "WEBSITE OK", 3.9, 240, "OPERATIONAL"),
+        (f"Uusi {business_type}", None, "NO WEBSITE", None, 0, "OPERATIONAL"),
+        (f"{bt} Kulma", None, "NO WEBSITE", 4.9, 12, "CLOSED_TEMPORARILY"),
+        (f"Vanha {business_type}", None, "NO WEBSITE", 3.2, 7, "CLOSED_PERMANENTLY"),
+        (f"{bt} Premium", "www.example-premium.fi", "WEBSITE OK", 4.8, 410, "OPERATIONAL"),
+    ]
+    return [
+        {
+            "place_id": f"dev-{i}",
+            "name": name,
+            "address": f"Esimerkkikatu {i}, {city}",
+            "phone": f"040 123 45{i:02d}" if i % 3 else None,
+            "website": website,
+            "website_status": status,
+            "rating": rating,
+            "review_count": reviews,
+            "business_status": business_status,
+            "primary_type": None,
+            "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus(f'{name} {city}')}",
+        }
+        for i, (name, website, status, rating, reviews, business_status) in enumerate(rows, start=1)
+    ]
+
+
+# 1. HAKU (Stateless, Google API)
+# HUOM: Muutettu polku /leads -> /search, jotta /leads jää tietokannalle
 @app.get("/search", response_model=List[GoogleSearchResult])
 async def search_google(
     business_type: str = Query(..., min_length=2),
@@ -335,61 +351,31 @@ async def search_google(
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
 ):
-    # Fast local/dev fallback so the app works even if Google API is slow or blocked
     if not USE_LIVE_GOOGLE:
-        sample_results = [
-            GoogleSearchResult(
-                name=f"{business_type.title()} Example {i}",
-                place_id=f"dev-{i}",
-                address=f"Sample Street {i}, {city}",
-                phone="+358 40 123 4567" if i % 2 == 0 else None,
-                website=None if i % 2 == 0 else f"www.example{i}.fi",
-                website_status="NO WEBSITE" if i % 2 == 0 else "BROKEN WEBSITE",
-                discovery_method="DEV-MOCK",
-            )
-            for i in range(1, 6)
-        ]
-        session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(sample_results)))
+        places = drop_permanently_closed(_mock_places(business_type, city))
+        results = [GoogleSearchResult(**p, discovery_method="DEV-MOCK") for p in places]
+        session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
         session.commit()
-        return sample_results
+        return results
 
     if "AIza" not in GOOGLE_API_KEY:
         raise HTTPException(500, "API Key missing")
 
     service = GooglePlacesService(GOOGLE_API_KEY)
 
-    # Kaikki blokkavat Google API -kutsut ajetaan taustasäikeessä
-    # jotta FastAPI:n event loop ei jäädy (time.sleep paginoinnissa)
-    def _blocking_search() -> List[Dict]:
-        # 1. Grid Search (geocode + nearby search + deduplikaatio)
-        unique_places = service.search_grid(city, business_type)
-        if not unique_places:
-            return []
-
-        # 2. Details Enrichment — suodattaa jo skannatut pois (ScannedPlace-cache)
-        return service.enrich_with_details(unique_places, session)
-
-    final_data = await asyncio.to_thread(_blocking_search)
-
-    if not final_data:
+    # Google-kutsut ja website-analyysi blokkaavat -> taustasäikeeseen, event loop ei jäädy
+    places = await asyncio.to_thread(service.search_grid, city, business_type)
+    if not places:
         return []
 
-    # 3. Website Analysis (rinnakkain, ei Google-kutsuja — ei blokkaa pitkään)
     def _blocking_website_analysis() -> List[GoogleSearchResult]:
         output = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS_WEBSITE) as ex:
-            future_map = {ex.submit(analyze_website, d.get("website")): d for d in final_data}
+            future_map = {ex.submit(analyze_website, p.get("website")): p for p in places}
             for f in as_completed(future_map):
-                d = future_map[f]
-                web_status = f.result()
-
                 output.append(GoogleSearchResult(
-                    name=d.get("name"),
-                    place_id=d.get("place_id"),
-                    address=d.get("formatted_address") or d.get("vicinity"),
-                    phone=d.get("formatted_phone_number"),
-                    website=d.get("website"),
-                    website_status=web_status,
+                    **future_map[f],
+                    website_status=f.result(),
                     discovery_method="API",
                 ))
         return output

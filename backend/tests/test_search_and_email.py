@@ -12,15 +12,20 @@ def test_search_mock_mode_returns_results_and_saves_history(client_a: TestClient
     res = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"})
     assert res.status_code == 200
     results = res.json()
-    assert len(results) == 5
+    assert len(results) == 7
     assert all(r["discovery_method"] == "DEV-MOCK" for r in results)
     assert all("Espoo" in r["address"] for r in results)
+    assert all(r["maps_url"].startswith("https://www.google.com/maps/") for r in results)
+
+    statuses = {r["business_status"] for r in results}
+    assert "CLOSED_PERMANENTLY" not in statuses
+    assert "CLOSED_TEMPORARILY" in statuses
 
     history = client_a.get("/search-history").json()
     assert len(history) == 1
     assert history[0]["business_type"] == "parturi"
     assert history[0]["city"] == "Espoo"
-    assert history[0]["result_count"] == 5
+    assert history[0]["result_count"] == 7
 
 
 class _FakeOpenAI:
@@ -99,3 +104,29 @@ def test_generate_email_survives_scrape_failure(
 def test_generate_email_without_api_key(client_a: TestClient, make_lead: Any) -> None:
     lead = make_lead()
     assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 500
+
+
+def test_search_live_path_wires_service_and_website_analysis(
+    client_a: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.main.USE_LIVE_GOOGLE", True)
+    monkeypatch.setattr("app.main.GOOGLE_API_KEY", "AIza-test")
+    places = [
+        {"place_id": "ChIJ1", "name": "Parturi A", "address": "Katu 1", "phone": None, "website": "https://a.fi",
+         "rating": 4.5, "review_count": 30, "business_status": "OPERATIONAL", "primary_type": "hair_salon",
+         "maps_url": "https://maps.google.com/?cid=1"},
+        {"place_id": "ChIJ2", "name": "Parturi B", "address": "Katu 2", "phone": "09 1", "website": None,
+         "rating": None, "review_count": None, "business_status": "CLOSED_TEMPORARILY", "primary_type": None,
+         "maps_url": None},
+    ]
+    monkeypatch.setattr("app.main.GooglePlacesService.search_grid", lambda self, city, keyword: places)
+    monkeypatch.setattr("app.main.analyze_website", lambda url: "NOT MOBILE" if url else "NO WEBSITE")
+
+    res = client_a.get("/search", params={"business_type": "parturi", "city": "Kauniainen"})
+    assert res.status_code == 200
+    by_id = {r["place_id"]: r for r in res.json()}
+    assert by_id["ChIJ1"]["website_status"] == "NOT MOBILE"
+    assert by_id["ChIJ1"]["discovery_method"] == "API"
+    assert by_id["ChIJ1"]["review_count"] == 30
+    assert by_id["ChIJ2"]["website_status"] == "NO WEBSITE"
+    assert client_a.get("/search-history").json()[0]["result_count"] == 2
