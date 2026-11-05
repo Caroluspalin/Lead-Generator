@@ -268,3 +268,35 @@ def test_social_media_url_is_no_website_without_request(url: str, monkeypatch: p
 def test_lookalike_domains_are_not_social_media(url: str, web: Callable[..., _FakeWeb]) -> None:
     web({("https", True): _Resp(url=url)})
     assert analyze_website(url).status == "WEBSITE OK"
+
+
+# --- fetch_page (yhteystietohaku käyttää samoja sääntöjä) ---
+
+def test_fetch_page_uses_https_and_browser_headers(web: Callable[..., _FakeWeb]) -> None:
+    fake = web({("https", True): _Resp()})
+    assert wc.fetch_page("http://example.fi/yhteystiedot") is not None
+    assert fake.calls[0]["url"] == "https://example.fi/yhteystiedot"
+    assert fake.calls[0]["headers"] is wc.HEADERS
+    assert fake.calls[0]["timeout"] == wc.TIMEOUT_SECONDS
+
+
+def test_fetch_page_falls_back_on_bad_ssl_and_http(web: Callable[..., _FakeWeb]) -> None:
+    web({("https", True): _ssl("certificate has expired"), ("https", False): _Resp(text="ssl-ohitus")})
+    page = wc.fetch_page("example.fi")
+    assert page is not None and page.text == "ssl-ohitus"
+
+    web({("https", True): _refused(), ("http", True): _Resp(url="http://example.fi/", text="http")})
+    page = wc.fetch_page("example.fi")
+    assert page is not None and page.text == "http"
+
+
+def test_fetch_page_never_requests_social_media(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("requests.get", lambda u, **_k: calls.append(u))
+    assert wc.fetch_page("https://www.facebook.com/parturi") is None
+    assert calls == []
+
+
+def test_fetch_page_dns_failure_is_none(web: Callable[..., _FakeWeb]) -> None:
+    web({("https", True): _dns_error()})
+    assert wc.fetch_page("eiole.fi") is None

@@ -69,11 +69,17 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
     if (isOpen) {
       setDraft(null);
       setInstruction('');
-      setRecipientEmail('');
       setError('');
       fetchDraft();
     }
   }, [isOpen, fetchDraft]);
+
+  // Erillinen efekti: taustalla löytyvä osoite esitäyttää kentän ilman uutta AI-generointia
+  useEffect(() => {
+    if (isOpen) {
+      setRecipientEmail(agency.email ?? '');
+    }
+  }, [isOpen, agency.email]);
 
   const handleRegenerate = () => {
     fetchDraft(instruction);

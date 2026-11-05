@@ -116,3 +116,20 @@ def test_fresh_postgres_upgrade_keeps_timestamptz_values() -> None:
     with engine.begin() as conn:
         conn.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
     engine.dispose()
+
+
+def test_do_not_contact_migration_with_existing_rows(tmp_path: Path) -> None:
+    """NOT NULL -sarake olemassa olevaan tauluun: vanhat liidit saavat false-arvon."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'dnc.db'}")
+    with engine.begin() as conn:
+        cfg = _config(conn)
+        command.upgrade(cfg, "11b71478b845")
+        conn.execute(text(
+            "INSERT INTO lead (user_id, name, city, pipeline_status, source, created_at, updated_at) "
+            "VALUES ('u', 'Vanha liidi', 'Espoo', 'Shortlisted', 'API', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+        ))
+        command.upgrade(cfg, "head")
+        row = conn.execute(text("SELECT do_not_contact, email FROM lead")).one()
+        assert row[0] in (0, False)
+        assert row[1] is None
+    engine.dispose()

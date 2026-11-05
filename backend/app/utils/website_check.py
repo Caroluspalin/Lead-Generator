@@ -230,3 +230,27 @@ def analyze_website(url: Optional[str]) -> WebsiteCheck:
     # HTTPS ohjasi takaisin HTTP:lle -> sivu toimii käytännössä vain ilman salausta
     insecure = "redirects to HTTP" if urlparse(response.url).scheme == "http" else None
     return _classify_response(response, insecure_issue=insecure)
+
+
+def fetch_page(url: str) -> Optional[requests.Response]:
+    """Hakee sivun samoilla säännöillä kuin analyze_website (UA, timeout, retry, SSL/HTTP-fallback).
+
+    Palauttaa None jos sivu ei vastaa. Ei tee pyyntöä someosoitteisiin.
+    """
+    if not url or is_social_media_url(url):
+        return None
+    https_url = url if url.lower().startswith("https://") else _with_scheme(url, "https")
+    try:
+        return _get(https_url)
+    except _Failure as fail:
+        if fail.kind == "ssl":
+            try:
+                return _get(https_url, verify=False)
+            except _Failure:
+                return None
+        if fail.kind == "dns":
+            return None
+    try:
+        return _get(_with_scheme(url, "http"))
+    except _Failure:
+        return None

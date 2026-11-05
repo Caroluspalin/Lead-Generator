@@ -15,9 +15,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus, urlparse
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from sqlalchemy import Engine
 from sqlmodel import Session, select
 from pydantic import BaseModel
 import requests
@@ -27,6 +28,7 @@ from .database import create_db_and_tables, get_session
 from .models import Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, utc_now
 from .utils.scraper import scrape_website_text
 from .utils.website_check import analyze_website
+from .utils.contact_finder import find_contact_email
 from .scoring import lead_score
 from .auth import verify_token, AuthUser
 
@@ -482,9 +484,39 @@ async def search_google(
     return _finalize_search(results, business_type, city, session, user, service.usage())
 
 # 2. TALLENNA LIIDI (Database)
+# Sivusto toimii -> kannattaa etsiä sähköpostia (BROKEN/NO WEBSITE/UNKNOWN eivät vastaa luotettavasti)
+EMAIL_SEARCH_STATUSES = {"WEBSITE OK", "NOT MOBILE", "INSECURE"}
+
+
+def can_search_email(lead: Lead) -> bool:
+    return bool(lead.website) and lead.website_status in EMAIL_SEARCH_STATUSES
+
+
+async def _find_email_in_background(lead_id: int, user_id: str, website: str, engine: Engine) -> None:
+    """Ajetaan POST /leads -vastauksen jälkeen, ettei tallennus odota sivujen hakua."""
+    try:
+        found = await asyncio.to_thread(find_contact_email, website)
+        if found is None:
+            return
+        with Session(engine) as session:
+            db_lead = session.get(Lead, lead_id)
+            # Käyttäjä on voinut poistaa liidin tai asettaa osoitteen käsin välissä
+            if db_lead is None or db_lead.user_id != user_id or db_lead.email:
+                return
+            db_lead.email = found.email
+            db_lead.email_source = found.source
+            db_lead.updated_at = utc_now()
+            session.add(db_lead)
+            session.commit()
+            logger.info(f"Sähköposti löytyi liidille {lead_id}: {found.email} ({found.source})")
+    except Exception as e:
+        logger.warning(f"Sähköpostihaku epäonnistui liidille {lead_id}: {e}")
+
+
 @app.post("/leads", response_model=Lead)
 def create_lead(
     lead: LeadCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
 ):
@@ -505,6 +537,34 @@ def create_lead(
     session.add(db_lead)
     session.commit()
     session.refresh(db_lead)
+
+    if can_search_email(db_lead) and db_lead.id is not None and db_lead.website:
+        background_tasks.add_task(
+            _find_email_in_background, db_lead.id, user.id, db_lead.website, session.get_bind()
+        )
+    return db_lead
+
+
+@app.post("/leads/{lead_id}/find-email", response_model=Lead)
+async def find_lead_email(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    db_lead = session.get(Lead, lead_id)
+    if not db_lead or db_lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+    if not can_search_email(db_lead) or not db_lead.website:
+        raise HTTPException(422, "Website is not reachable, cannot search for an email")
+
+    found = await asyncio.to_thread(find_contact_email, db_lead.website)
+    if found is not None:
+        db_lead.email = found.email
+        db_lead.email_source = found.source
+        db_lead.updated_at = utc_now()
+        session.add(db_lead)
+        session.commit()
+        session.refresh(db_lead)
     return db_lead
 
 # 3. HAE TALLENNETUT LIIDIT (Database)

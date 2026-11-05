@@ -55,6 +55,11 @@ class Lead(SQLModel, table=True):
     website_context: Optional[str] = None
     scraped_at: Optional[datetime] = None
 
+    # Yhteystiedot: vain sivustolta oikeasti löytynyt osoite (app/utils/contact_finder.py)
+    email: Optional[str] = None
+    email_source: Optional[str] = None  # esim. "mailto on /yhteystiedot"
+    do_not_contact: bool = Field(default=False)
+
     # Places API (New) -tiedot hakuhetkeltä + pisteytys (app/scoring.py)
     rating: Optional[float] = None
     review_count: Optional[int] = None
@@ -91,4 +96,6 @@ class LeadUpdate(SQLModel):
     pipeline_status: Optional[str] = None
     notes: Optional[str] = None
     phone: Optional[str] = None
+    email: Optional[str] = None
+    do_not_contact: Optional[bool] = None
     website: Optional[str] = None

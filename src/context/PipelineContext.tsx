@@ -12,6 +12,7 @@ interface PipelineContextValue {
   updateStatus: (id: number, status: PipelineStatus) => Promise<void>;
   updateNotes: (id: number, notes: string) => Promise<void>;
   removeFromPipeline: (id: number) => Promise<void>;
+  findEmail: (id: number) => Promise<SavedAgency>;
   refresh: () => Promise<void>;
 }
 
@@ -113,6 +114,17 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     );
   };
 
+  // Etsii sähköpostin liidin omalta sivustolta (backend: etusivu + max 3 yhteystietosivua)
+  const findEmail = async (id: number): Promise<SavedAgency> => {
+    const res = await apiFetch(`/leads/${id}/find-email`, { method: 'POST' });
+    if (!res.ok) {
+      throw new Error(`Email search failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    return updated;
+  };
+
   const removeFromPipeline = async (id: number) => {
     const res = await apiFetch(`/leads/${id}`, {
       method: 'DELETE',
@@ -133,6 +145,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         updateStatus,
         updateNotes,
         removeFromPipeline,
+        findEmail,
         refresh,
       }}
     >

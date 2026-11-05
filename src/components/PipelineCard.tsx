@@ -10,7 +10,12 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  Mail,
+  Search,
+  Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { usePipeline } from '../context/PipelineContext';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
@@ -36,6 +41,29 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [notesDraft, setNotesDraft] = useState(agency.notes ?? '');
   const [isExpanded, setIsExpanded] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [findingEmail, setFindingEmail] = useState(false);
+  const { findEmail } = usePipeline();
+
+  // Sama ehto kuin backendin EMAIL_SEARCH_STATUSES
+  const canSearchEmail =
+    !!agency.website &&
+    ['WEBSITE OK', 'NOT MOBILE', 'INSECURE'].includes(agency.website_status ?? '');
+
+  const handleFindEmail = async () => {
+    setFindingEmail(true);
+    try {
+      const updated = await findEmail(agency.id);
+      if (updated.email) {
+        toast.success(`Found ${updated.email}`);
+      } else {
+        toast.info('No email address found on the website');
+      }
+    } catch {
+      toast.error('Email search failed');
+    } finally {
+      setFindingEmail(false);
+    }
+  };
 
   const handleNotesBlur = () => {
     if (notesDraft !== (agency.notes ?? '')) {
@@ -159,6 +187,39 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             </div>
           )}
         </div>
+
+        {/* Email */}
+        <div className="flex flex-wrap items-center gap-2">
+          {agency.email ? (
+            <a
+              href={`mailto:${agency.email}`}
+              title={agency.email_source ? `Found: ${agency.email_source}` : undefined}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 transition-colors text-sm font-medium min-w-0"
+            >
+              <Mail size={14} className="shrink-0" />
+              <span className="truncate">{agency.email}</span>
+            </a>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 text-slate-400 text-sm">
+              <Mail size={14} className="shrink-0" />
+              <span>No email</span>
+            </div>
+          )}
+          {canSearchEmail && (
+            <button
+              type="button"
+              onClick={handleFindEmail}
+              disabled={findingEmail}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-60"
+            >
+              {findingEmail ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+              {findingEmail ? 'Searching...' : agency.email ? 'Search again' : 'Find email'}
+            </button>
+          )}
+        </div>
+        {agency.email && agency.email_source && (
+          <p className="-mt-1 text-[11px] text-slate-400">Source: {agency.email_source}</p>
+        )}
 
         {/* Pipeline Stage Navigation */}
         <div>

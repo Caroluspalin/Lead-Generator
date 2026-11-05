@@ -89,6 +89,9 @@ export interface SavedAgency {
   website?: string;
   website_status?: string;
   website_issue?: string | null;
+  email?: string | null;
+  email_source?: string | null;
+  do_not_contact: boolean;
   rating?: number | null;
   review_count?: number | null;
   business_status?: BusinessStatus | null;
