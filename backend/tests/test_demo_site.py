@@ -171,8 +171,10 @@ def test_render_always_has_banner_noindex_and_no_script(template: str) -> None:
         assert "Tämä on luonnos, jonka Palin teki yritykselle Parturi-Kampaamo Taina Lantiainen. Ei yrityksen virallinen sivu." in html
         assert "040 123 4567" in html and "https://palin.fi" in html
         assert "<script" not in html.lower()
+        # Ilman Unsplash-kuvia ei yhtään ulkoista resurssia
         assert "<img" not in html.lower()
         assert not re.search(r'src="https?://', html)
+        assert "font-family:'" in html and "data:font/woff2;base64," in html
         assert '<html lang="fi">' in html
 
 
@@ -339,7 +341,7 @@ def test_regenerate_keeps_token(client_a: TestClient, lead: dict[str, Any], demo
 def test_patch_rerenders_without_ai_call(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     calls_before = len(demo_ready.calls)
-    edited = {k: v for k, v in demo["content"].items() if k != "opening_hours"}
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "images")}
     edited["hero_title"] = "Tainan kampaamo"
     edited["price_note"] = "Hiustenleikkaus alkaen 30 €, varaukset puhelimitse."  # käyttäjä saa kirjoittaa oikean hinnan
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "services", "color_scheme": "forest", "content": edited})
@@ -361,7 +363,7 @@ def test_patch_template_only_resets_incompatible_scheme(
 
 def test_patch_rejects_invalid_content(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-    bad = {**{k: v for k, v in demo["content"].items() if k != "opening_hours"}, "services": []}
+    bad = {**{k: v for k, v in demo["content"].items() if k not in ("opening_hours", "images")}, "services": []}
     assert client_a.patch(f"/leads/{lead['id']}/demo", json={"content": bad}).status_code == 422
     assert client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "nope"}).status_code == 422
 
@@ -448,3 +450,271 @@ def test_email_demo_link_added_by_code_if_model_drops_placeholder(
     body = client_a.post(f"/leads/{lead['id']}/generate-email", json={}).json()["body"]
     assert "keksitty.example" not in body
     assert f"Luonnos: {demo['preview_url']}" in body
+
+
+# --- Kuvat (Unsplash) ---
+
+from app.demo_icons import ICONS, service_icon_names  # noqa: E402
+from app.demo_site import TEMPLATE_FONTS, DemoImages, font_face_css  # noqa: E402
+from app.utils import unsplash  # noqa: E402
+from app.utils.unsplash import DemoPhoto  # noqa: E402
+
+
+def _api_photo(pid: str, alt: str = "empty salon chairs", **user: Any) -> dict[str, Any]:
+    return {
+        "id": pid,
+        "alt_description": alt,
+        "description": None,
+        "urls": {"raw": f"https://images.unsplash.com/photo-{pid}?ixid=abc{pid}", "regular": "x"},
+        "links": {"download_location": f"https://api.unsplash.com/photos/{pid}/download?ixid=abc{pid}"},
+        "user": {"name": user.get("name", f"Kuvaaja {pid}"), "username": f"u{pid}", "links": {"html": f"https://unsplash.com/@u{pid}"}},
+    }
+
+
+class _UnsplashFake:
+    def __init__(self, pages: dict[str, list[dict[str, Any]]]) -> None:
+        self.pages = pages
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, url: str, **kwargs: Any) -> Any:
+        self.calls.append({"url": url, **kwargs})
+        query = (kwargs.get("params") or {}).get("query")
+        data = {"results": self.pages.get(query, [])} if url.endswith("/search/photos") else {}
+
+        class _R:
+            status_code = 200
+            headers = {"X-Ratelimit-Remaining": "49"}
+            text = ""
+
+            @staticmethod
+            def json() -> dict[str, Any]:
+                return data
+
+        return _R()
+
+
+def _photo(pid: str, people: bool = False) -> DemoPhoto:
+    return DemoPhoto(
+        id=pid, raw_url=f"https://images.unsplash.com/photo-{pid}?ixid=x{pid}", alt="", photographer_name=f"Kuvaaja {pid}",
+        photographer_url=f"https://unsplash.com/@u{pid}", download_location=f"https://api.unsplash.com/photos/{pid}/download",
+        has_people=people,
+    )
+
+
+def test_search_photos_request_and_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _UnsplashFake({"hair salon interior": [_api_photo("a"), _api_photo("b", alt="woman getting a haircut")]})
+    monkeypatch.setattr("requests.get", fake)
+    photos = unsplash.search_photos("hair salon interior", "key-123")
+    call = fake.calls[0]
+    assert call["url"] == "https://api.unsplash.com/search/photos"
+    assert call["headers"] == {"Authorization": "Client-ID key-123", "Accept-Version": "v1"}
+    assert call["params"] == {"query": "hair salon interior", "per_page": 20, "orientation": "landscape", "content_filter": "high"}
+    assert [p.id for p in photos] == ["a", "b"]
+    assert photos[0].has_people is False and photos[1].has_people is True
+    assert photos[0].photographer_url == "https://unsplash.com/@ua"
+
+
+def test_search_photos_error_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _R:
+        status_code = 403
+        text = "Rate Limit Exceeded"
+        headers: dict[str, str] = {}
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: _R())
+    assert unsplash.search_photos("x", "key") == []
+
+
+@pytest.mark.parametrize(
+    ("primary_type", "template", "first_query"),
+    [
+        ("hair_salon", "beauty", "hair salon interior"),
+        ("barber_shop", "beauty", "barbershop interior"),
+        ("hair_care", "beauty", "hair salon interior"),  # ei "car workshop"
+        ("cafe", "restaurant", "cafe interior"),
+        ("car_repair", "services", "car workshop"),
+        (None, "beauty", "beauty salon interior"),
+    ],
+)
+def test_image_queries_by_industry_not_business_name(primary_type: str | None, template: str, first_query: str) -> None:
+    assert unsplash.image_queries(primary_type, template)[0] == first_query
+
+
+def test_second_query_only_when_first_is_thin(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _UnsplashFake({"hair salon interior": [_api_photo("a")], "hairdresser tools": [_api_photo(c) for c in "bcde"]})
+    monkeypatch.setattr("requests.get", fake)
+    assert len(unsplash.find_candidates("hair_salon", "beauty", "k")) == 5
+    assert len(fake.calls) == 2
+
+    fake = _UnsplashFake({"hair salon interior": [_api_photo(c) for c in "abcdef"]})
+    monkeypatch.setattr("requests.get", fake)
+    unsplash.find_candidates("hair_salon", "beauty", "k")
+    assert len(fake.calls) == 1
+
+
+def test_choose_images_prefers_hero_without_people() -> None:
+    hero, mood, options = unsplash.choose_images([_photo("p1", people=True), _photo("a"), _photo("b"), _photo("c"), _photo("d")])
+    assert hero is not None and hero.id == "a"
+    assert [m.id for m in mood] == ["p1", "b", "c"]
+    assert options[0].id == "a" and len(options) == 5
+
+
+def test_photo_url_keeps_ixid_and_adds_params() -> None:
+    url = unsplash.photo_url(_photo("a"), 1080)
+    assert url.startswith("https://images.unsplash.com/photo-a?ixid=xa&")
+    assert "w=1080" in url and "auto=format" in url and "fit=crop" in url
+
+
+def test_attribution_links_have_utm() -> None:
+    assert unsplash.with_utm("https://unsplash.com/@ua", "agency_hunter") == "https://unsplash.com/@ua?utm_source=agency_hunter&utm_medium=referral"
+    assert unsplash.unsplash_home_url("agency_hunter") == "https://unsplash.com/?utm_source=agency_hunter&utm_medium=referral"
+
+
+def test_render_with_images_has_attribution_and_srcset() -> None:
+    images = DemoImages(hero=_photo("h"), mood=[_photo("m1"), _photo("m2")], options=[_photo("h"), _photo("m1"), _photo("m2")])
+    html = _render(images=images.model_dump())
+    assert 'src="https://images.unsplash.com/photo-h?ixid=xh&amp;w=1600' in html or "photo-h?ixid=xh&amp;w=" in html
+    assert "srcset=" in html
+    assert html.count("/ <a href=\"https://unsplash.com/?utm_source=agency_hunter&amp;utm_medium=referral\"") == 3
+    assert 'href="https://unsplash.com/@uh?utm_source=agency_hunter&amp;utm_medium=referral"' in html
+    assert "Kuva: <a" in html and ">Kuvaaja h</a>" in html
+    assert 'class="gallery n2"' in html
+    # Vain Unsplashin kuvat ulkoisena resurssina
+    assert set(re.findall(r'src="(https?://[^/"]+)', html)) == {"https://images.unsplash.com"}
+
+
+def test_render_without_images_uses_gradient() -> None:
+    html = _render()
+    assert 'class="hero no-image"' in html and "hero-deco" in html
+    assert "gallery" not in html.split("<main", 1)[1].split("palvelut", 1)[0]
+
+
+# --- Visuaalinen ilme ---
+
+def test_hero_shows_business_name_as_h1_and_ai_title_as_eyebrow() -> None:
+    html = _render()
+    assert '<h1 id="hero-title">Parturi-Kampaamo Taina Lantiainen</h1>' in html
+    assert '<p class="eyebrow">Parturi-kampaamo Kauniaisissa</p>' in html
+
+
+def test_banner_is_single_line_and_footer_does_not_repeat_it() -> None:
+    html = _render()
+    banner = "Tämä on luonnos, jonka Palin teki yritykselle Parturi-Kampaamo Taina Lantiainen. Ei yrityksen virallinen sivu."
+    assert html.count(banner) == 1
+    bar = html.split('<div class="demo-bar"', 1)[1].split("</div>", 1)[0]
+    assert banner in bar and "040 123 4567" in bar and "palin.fi" in bar
+    assert "<p" not in bar  # yksi rivi, ei kappaleita
+    # Mobiilissa lyhyt versio (CSS vaihtaa .long/.short), sivusto vain leveällä näytöllä
+    assert '<span class="short">Luonnos – ei virallinen sivu · Palin</span>' in bar
+    assert ".demo-bar .long{display:none}" in html and ".demo-bar .short{display:none}" in html
+    assert "luonnos" not in html.split('<footer', 1)[1].lower()
+
+
+@pytest.mark.parametrize("template", ["beauty", "restaurant", "services"])
+def test_each_template_embeds_its_own_heading_font(template: str) -> None:
+    html = _render(template, next(iter(TEMPLATES[template].schemes)))
+    font = TEMPLATE_FONTS[template]
+    assert f"font-family:'{font.family}'" in html
+    assert font_face_css(template) in html
+
+
+def test_fonts_have_licenses() -> None:
+    from pathlib import Path
+    fonts = Path(__file__).resolve().parent.parent / "app" / "templates" / "demo" / "fonts"
+    for font in TEMPLATE_FONTS.values():
+        assert (fonts / font.file).stat().st_size < 40_000
+    assert len(list(fonts.glob("OFL-*.txt"))) == 3
+
+
+def test_service_icons_match_services_and_are_unique() -> None:
+    services = [
+        ("Hiustenleikkaus", "Leikkaus toiveidenne mukaan."),
+        ("Hiusten värjäys", "Värjäämme hiuksia."),
+        ("Hiusten muotoilu", "Muotoilemme hiukset juhlaan."),
+        ("Hiustenhoito", "Hoidamme hiuksia."),
+        ("Parranajo", "Autamme teitä parran kanssa."),
+        ("Lasten leikkaus", "Leikkaamme lasten hiukset."),
+    ]
+    icons = service_icon_names(services, "beauty")
+    assert icons[:5] == ["scissors", "palette", "wind", "leaf", "razor"]
+    assert len(set(icons)) == 6
+    assert "car" not in icons  # "Autamme" ei ole auto
+
+
+def test_service_icons_fallback_pool_for_unknown_services() -> None:
+    icons = service_icon_names([("Palvelu A", "Jotain."), ("Palvelu B", "Muuta."), ("Palvelu C", "Kolmas.")], "restaurant")
+    assert icons == ["utensils", "cup", "wine"]
+    assert all(i in ICONS for i in icons)
+
+
+@pytest.mark.parametrize("count", [3, 4, 5, 6])
+def test_services_grid_class_by_count(count: int) -> None:
+    services = [{"name": f"Palvelu {i}", "description": "Kuvaus palvelusta tässä."} for i in range(count)]
+    html = _render(services=services)
+    assert f'class="services n{count}"' in html
+    assert html.count('<article class="card">') == count
+
+
+def test_css_handles_odd_counts_without_lonely_card() -> None:
+    html = _render()
+    assert ".services.n3>:last-child,.services.n5>:last-child{grid-column:1/-1}" in html
+    assert ".services.n5>:nth-child(4),.services.n5>:nth-child(5){grid-column:span 3}" in html
+
+
+# --- Kuvat endpointin kautta ---
+
+@pytest.fixture
+def unsplash_ready(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    photos = [_photo("p1", people=True)] + [_photo(c) for c in "abcd"]
+    monkeypatch.setattr("app.main.UNSPLASH_ACCESS_KEY", "key-123")
+    monkeypatch.setattr("app.main.unsplash.find_candidates", lambda pt, tpl, key: photos)
+    tracked: list[str] = []
+    monkeypatch.setattr("app.main.unsplash.track_download", lambda photo, key: tracked.append(photo.id))
+    return tracked
+
+
+def test_generate_demo_with_images_tracks_downloads(
+    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]
+) -> None:
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    images = demo["content"]["images"]
+    assert images["hero"]["id"] == "a"
+    assert [m["id"] for m in images["mood"]] == ["p1", "b", "c"]
+    assert len(images["options"]) == 5
+    assert unsplash_ready == ["a", "p1", "b", "c"]  # hero + tunnelmakuvat
+    page = client_a.get(f"/demo/{demo['public_token']}")
+    assert "img-src data: https://images.unsplash.com" in page.headers["content-security-policy"]
+    assert "font-src data:" in page.headers["content-security-policy"]
+    assert "photo-a?ixid=xa" in page.text
+
+
+def test_generate_demo_without_unsplash_key_uses_gradient(
+    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
+) -> None:
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    assert demo["content"]["images"] == {"hero": None, "mood": [], "options": []}
+    assert 'class="hero no-image"' in client_a.get(f"/demo/{demo['public_token']}").text
+
+
+def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]) -> None:
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    unsplash_ready.clear()
+    calls_before = len(demo_ready.calls)
+
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "d"}).json()
+    assert res["content"]["images"]["hero"]["id"] == "d"
+    assert "d" not in [m["id"] for m in res["content"]["images"]["mood"]]
+    assert unsplash_ready == ["d"]  # vain uusi kuva: "a" oli jo käytössä (hero -> tunnelmakuva)
+    assert len(demo_ready.calls) == calls_before
+    assert "photo-d?ixid=xd" in client_a.get(f"/demo/{demo['public_token']}").text
+
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "none"}).json()
+    assert res["content"]["images"]["hero"] is None
+    assert client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "keksitty"}).status_code == 422
+
+
+def test_text_edit_keeps_images(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]) -> None:
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "images")}
+    edited["about"] = "Muokattu esittelyteksti, joka on riittävän pitkä hyväksyttäväksi."
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"content": edited}).json()
+    assert res["content"]["images"]["hero"]["id"] == "a"

@@ -4,11 +4,13 @@ AI ei kirjoita HTML:ää: se tuottaa vain sisällön JSON-muodossa (DemoAIConten
 tiukasti. HTML renderöidään valmiista Jinja2-pohjasta (autoescape), joten jokainen demo on
 teknisesti toimiva, nopea, mobiiliystävällinen ja turvallinen (ei JavaScriptiä, ei ulkoisia resursseja).
 """
+import base64
 import json
 import logging
 import re
 import secrets
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +18,9 @@ import requests
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .demo_icons import icon_svg, service_icon_names
 from .text_quality import find_forbidden_words
+from .utils.unsplash import DemoPhoto, photo_url, unsplash_home_url, with_utm
 
 logger = logging.getLogger(__name__)
 
@@ -143,9 +147,17 @@ class DemoContent(DemoAIContent):
     price_note: str = Field(default=DEFAULT_PRICE_NOTE, min_length=5, max_length=120)
 
 
+class DemoImages(BaseModel):
+    """Unsplash-kuvat (hotlinkattavat URLit + attribuutiotiedot). hero None -> gradientti."""
+    hero: Optional[DemoPhoto] = None
+    mood: list[DemoPhoto] = Field(default_factory=list, max_length=3)
+    options: list[DemoPhoto] = Field(default_factory=list, max_length=8)
+
+
 class DemoStoredContent(DemoContent):
     # Haettu Place Detailsista generoinnin hetkellä; osa demoa, ei erillistä Places-välimuistia
     opening_hours: list[str] = Field(default_factory=list, max_length=7)
+    images: DemoImages = Field(default_factory=DemoImages)
 
 
 # Keksityt faktat: arvostelut, palkinnot, historia, sitaatit (label, regex)
@@ -250,12 +262,12 @@ DEMO_SYSTEM_PROMPT = """Kirjoitat suomenkielisen sisällön paikallisen yritykse
 
 Palauta VAIN yksi JSON-objekti täsmälleen tällä rakenteella (ei muuta tekstiä, ei markdownia):
 {
-  "hero_title": "lyhyt otsikko, 5-80 merkkiä",
-  "hero_subtitle": "yksi lause, 10-180 merkkiä",
+  "hero_title": "toimiala ja paikka, 5-60 merkkiä, esim. Parturi-kampaamo Kauniaisissa (pieni yläotsikko yrityksen nimen yläpuolella)",
+  "hero_subtitle": "yksi lyhyt, luonteva lause siitä mitä yritys tarjoaa, 10-120 merkkiä",
   "about": "2-4 lyhyttä lausetta yrityksestä, 40-700 merkkiä",
   "services": [{"name": "palvelun nimi, 2-60 merkkiä", "description": "yksi lause, 10-220 merkkiä"}]
 }
-services: 3-6 kappaletta.
+services: 3-6 kappaletta, mieluiten 4 tai 6. Palvelun nimi lyhyt (1-3 sanaa).
 
 SÄÄNNÖT:
 - Yritys puhuu me-muodossa ("Tarjoamme..."), asiakasta puhutellaan te-muodossa ("Varatkaa aika puhelimitse", "Tervetuloa").
@@ -352,6 +364,52 @@ class DemoSender:
     website: Optional[str]
 
 
+@dataclass(frozen=True)
+class HeadingFont:
+    family: str
+    file: str
+    weight: int
+    fallback: str
+
+
+# Yksi otsikkofontti per pohja (OFL, Fontsource 5.3.0, latin-osajoukko kattaa å ä ö), leipäteksti system-ui.
+# Upotetaan base64-muodossa: ei ulkoista CDN:ää, demo pysyy yhtenä tiedostona.
+TEMPLATE_FONTS: dict[str, HeadingFont] = {
+    "beauty": HeadingFont("Cormorant Garamond", "cormorant-garamond-latin-600-normal.woff2", 600, "Georgia, 'Times New Roman', serif"),
+    "restaurant": HeadingFont("DM Serif Display", "dm-serif-display-latin-400-normal.woff2", 400, "Georgia, 'Times New Roman', serif"),
+    "services": HeadingFont("Manrope", "manrope-latin-700-normal.woff2", 700, "system-ui, -apple-system, 'Segoe UI', sans-serif"),
+}
+
+
+@lru_cache(maxsize=None)
+def font_face_css(template: str) -> str:
+    font = TEMPLATE_FONTS[template]
+    data = base64.b64encode((_TEMPLATE_DIR / "fonts" / font.file).read_bytes()).decode("ascii")
+    return (
+        f"@font-face{{font-family:'{font.family}';font-style:normal;font-weight:{font.weight};"
+        f"font-display:swap;src:url(data:font/woff2;base64,{data}) format('woff2');}}"
+    )
+
+
+@dataclass(frozen=True)
+class ImageView:
+    src: str
+    srcset: str
+    credit_name: str
+    credit_url: str
+    unsplash_url: str
+
+
+def _image_view(photo: DemoPhoto, widths: tuple[int, ...], utm_app: str) -> ImageView:
+    return ImageView(
+        src=photo_url(photo, widths[len(widths) // 2]),
+        srcset=", ".join(f"{photo_url(photo, w)} {w}w" for w in widths),
+        credit_name=photo.photographer_name,
+        credit_url=with_utm(photo.photographer_url, utm_app),
+        unsplash_url=unsplash_home_url(utm_app),
+    )
+
+
 def banner_text(business: DemoBusiness, sender: DemoSender) -> str:
     return f"Tämä on luonnos, jonka {sender.name} teki yritykselle {business.name}. Ei yrityksen virallinen sivu."
 
@@ -363,14 +421,23 @@ def render_demo_html(
     content: DemoStoredContent,
     business: DemoBusiness,
     sender: DemoSender,
+    utm_app: str = "agency_hunter",
 ) -> str:
     template, color_scheme = validate_template_choice(template, color_scheme)
     tpl = TEMPLATES[template]
+    icons = service_icon_names([(s.name, s.description) for s in content.services], template)
+    images = content.images
     return _env.get_template(f"{template}.html.j2").render(
         template=template,
         services_title=tpl.services_title,
         colors=tpl.schemes[color_scheme],
+        font=TEMPLATE_FONTS[template],
+        font_face_css=font_face_css(template),
         content=content,
+        services=[(s, icon_svg(name)) for s, name in zip(content.services, icons)],
+        icon=icon_svg,
+        hero_image=_image_view(images.hero, (640, 1080, 1600, 2200), utm_app) if images.hero else None,
+        mood_images=[_image_view(p, (480, 800, 1200), utm_app) for p in images.mood],
         business=business,
         sender=sender,
         tel=phone_to_tel(business.phone),

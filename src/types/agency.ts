@@ -29,8 +29,26 @@ export interface DemoContent {
   price_note: string;
 }
 
+// Unsplash-kuva (hotlinkattava raw_url sisältää ixid-parametrin, joka pitää säilyttää)
+export interface DemoPhoto {
+  id: string;
+  raw_url: string;
+  alt: string;
+  photographer_name: string;
+  photographer_url: string;
+  download_location: string;
+  has_people: boolean;
+}
+
+export interface DemoImages {
+  hero: DemoPhoto | null;
+  mood: DemoPhoto[];
+  options: DemoPhoto[];
+}
+
 export interface DemoStoredContent extends DemoContent {
   opening_hours: string[];
+  images: DemoImages;
 }
 
 export type DemoStatus = 'draft' | 'published' | 'expired';

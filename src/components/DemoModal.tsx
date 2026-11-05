@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Demo, DemoContent, DemoTemplateOption, SavedAgency } from '../types/agency';
+import type { Demo, DemoContent, DemoPhoto, DemoTemplateOption, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
 
 interface DemoModalProps {
@@ -13,6 +13,13 @@ interface DemoModalProps {
 
 const MIN_SERVICES = 3;
 const MAX_SERVICES = 6;
+const MAX_IMAGE_OPTIONS = 5;
+// Sama utm_source kuin backendin UNSPLASH_APP_NAME (Unsplashin attribuutiovaatimus)
+const UNSPLASH_UTM = 'utm_source=agency_hunter&utm_medium=referral';
+
+const withUtm = (url: string): string => `${url}${url.includes('?') ? '&' : '?'}${UNSPLASH_UTM}`;
+const thumbUrl = (photo: DemoPhoto): string =>
+  `${photo.raw_url}${photo.raw_url.includes('?') ? '&' : '?'}w=320&h=200&fit=crop&auto=format&q=60`;
 
 const inputClass =
   'w-full text-sm border-2 border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors';
@@ -256,6 +263,59 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
                           </option>
                         ))}
                       </select>
+                    </div>
+
+                    <div>
+                      <span className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
+                        Hero image
+                      </span>
+                      {demo.content.images.options.length === 0 ? (
+                        <p className="text-xs text-slate-500">
+                          No photos available (gradient is used). Set UNSPLASH_ACCESS_KEY in backend .env and regenerate.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2">
+                          {demo.content.images.options.slice(0, MAX_IMAGE_OPTIONS).map((photo) => {
+                            const selected = demo.content.images.hero?.id === photo.id;
+                            return (
+                              <figure key={photo.id} className="m-0">
+                                <button
+                                  type="button"
+                                  onClick={() => !selected && patch({ hero_image_id: photo.id })}
+                                  disabled={busy !== null}
+                                  aria-pressed={selected}
+                                  aria-label={`Use photo by ${photo.photographer_name}`}
+                                  className={`block w-full overflow-hidden rounded-lg border-2 transition-colors ${
+                                    selected ? 'border-sky-600 ring-2 ring-sky-200' : 'border-transparent hover:border-slate-300'
+                                  }`}
+                                >
+                                  <img src={thumbUrl(photo)} alt={photo.alt} className="w-full h-16 object-cover" loading="lazy" />
+                                </button>
+                                <figcaption className="mt-0.5 text-[10px] leading-tight text-slate-400 truncate">
+                                  <a href={withUtm(photo.photographer_url)} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                    {photo.photographer_name}
+                                  </a>{' '}
+                                  /{' '}
+                                  <a href={withUtm('https://unsplash.com/')} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                    Unsplash
+                                  </a>
+                                </figcaption>
+                              </figure>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            onClick={() => demo.content.images.hero && patch({ hero_image_id: 'none' })}
+                            disabled={busy !== null}
+                            aria-pressed={!demo.content.images.hero}
+                            className={`h-16 rounded-lg border-2 text-[11px] font-medium text-slate-600 bg-gradient-to-br from-slate-100 to-slate-200 ${
+                              !demo.content.images.hero ? 'border-sky-600 ring-2 ring-sky-200' : 'border-transparent hover:border-slate-300'
+                            }`}
+                          >
+                            No photo
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {draft && (

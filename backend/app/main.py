@@ -29,8 +29,10 @@ from .database import create_db_and_tables, get_session
 from .models import (
     Demo, Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate, utc_now,
 )
+from .utils import unsplash
 from .demo_site import (
     DemoBusiness,
+    DemoImages,
     DemoContent,
     DemoGenerationError,
     DemoSender,
@@ -783,6 +785,10 @@ SITE_MODEL = os.getenv("SITE_MODEL", "").strip() or EMAIL_MODEL
 SITE_REASONING_EFFORT = os.getenv("SITE_REASONING_EFFORT", EMAIL_REASONING_EFFORT).strip().lower()
 # Demolinkin pohja-URL sähköposteissa. Paikallisesti backend itse; Vaihe B vaihtaa julkiseen osoitteeseen.
 DEMO_PUBLIC_BASE_URL = os.getenv("DEMO_PUBLIC_BASE_URL", "http://127.0.0.1:8000").strip().rstrip("/")
+# Unsplash-kuvat demosivuille. Ilman avainta demo käyttää gradienttia.
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
+# Unsplashin attribuutiolinkkien utm_source (sovelluksen nimi Unsplashin developer-portaalissa)
+UNSPLASH_APP_NAME = os.getenv("UNSPLASH_APP_NAME", "agency_hunter").strip() or "agency_hunter"
 DEMO_LINK_PLACEHOLDER = "[DEMO_LINKKI]"
 DEMO_OFFER = f"Tein teille valmiin luonnoksen, voitte katsoa sen täältä: {DEMO_LINK_PLACEHOLDER}"
 
@@ -1229,6 +1235,8 @@ class DemoUpdateRequest(BaseModel):
     template: Optional[str] = None
     color_scheme: Optional[str] = None
     content: Optional[DemoContent] = None
+    # Unsplash-kuvan id vaihtoehdoista (content.images.options) tai "none" = ei kuvaa (gradientti)
+    hero_image_id: Optional[str] = None
 
 
 class DemoOut(BaseModel):
@@ -1272,6 +1280,7 @@ def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lea
         template=demo_template,
         color_scheme=scheme,
         content=content,
+        utm_app=UNSPLASH_APP_NAME,
         business=DemoBusiness(
             name=lead.name, city=lead.city, address=lead.address, phone=lead.phone,
             maps_url=_safe_web_url(lead.maps_url),
@@ -1326,7 +1335,28 @@ async def generate_demo_content(lead: Lead) -> tuple[DemoContent, list[ChatResul
     raise DemoGenerationError("; ".join(problems[:10]))
 
 
-def _log_demo_cost(lead_id: int, results: list[ChatResult], place_details_calls: int) -> float:
+async def find_demo_images(lead: Lead, template: str) -> tuple[DemoImages, int]:
+    """(kuvat, Unsplash-hakujen määrä). Ilman avainta tai virheessä tyhjä -> gradientti."""
+    if not UNSPLASH_ACCESS_KEY:
+        return DemoImages(), 0
+    queries = unsplash.image_queries(lead.primary_type, template)
+    candidates = await asyncio.to_thread(unsplash.find_candidates, lead.primary_type, template, UNSPLASH_ACCESS_KEY)
+    hero, mood, options = unsplash.choose_images(candidates)
+    searches = 1 if len(candidates) >= unsplash.MIN_CANDIDATES or len(queries) == 1 else 2
+    return DemoImages(hero=hero, mood=mood, options=options), searches
+
+
+def _track_downloads(photos: list[unsplash.DemoPhoto]) -> None:
+    # Unsplashin vaatimus: lataustapahtuma kun kuva asetetaan sivulle. Ajetaan vastauksen jälkeen.
+    for photo in photos:
+        unsplash.track_download(photo, UNSPLASH_ACCESS_KEY)
+
+
+def _used_photos(images: DemoImages) -> list[unsplash.DemoPhoto]:
+    return ([images.hero] if images.hero else []) + list(images.mood)
+
+
+def _log_demo_cost(lead_id: int, results: list[ChatResult], place_details_calls: int, unsplash_requests: int = 0) -> float:
     total = place_details_calls * PLACE_DETAILS_ENTERPRISE_USD
     for r in results:
         prices = next((p for name, p in MODEL_PRICES_PER_1M.items() if r.model.startswith(name)), None)
@@ -1335,7 +1365,8 @@ def _log_demo_cost(lead_id: int, results: list[ChatResult], place_details_calls:
     tokens = ", ".join(f"{r.model} in {r.input_tokens} / out {r.output_tokens}" for r in results)
     logger.info(
         f"Demo generoitu liidille {lead_id}: AI-kutsuja {len(results)} ({tokens}), "
-        f"Place Details {place_details_calls} kpl ({PLACE_DETAILS_FIELD_MASK}), arvio ~${total:.4f}"
+        f"Place Details {place_details_calls} kpl ({PLACE_DETAILS_FIELD_MASK}), "
+        f"Unsplash-pyyntöjä {unsplash_requests} (ilmainen API), arvio ~${total:.4f}"
     )
     return total
 
@@ -1348,6 +1379,7 @@ def list_demo_templates(_user: AuthUser = Depends(verify_token)) -> list[dict[st
 @app.post("/leads/{lead_id}/demo", response_model=DemoOut)
 async def generate_demo(
     lead_id: int,
+    background_tasks: BackgroundTasks,
     req: DemoGenerateRequest = DemoGenerateRequest(),
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
@@ -1374,8 +1406,12 @@ async def generate_demo(
     if _can_fetch_place_details(lead) and lead.google_place_id:
         place_calls = 1
         hours = await asyncio.to_thread(fetch_opening_hours, lead.google_place_id, GOOGLE_API_KEY)
-    stored = DemoStoredContent(**content.model_dump(), opening_hours=hours or [])
-    _log_demo_cost(lead_id, results, place_calls)
+    images, searches = await find_demo_images(lead, template)
+    stored = DemoStoredContent(**content.model_dump(), opening_hours=hours or [], images=images)
+    used = _used_photos(images)
+    if used:
+        background_tasks.add_task(_track_downloads, used)
+    _log_demo_cost(lead_id, results, place_calls, unsplash_requests=searches + len(used))
 
     html = _render_for(template, scheme, stored, lead, profile)
     demo = session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).first()
@@ -1408,6 +1444,7 @@ def read_demo(
 def update_demo(
     lead_id: int,
     req: DemoUpdateRequest,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
 ):
@@ -1423,7 +1460,23 @@ def update_demo(
 
     stored = DemoStoredContent.model_validate_json(demo.content_json)
     if req.content is not None:
-        stored = DemoStoredContent(**req.content.model_dump(), opening_hours=stored.opening_hours)
+        stored = DemoStoredContent(
+            **req.content.model_dump(), opening_hours=stored.opening_hours, images=stored.images
+        )
+    if req.hero_image_id is not None:
+        images = stored.images
+        if req.hero_image_id == "none":
+            new_hero = None
+        else:
+            new_hero = next((p for p in images.options if p.id == req.hero_image_id), None)
+            if new_hero is None:
+                raise HTTPException(422, "Unknown hero_image_id (must be one of content.images.options)")
+        before = {p.id for p in _used_photos(images)}
+        updated = DemoImages(hero=new_hero, mood=unsplash.mood_for(new_hero, images.options), options=images.options)
+        stored = stored.model_copy(update={"images": updated})
+        newly_used = [p for p in _used_photos(updated) if p.id not in before]
+        if newly_used and UNSPLASH_ACCESS_KEY:
+            background_tasks.add_task(_track_downloads, newly_used)
 
     demo.template, demo.color_scheme = template, scheme
     demo.content_json = stored.model_dump_json()
@@ -1449,7 +1502,11 @@ def delete_demo(
 DEMO_RESPONSE_HEADERS = {
     "X-Robots-Tag": "noindex, nofollow",
     # Demo on staattinen: ei skriptejä, ei ulkoisia resursseja, inline-CSS sallittu
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'",
+    # Kuvat hotlinkataan Unsplashista (API-ehto), fontit ovat inline data-URI:na
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://images.unsplash.com; "
+        "font-src data:; base-uri 'none'; form-action 'none'"
+    ),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store",

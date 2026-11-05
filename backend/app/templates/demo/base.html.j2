@@ -2,94 +2,160 @@
 <html lang="fi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<title>{{ business.name }} – luonnos</title>
+<meta name="theme-color" content="{{ colors.hero_from }}">
+<title>{{ business.name }}</title>
 <meta name="description" content="{{ content.hero_subtitle }}">
+{% if hero_image %}<link rel="preload" as="image" href="{{ hero_image.src }}" imagesrcset="{{ hero_image.srcset }}" imagesizes="100vw">{% endif %}
 <style>
+{{ font_face_css | safe }}
 :root{
   --bg:{{ colors.bg }};--surface:{{ colors.surface }};--text:{{ colors.text }};--muted:{{ colors.muted }};
   --primary:{{ colors.primary }};--on-primary:{{ colors.on_primary }};
-  --hero-from:{{ colors.hero_from }};--hero-to:{{ colors.hero_to }};--on-hero:{{ colors.on_hero }};
-  --radius:14px;--max:1040px;
+  --hero-from:{{ colors.hero_from }};--hero-to:{{ colors.hero_to }};
+  --font-heading:'{{ font.family }}',{{ font.fallback | safe }};
+  --font-body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --radius:16px;--max:1120px;--gutter:20px;
 }
 *,*::before,*::after{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  background:var(--bg);color:var(--text);line-height:1.6;font-size:17px;-webkit-font-smoothing:antialiased}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font-family:var(--font-body);background:var(--bg);color:var(--text);line-height:1.6;font-size:17px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{display:block;max-width:100%}
 a{color:var(--primary)}
-a:focus-visible,.btn:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
-.skip{position:absolute;left:-999px;top:0;background:var(--surface);padding:.5rem 1rem;z-index:10}
+:focus-visible{outline:3px solid var(--primary);outline-offset:3px;border-radius:6px}
+.skip{position:absolute;left:-999px;top:0;background:var(--surface);padding:.5rem 1rem;z-index:20}
 .skip:focus{left:1rem}
-.wrap{max-width:var(--max);margin:0 auto;padding:0 20px}
-.demo-banner{background:#111;color:#fff;font-size:14px;line-height:1.45;padding:10px 0}
-.demo-banner p{margin:0}
-.demo-banner a{color:#fff;text-decoration:underline}
-.demo-banner strong{font-weight:700}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
+h1,h2,h3,.brand{font-family:var(--font-heading);font-weight:{{ font.weight }};letter-spacing:{{ '-0.01em' if template == 'services' else '0' }}}
+svg.i{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* Luonnosbanneri: ohut ja hillitty */
+.demo-bar{background:#111;color:#e8e8e8;font-size:12px;line-height:1.4;padding:6px var(--gutter);text-align:center}
+.demo-bar a{color:#fff}
+/* Mobiilissa lyhyt versio (display:none poistaa myös ruudunlukijalta, ei toistoa) */
+.demo-bar .long{display:none}
+
+/* Header */
 .site-header{background:var(--surface);border-bottom:1px solid rgba(0,0,0,.06)}
-.site-header .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding-top:14px;padding-bottom:14px}
-.brand{font-weight:700;font-size:18px;color:var(--text);text-decoration:none;letter-spacing:-.01em}
-.nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none;font-size:15px}
-.nav a{color:var(--muted);text-decoration:none;padding:6px 0;display:inline-block}
+.site-header .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px}
+.brand{font-size:19px;line-height:1.15;color:var(--text);text-decoration:none;min-width:0;overflow-wrap:anywhere}
+.nav{display:none;gap:26px;margin:0;padding:0;list-style:none;font-size:15px}
+.nav a{color:var(--muted);text-decoration:none}
 .nav a:hover{color:var(--primary)}
-.hero{background:linear-gradient(135deg,var(--hero-from),var(--hero-to));color:var(--on-hero);position:relative;overflow:hidden}
-.hero .wrap{padding-top:72px;padding-bottom:80px;position:relative}
-.hero h1{font-size:clamp(30px,6vw,52px);line-height:1.1;margin:0 0 16px;letter-spacing:-.02em;max-width:18ch}
-.hero p{font-size:clamp(17px,2.4vw,21px);margin:0 0 28px;max-width:44ch;opacity:.95}
-.hero-deco{position:absolute;right:-40px;bottom:-40px;width:260px;height:260px;opacity:.14;color:var(--on-hero)}
-.btn{display:inline-flex;align-items:center;gap:10px;font-weight:600;font-size:17px;text-decoration:none;
-  border-radius:999px;padding:14px 26px;min-height:48px}
-.btn-light{background:#fff;color:var(--text)}
-.btn-light:hover{background:#f1f1f1}
-.btn svg{width:20px;height:20px;flex:none}
-section{padding:64px 0}
-section h2{font-size:clamp(24px,4vw,32px);margin:0 0 8px;letter-spacing:-.01em}
-.lead{color:var(--muted);margin:0 0 32px;max-width:60ch}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
-.card{background:var(--surface);border-radius:var(--radius);padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.05),0 6px 20px rgba(0,0,0,.04)}
-.card h3{margin:12px 0 6px;font-size:19px}
-.card p{margin:0;color:var(--muted)}
-.icon{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--primary);color:var(--on-primary)}
-.icon svg{width:24px;height:24px}
-.price-note{margin-top:22px;font-weight:600}
+/* Headerin soittonappi vain kun mobiilin alapalkki ei ole käytössä (ei kolmea Soita-nappia yhtä aikaa) */
+.header-call{display:none;align-items:center;gap:8px;background:var(--primary);color:var(--on-primary);text-decoration:none;font-weight:600;font-size:15px;border-radius:999px;padding:10px 16px;white-space:nowrap}
+.header-call svg.i{width:18px;height:18px}
+
+/* Hero */
+.hero{position:relative;color:#fff;background:linear-gradient(140deg,var(--hero-from),var(--hero-to));overflow:hidden;isolation:isolate}
+.hero-media{position:absolute;inset:0;z-index:-2}
+.hero-media img{width:100%;height:100%;object-fit:cover}
+.hero::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(to top,rgba(0,0,0,.78) 0%,rgba(0,0,0,.45) 55%,rgba(0,0,0,.25) 100%)}
+.hero.no-image::after{background:radial-gradient(circle at 85% 10%,rgba(255,255,255,.16),transparent 50%)}
+.hero .wrap{min-height:min(78svh,700px);display:flex;flex-direction:column;justify-content:flex-end;padding-top:72px;padding-bottom:56px}
+.eyebrow{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;margin:0 0 14px;opacity:.92}
+.hero h1{font-size:clamp(40px,10.5vw,80px);line-height:1.02;margin:0 0 18px;max-width:20ch;overflow-wrap:anywhere;text-wrap:balance}
+.hero-sub{font-size:clamp(18px,2.6vw,22px);line-height:1.5;margin:0 0 30px;max-width:36ch;opacity:.95}
+.actions{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;font-weight:600;font-size:17px;text-decoration:none;border-radius:999px;padding:14px 24px;min-height:52px}
+.btn-light{background:#fff;color:#111}
+.btn-ghost{color:#fff;border:1.5px solid rgba(255,255,255,.7)}
+.btn-ghost:hover{background:rgba(255,255,255,.12)}
+.btn-primary{background:var(--primary);color:var(--on-primary)}
+.credit{font-size:11px;line-height:1.3;opacity:.8;margin:0}
+.credit a{color:inherit}
+.hero .credit{position:absolute;right:var(--gutter);bottom:12px;max-width:60%;text-align:right}
+.hero-deco{position:absolute;right:-30px;top:40px;width:220px;height:220px;opacity:.13;stroke:#fff;stroke-width:1;fill:none}
+
+/* Osiot */
+section{padding:72px 0}
+section.hero{padding:0}
+section.gallery-section{padding-top:0}
+.no-margin{margin:0}
+.section-title{font-size:clamp(30px,6vw,44px);line-height:1.1;margin:0 0 10px}
+.lead{color:var(--muted);margin:0 0 34px;max-width:58ch}
+
+/* Palvelut: ruudukko joka ei jätä yksinäistä korttia riville */
+.services{display:grid;gap:14px;grid-template-columns:1fr}
+.card{background:var(--surface);border-radius:var(--radius);padding:22px;display:flex;gap:16px;align-items:flex-start;box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.05)}
+.card h3{margin:2px 0 4px;font-size:22px;line-height:1.2}
+.card p{margin:0;color:var(--muted);font-size:16px}
+.icon{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary);flex:none}
+.price-note{margin:26px 0 0;font-weight:600}
+
+/* Tunnelmakuvat */
+.gallery{display:grid;grid-auto-flow:column;grid-auto-columns:82%;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.gallery figure{margin:0;scroll-snap-align:start}
+.gallery img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:var(--radius);background:color-mix(in srgb,var(--primary) 10%,var(--bg))}
+.gallery figcaption{margin-top:6px;color:var(--muted)}
+
 .about{background:var(--surface)}
-.about p{max-width:65ch;margin:0}
-.two-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+.about-text{font-size:clamp(18px,2.4vw,21px);line-height:1.65;max-width:62ch;margin:0}
+
+/* Aukioloajat + yhteystiedot */
+.info{display:grid;gap:16px;grid-template-columns:1fr}
+.panel{background:var(--surface);border-radius:var(--radius);padding:26px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.05)}
+.panel h2{font-size:28px;margin:0 0 16px;display:flex;align-items:center;gap:10px}
+.panel h2 svg.i{color:var(--primary)}
 .hours{list-style:none;margin:0;padding:0}
-.hours li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}
+.hours li{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid rgba(0,0,0,.07)}
 .hours li:last-child{border-bottom:0}
-.contact dl{margin:0}
-.contact dt{font-weight:600;margin-top:14px}
-.contact dt:first-child{margin-top:0}
-.contact dd{margin:2px 0 0;color:var(--muted)}
-.btn-primary{background:var(--primary);color:var(--on-primary);margin-top:22px}
-.btn-primary:hover{filter:brightness(1.08)}
-.site-footer{background:#111;color:#ddd;padding:28px 0;font-size:14px}
-.site-footer p{margin:4px 0}
-.site-footer a{color:#fff}
+.hours .closed{color:var(--muted)}
+.contact-line{display:flex;gap:12px;align-items:flex-start;margin:0 0 14px}
+.contact-line svg.i{color:var(--primary);margin-top:3px}
+.contact-line a{color:var(--text);font-weight:600}
+.panel .btn{margin-top:8px;width:100%}
+
+.site-footer{padding:30px 0 40px;color:var(--muted);font-size:14px;border-top:1px solid rgba(0,0,0,.06)}
+.site-footer p{margin:0}
+
+/* Mobiilin kiinteä soittonappi */
+.call-bar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:10;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+body.has-call{padding-bottom:84px}
+
 {% block extra_css %}{% endblock %}
-@media (max-width:600px){
-  body{font-size:16px}
-  .hero .wrap{padding-top:52px;padding-bottom:60px}
-  section{padding:48px 0}
-  .hero-deco{width:180px;height:180px}
+
+@media (min-width:640px){
+  .demo-bar .long{display:inline}
+  .demo-bar .short{display:none}
+  .brand{font-size:21px}
+  .services{grid-template-columns:repeat(2,1fr)}
+  .services.n3>:last-child,.services.n5>:last-child{grid-column:1/-1}
+  .gallery{grid-auto-flow:row;grid-template-columns:repeat(2,1fr);overflow:visible}
+  .gallery.n3>:first-child{grid-column:1/-1}
+  .gallery.n3>:first-child img{aspect-ratio:16/7}
+  .info{grid-template-columns:repeat(2,1fr)}
+  .panel .btn{width:auto}
+}
+@media (min-width:960px){
+  :root{--gutter:32px}
+  .nav{display:flex}
+  .header-call{display:inline-flex}
+  .services.n3,.services.n6{grid-template-columns:repeat(3,1fr)}
+  .services.n3>:last-child{grid-column:auto}
+  .services.n4{grid-template-columns:repeat(2,1fr)}
+  .services.n5{grid-template-columns:repeat(6,1fr)}
+  .services.n5>*{grid-column:span 2}
+  .services.n5>:nth-child(4),.services.n5>:nth-child(5){grid-column:span 3}
+  .services.n5>:last-child{grid-column:span 3}
+  .card{flex-direction:column;padding:28px}
+  .gallery.n3{grid-template-columns:repeat(3,1fr)}
+  .gallery.n3>:first-child{grid-column:auto}
+  .gallery.n3>:first-child img,.gallery img{aspect-ratio:4/3}
+  .call-bar{display:none}
+  body.has-call{padding-bottom:0}
+  .hero .wrap{padding-bottom:80px}
 }
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
 </head>
-<body>
+<body{% if tel %} class="has-call"{% endif %}>
 <a class="skip" href="#main">Siirry sisältöön</a>
 
-<div class="demo-banner" role="note" aria-label="Luonnoksen tiedot">
-  <div class="wrap">
-    <p><strong>{{ banner }}</strong></p>
-    <p>
-      Luonnoksen tekijä: {{ sender.name }}{% if sender.company_name %}, {{ sender.company_name }}{% endif %}
-      {% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}
-      {% if sender.website %} · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website }}</a>{% endif %}
-    </p>
-  </div>
+<div class="demo-bar" role="note">
+  <span class="long">{{ banner }}</span><span class="short">Luonnos – ei virallinen sivu · {{ sender.name }}</span>{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %}<span class="long"> · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a></span>{% endif %}
 </div>
 
 <header class="site-header">
@@ -103,34 +169,43 @@ section h2{font-size:clamp(24px,4vw,32px);margin:0 0 8px;letter-spacing:-.01em}
         <li><a href="#yhteystiedot">Yhteystiedot</a></li>
       </ul>
     </nav>
+    {% if tel %}<a class="header-call" href="tel:{{ tel }}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('phone') }}</svg>Soita</a>{% endif %}
   </div>
 </header>
 
 <main id="main">
-  <section class="hero" id="top" aria-labelledby="hero-title">
+  <section class="hero{% if not hero_image %} no-image{% endif %}" id="top" aria-labelledby="hero-title">
+    {% if hero_image %}
+    <div class="hero-media"><img src="{{ hero_image.src }}" srcset="{{ hero_image.srcset }}" sizes="100vw" alt="" fetchpriority="high" decoding="async"></div>
+    {% else %}
+    <svg class="hero-deco" viewBox="0 0 24 24" aria-hidden="true">{% block deco %}{% endblock %}</svg>
+    {% endif %}
     <div class="wrap">
-      <h1 id="hero-title">{{ content.hero_title }}</h1>
-      <p>{{ content.hero_subtitle }}</p>
-      {% if tel %}
-      <a class="btn btn-light" href="tel:{{ tel }}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>
-        Soita {{ business.phone }}
-      </a>
-      {% endif %}
-      <svg class="hero-deco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">{% block deco %}{% endblock %}</svg>
+      <p class="eyebrow">{{ content.hero_title }}</p>
+      <h1 id="hero-title">{{ business.name }}</h1>
+      <p class="hero-sub">{{ content.hero_subtitle }}</p>
+      <div class="actions">
+        {% if tel %}<a class="btn btn-light" href="tel:{{ tel }}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('phone') }}</svg>Soita {{ business.phone }}</a>{% endif %}
+        {% if business.maps_url %}<a class="btn btn-ghost" href="{{ business.maps_url }}" rel="noopener noreferrer"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('pin') }}</svg>Reittiohjeet</a>{% endif %}
+      </div>
     </div>
+    {% if hero_image %}
+    <p class="credit">Kuva: <a href="{{ hero_image.credit_url }}" rel="noopener noreferrer">{{ hero_image.credit_name }}</a> / <a href="{{ hero_image.unsplash_url }}" rel="noopener noreferrer">Unsplash</a></p>
+    {% endif %}
   </section>
 
   <section id="palvelut" aria-labelledby="palvelut-title">
     <div class="wrap">
-      <h2 id="palvelut-title">{{ services_title }}</h2>
+      <h2 class="section-title" id="palvelut-title">{{ services_title }}</h2>
       <p class="lead">{% block services_lead %}Tutustukaa palveluihimme.{% endblock %}</p>
-      <div class="grid">
-        {% for service in content.services %}
+      <div class="services n{{ services | length }}">
+        {% for service, svg in services %}
         <article class="card">
-          <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{% block service_icon scoped %}{% endblock %}</svg></div>
-          <h3>{{ service.name }}</h3>
-          <p>{{ service.description }}</p>
+          <div class="icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24">{{ svg }}</svg></div>
+          <div>
+            <h3>{{ service.name }}</h3>
+            <p>{{ service.description }}</p>
+          </div>
         </article>
         {% endfor %}
       </div>
@@ -138,37 +213,49 @@ section h2{font-size:clamp(24px,4vw,32px);margin:0 0 8px;letter-spacing:-.01em}
     </div>
   </section>
 
+  {% if mood_images %}
+  <section class="gallery-section" aria-label="Kuvia">
+    <div class="wrap">
+      <div class="gallery n{{ mood_images | length }}">
+        {% for img in mood_images %}
+        <figure>
+          <img src="{{ img.src }}" srcset="{{ img.srcset }}" sizes="(min-width: 960px) 40vw, (min-width: 640px) 50vw, 82vw" alt="" loading="lazy" decoding="async">
+          <figcaption class="credit">Kuva: <a href="{{ img.credit_url }}" rel="noopener noreferrer">{{ img.credit_name }}</a> / <a href="{{ img.unsplash_url }}" rel="noopener noreferrer">Unsplash</a></figcaption>
+        </figure>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="about" id="tietoa" aria-labelledby="tietoa-title">
     <div class="wrap">
-      <h2 id="tietoa-title">Tietoa meistä</h2>
-      <p>{{ content.about }}</p>
+      <h2 class="section-title" id="tietoa-title">Tietoa meistä</h2>
+      <p class="about-text">{{ content.about }}</p>
     </div>
   </section>
 
   <section aria-label="Aukioloajat ja yhteystiedot">
-    <div class="wrap two-col">
-      <div id="aukioloajat">
-        <h2>Aukioloajat</h2>
+    <div class="wrap info">
+      <div class="panel" id="aukioloajat">
+        <h2><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('clock') }}</svg>Aukioloajat</h2>
         {% if content.opening_hours %}
         <ul class="hours">
           {% for line in content.opening_hours %}
           {% set parts = line.split(': ', 1) %}
-          <li><span>{{ parts[0] | capitalize }}</span><span>{{ parts[1] if parts | length > 1 else '' }}</span></li>
+          {% set value = parts[1] if parts | length > 1 else '' %}
+          <li><span>{{ parts[0] | capitalize }}</span><span{% if value | lower == 'suljettu' %} class="closed"{% endif %}>{{ value }}</span></li>
           {% endfor %}
         </ul>
         {% else %}
-        <p class="lead">Kysykää aukioloajat puhelimitse.</p>
+        <p class="lead no-margin">Kysykää aukioloajat puhelimitse.</p>
         {% endif %}
       </div>
-      <div id="yhteystiedot" class="contact">
-        <h2>Yhteystiedot</h2>
-        <dl>
-          {% if business.address %}<dt>Osoite</dt><dd>{{ business.address }}</dd>{% endif %}
-          {% if business.phone %}<dt>Puhelin</dt><dd>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}</dd>{% endif %}
-        </dl>
-        {% if business.maps_url %}
-        <a class="btn btn-primary" href="{{ business.maps_url }}" rel="noopener noreferrer">Avaa Google Mapsissa</a>
-        {% endif %}
+      <div class="panel" id="yhteystiedot">
+        <h2><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('pin') }}</svg>Yhteystiedot</h2>
+        {% if business.address %}<p class="contact-line"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('home') }}</svg><span>{{ business.address }}</span></p>{% endif %}
+        {% if business.phone %}<p class="contact-line"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('phone') }}</svg>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}<span>{{ business.phone }}</span>{% endif %}</p>{% endif %}
+        {% if business.maps_url %}<a class="btn btn-primary" href="{{ business.maps_url }}" rel="noopener noreferrer">Avaa Google Mapsissa</a>{% endif %}
       </div>
     </div>
   </section>
@@ -176,9 +263,10 @@ section h2{font-size:clamp(24px,4vw,32px);margin:0 0 8px;letter-spacing:-.01em}
 
 <footer class="site-footer">
   <div class="wrap">
-    <p>&copy; {{ business.name }}{% if business.city %}, {{ business.city }}{% endif %}</p>
-    <p>{{ banner }} Luonnoksen teki {{ sender.name }}{% if sender.company_name %} ({{ sender.company_name }}){% endif %}{% if sender.phone %}, {{ sender.phone }}{% endif %}.</p>
+    <p>{{ business.name }}{% if business.city %} · {{ business.city }}{% endif %}</p>
   </div>
 </footer>
+
+{% if tel %}<a class="btn btn-primary call-bar" href="tel:{{ tel }}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true">{{ icon('phone') }}</svg>Soita {{ business.phone }}</a>{% endif %}
 </body>
 </html>
