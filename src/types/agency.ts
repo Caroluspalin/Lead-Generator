@@ -13,6 +13,8 @@ export const PIPELINE_STATUSES: PipelineStatus[] = [
   'Rejected',
 ];
 
+export type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history';
+
 export type WebsiteStatus = 'NO WEBSITE' | 'BROKEN WEBSITE' | 'NOT MOBILE' | 'WEBSITE OK';
 
 // Hakutulos backendista (ei persistoida viela)

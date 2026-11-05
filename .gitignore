@@ -26,6 +26,7 @@ dist-ssr
 # --- Security: ÄLÄ KOSKAAN PUSHAA NÄITÄ ---
 .env
 .env.*
+!.env.example
 *.env
 
 # --- Python ---

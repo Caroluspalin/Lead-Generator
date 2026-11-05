@@ -2,7 +2,6 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
   Users,
-  Globe,
   AlertTriangle,
   Smartphone,
   CheckCircle2,

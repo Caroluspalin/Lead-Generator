@@ -31,6 +31,15 @@
   - POST-operaatiot asettavat `user_id` serverissä (`AuthUser.id`), ei clientin syötteestä
   - ScannedPlace pysyy globaalina cachena (julkinen place_id, per-user cache kaksinkertaistaisi API-laskun)
   - Dev-SQLite poistettu schema-muutosten takia (CLAUDE.md:n ohjeen mukaan, ei Alembicia)
+- **Phase 11c**: Korjaukset ja riippuvuuksien lukitus:
+  - `backend/requirements.txt` lukittu tarkkoihin versioihin (`==`), mukana myös SQLAlchemy, pydantic ja starlette
+  - `datetime.utcnow()` → `datetime.now(timezone.utc)` (`models.utc_now()`): korjaa 500-virheen "Datetime values must have timezone information" uusimmalla SQLModelilla
+  - `@app.on_event("startup")` → `lifespan`-handler
+  - `lucide-react` lisätty `package.json`:iin (puuttui, vaikka käytössä kaikkialla)
+  - TypeScript-buildikorjaukset: `SidebarNav`-togglen tyyppi (`React.Dispatch<React.SetStateAction<boolean>>`), `import type { ReactNode }` konteksteissa, käyttämätön `Globe`-import, Retry-napin `onClick` (välitti MouseEventin hakusanaksi)
+  - `NavTab`-tyyppi siirretty `src/types/agency.ts`:ään, käyttämätön `Navbar.tsx` poistettu
+  - ESLint: `react-refresh/only-export-components` ohitettu rivikohtaisesti `useAuth`/`usePipeline`-hookeille
+  - `.gitignore`: `!.env.example` → `.env.example`-tiedostot ovat nyt oikeasti versionhallinnassa
 
 ## Seuraavaksi
 

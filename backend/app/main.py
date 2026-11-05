@@ -5,11 +5,12 @@ import io
 import logging
 import smtplib
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List, Optional, Dict
+from typing import AsyncIterator, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Depends
@@ -68,8 +69,15 @@ USE_LIVE_GOOGLE = os.getenv("USE_LIVE_GOOGLE", "False").lower() == "true"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Tietokannan alustus käynnistyessä
+    create_db_and_tables()
+    yield
+
+
 # App Initialization
-app = FastAPI(title="Agency Hunter CRM", version="2.1.0")
+app = FastAPI(title="Agency Hunter CRM", version="2.1.0", lifespan=lifespan)
 
 # Tuotanto: aseta ALLOWED_ORIGINS=https://app.example.com,https://example.com
 # Dev: oletuksena Viten localhost
@@ -86,11 +94,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Tietokannan alustus käynnistyessä
-@app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
 
 # --- GOOGLE SEARCH LOGIC (Scraper) ---
 
@@ -629,7 +632,7 @@ async def generate_email(
             context = await asyncio.to_thread(scrape_website_text, db_lead.website)
             if context:
                 db_lead.website_context = context
-                db_lead.scraped_at = datetime.utcnow()
+                db_lead.scraped_at = datetime.now(timezone.utc)
                 session.add(db_lead)
                 session.commit()
                 session.refresh(db_lead)

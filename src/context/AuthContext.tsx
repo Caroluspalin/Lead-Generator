@@ -3,8 +3,8 @@ import React, {
   useContext,
   useEffect,
   useState,
-  ReactNode,
 } from 'react';
+import type { ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isAuthConfigured } from '../lib/supabaseClient';
 
@@ -82,6 +82,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
+// Hook kuuluu providerin kanssa samaan tiedostoon; fast refresh tekee vain täyden reloadin tälle tiedostolle.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = (): AuthContextValue => {
   const ctx = useContext(AuthContext);
   if (!ctx) {

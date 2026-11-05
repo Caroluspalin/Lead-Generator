@@ -12,7 +12,7 @@ import {
 import { motion } from 'framer-motion';
 import { usePipeline } from '../context/PipelineContext';
 import { useAuth } from '../context/AuthContext';
-import type { NavTab } from './Navbar';
+import type { NavTab } from '../types/agency';
 
 interface SidebarNavProps {
   activeTab: NavTab;
@@ -235,7 +235,7 @@ const Logo: React.FC = () => {
 
 const ToggleClose: React.FC<{
   open: boolean;
-  setOpen: (value: boolean) => void;
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }> = ({ open, setOpen }) => {
   return (
     <motion.button

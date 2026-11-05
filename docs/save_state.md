@@ -104,9 +104,14 @@ Globaali cache (ei user_id:tä): place_id on julkista Google-dataa ja per-user c
 - **Deep Scan**: Verkkosivun leipätekstin scraping (requests + BeautifulSoup, 5s timeout) → teksti cachetetaan Lead.website_context -kenttään → OpenAI käyttää sitä personoitujen jäänmurtajien generointiin sähköposteihin. Vikasietoinen: jos scraping epäonnistuu, meili generoidaan ilman personointia
 - **Auth**: Supabase Auth + JWT. Frontend käyttää `@supabase/supabase-js`, session tallentuu selaimeen, access_token lisätään automaattisesti `apiFetch`-helperillä Authorization-headeriin. Backend verifioi JWT:n (`backend/app/auth.py`, `verify_token`-dependency) tukien sekä uusia ES256/RS256-tokeneita JWKS-endpointista (`PyJWKClient`, `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, avainten cache, macOS-venvissä certifi-SSL-context) että legacy-HS256-tokeneita `SUPABASE_JWT_SECRET`-salaisuudella. Algoritmi tunnistetaan tokenin headerista. `AUTH_DISABLED=true` ohittaa verifioinnin dev-kehityksessä. SidebarNav näyttää kirjautuneen käyttäjän emailin ja sign-out-napin
 - **Multi-tenancy**: Lead, EmailDraft ja SearchHistoryEntry sisältävät `user_id`-kentän (Supabase UUID, indexed). Kaikki endpointit suodattavat `user_id == current_user.id`: GET-listat `.where(user_id)`, PATCH/DELETE/single-GET palauttavat 404:n (ei 403:a) jos toisen käyttäjän resurssia yritetään käyttää — ei paljasta resurssien olemassaoloa. POST-operaatiot asettavat `user_id` serverissä `AuthUser.id`:stä (ei clientin syötteestä). `Lead.google_place_id` ei ole enää globaalisti unique — `UniqueConstraint("google_place_id", "user_id")` sallii saman yrityksen useammalle käyttäjälle. ScannedPlace pysyy globaalina cachena (ei user_id:tä, ks. tietokantaosio)
+- **Aikaleimat**: Kaikki datetime-kentät luodaan aikavyöhykkeellisinä (`models.utc_now()` = `datetime.now(timezone.utc)`). Uudet SQLModel-versiot hylkäävät naive-datetimet. Älä käytä `datetime.utcnow()`:ia
+- **Käynnistys**: DB-taulut luodaan FastAPI:n `lifespan`-handlerissa (ei vanhentunutta `@app.on_event("startup")`)
+- **Riippuvuudet**: `backend/requirements.txt` lukittu tarkkoihin versioihin (`==`), testattu Python 3.13:lla puhtaassa venvissä. Päivitä versioita tietoisesti, ei automaattisesti
 - **Tietokanta**: Dev SQLite, tuotanto PostgreSQL (Supabase). `DATABASE_URL` tukee `postgres://`- ja `postgresql://`-muotoja, Postgresissa pool_pre_ping + pool_size=5
 
 ## Ympäristömuuttujat (backend/.env)
+
+Pohja: `backend/.env.example` (versionhallinnassa, `.gitignore`:ssa poikkeus `!.env.example`).
 
 ```
 DATABASE_URL=sqlite:///agency_hunter.db   # tai postgresql://... Supabasesta
@@ -127,6 +132,8 @@ SMTP_FROM=
 ```
 
 ## Ympäristömuuttujat (frontend .env.local)
+
+Pohja: `.env.example` repon juuressa.
 
 ```
 VITE_API_BASE=http://127.0.0.1:8000
@@ -160,6 +167,5 @@ src/components/SearchHistoryView.tsx — Hakuhistoria + re-search
 src/components/AddBusinessModal.tsx — Manuaalinen liidin lisäys
 src/components/SidebarNav.tsx   — Sivupalkki-navigaatio
 src/components/LeadTable.tsx    — Hakutulosten taulukko
-src/components/Navbar.tsx       — NavTab-tyypit (ei käytössä, SidebarNav korvaa)
-src/types/agency.ts            — Agency, SavedAgency, PipelineStatus
+src/types/agency.ts            — Agency, SavedAgency, PipelineStatus, NavTab
 ```

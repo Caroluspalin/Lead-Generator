@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import LeadTable from './components/LeadTable';
 import SidebarNav from './components/SidebarNav';
 import AddBusinessModal from './components/AddBusinessModal';
-import type { NavTab } from './components/Navbar';
+import type { NavTab } from './types/agency';
 import PipelineBoard from './components/PipelineBoard';
 import DashboardView from './components/DashboardView';
 import SearchHistoryView from './components/SearchHistoryView';
@@ -228,7 +228,7 @@ function AppShell() {
                   <span className="flex-1">{error}</span>
                   <button
                     type="button"
-                    onClick={doSearch}
+                    onClick={() => doSearch()}
                     className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition-colors"
                   >
                     <RefreshCw size={12} />

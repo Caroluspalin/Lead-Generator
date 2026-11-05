@@ -1,8 +1,12 @@
 # FILE: backend/app/models.py
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field
 from sqlalchemy import UniqueConstraint
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 # Pipeline-statukset (liidin myyntivaihe)
 # Shortlisted -> Contacted -> Proposal Received -> Hired | Rejected
@@ -17,7 +21,7 @@ class SearchHistoryEntry(SQLModel, table=True):
     business_type: str
     city: str
     result_count: int = 0
-    searched_at: datetime = Field(default_factory=datetime.utcnow)
+    searched_at: datetime = Field(default_factory=utc_now)
 
 
 class EmailDraft(SQLModel, table=True):
@@ -27,7 +31,7 @@ class EmailDraft(SQLModel, table=True):
     subject: str
     body: str
     model: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class ScannedPlace(SQLModel, table=True):
@@ -35,7 +39,7 @@ class ScannedPlace(SQLModel, table=True):
     # Ei user_id:ta — place_id on julkista dataa ja per-user cache kaksinkertaistaisi API-laskun.
     id: Optional[int] = Field(default=None, primary_key=True)
     google_place_id: str = Field(index=True, unique=True)
-    scanned_at: datetime = Field(default_factory=datetime.utcnow)
+    scanned_at: datetime = Field(default_factory=utc_now)
 
 
 class Lead(SQLModel, table=True):
@@ -62,8 +66,8 @@ class Lead(SQLModel, table=True):
     source: str = Field(default="API")  # API tai MANUAL
     notes: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 class LeadCreate(SQLModel):
     name: str

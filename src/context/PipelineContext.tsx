@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import type { Agency, SavedAgency, PipelineStatus } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { useAuth } from './AuthContext';
@@ -134,6 +135,8 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
+// Hook kuuluu providerin kanssa samaan tiedostoon; fast refresh tekee vain täyden reloadin tälle tiedostolle.
+// eslint-disable-next-line react-refresh/only-export-components
 export const usePipeline = (): PipelineContextValue => {
   const ctx = useContext(PipelineContext);
   if (!ctx) {
