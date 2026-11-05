@@ -34,6 +34,27 @@ class EmailDraft(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+# Demo-sivun tila: draft = vain paikallinen esikatselu, published = julkaistu (Vaihe B), expired = vanhentunut
+DEMO_STATUSES = ["draft", "published", "expired"]
+
+
+class Demo(SQLModel, table=True):
+    # Yksi demo per liidi. Uudelleengenerointi päivittää saman rivin ja säilyttää public_tokenin,
+    # jotta jo lähetetty linkki pysyy toimivana.
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    lead_id: int = Field(index=True, unique=True)
+    template: str
+    color_scheme: str
+    content_json: str  # DemoStoredContent JSONina (sis. generointihetken aukioloajat)
+    html: str
+    public_token: str = Field(index=True, unique=True)
+    status: str = Field(default="draft")
+    created_at: datetime = Field(default_factory=utc_now)
+    published_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+
 class SenderProfile(SQLModel, table=True):
     # Yksi per käyttäjä: lähettäjän tiedot sähköposti- ja puhelinprompteihin + allekirjoitus
     id: Optional[int] = Field(default=None, primary_key=True)

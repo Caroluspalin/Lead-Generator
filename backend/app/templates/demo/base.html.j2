@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>{{ business.name }} – luonnos</title>
+<meta name="description" content="{{ content.hero_subtitle }}">
+<style>
+:root{
+  --bg:{{ colors.bg }};--surface:{{ colors.surface }};--text:{{ colors.text }};--muted:{{ colors.muted }};
+  --primary:{{ colors.primary }};--on-primary:{{ colors.on_primary }};
+  --hero-from:{{ colors.hero_from }};--hero-to:{{ colors.hero_to }};--on-hero:{{ colors.on_hero }};
+  --radius:14px;--max:1040px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);color:var(--text);line-height:1.6;font-size:17px;-webkit-font-smoothing:antialiased}
+a{color:var(--primary)}
+a:focus-visible,.btn:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
+.skip{position:absolute;left:-999px;top:0;background:var(--surface);padding:.5rem 1rem;z-index:10}
+.skip:focus{left:1rem}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 20px}
+.demo-banner{background:#111;color:#fff;font-size:14px;line-height:1.45;padding:10px 0}
+.demo-banner p{margin:0}
+.demo-banner a{color:#fff;text-decoration:underline}
+.demo-banner strong{font-weight:700}
+.site-header{background:var(--surface);border-bottom:1px solid rgba(0,0,0,.06)}
+.site-header .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding-top:14px;padding-bottom:14px}
+.brand{font-weight:700;font-size:18px;color:var(--text);text-decoration:none;letter-spacing:-.01em}
+.nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none;font-size:15px}
+.nav a{color:var(--muted);text-decoration:none;padding:6px 0;display:inline-block}
+.nav a:hover{color:var(--primary)}
+.hero{background:linear-gradient(135deg,var(--hero-from),var(--hero-to));color:var(--on-hero);position:relative;overflow:hidden}
+.hero .wrap{padding-top:72px;padding-bottom:80px;position:relative}
+.hero h1{font-size:clamp(30px,6vw,52px);line-height:1.1;margin:0 0 16px;letter-spacing:-.02em;max-width:18ch}
+.hero p{font-size:clamp(17px,2.4vw,21px);margin:0 0 28px;max-width:44ch;opacity:.95}
+.hero-deco{position:absolute;right:-40px;bottom:-40px;width:260px;height:260px;opacity:.14;color:var(--on-hero)}
+.btn{display:inline-flex;align-items:center;gap:10px;font-weight:600;font-size:17px;text-decoration:none;
+  border-radius:999px;padding:14px 26px;min-height:48px}
+.btn-light{background:#fff;color:var(--text)}
+.btn-light:hover{background:#f1f1f1}
+.btn svg{width:20px;height:20px;flex:none}
+section{padding:64px 0}
+section h2{font-size:clamp(24px,4vw,32px);margin:0 0 8px;letter-spacing:-.01em}
+.lead{color:var(--muted);margin:0 0 32px;max-width:60ch}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.card{background:var(--surface);border-radius:var(--radius);padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.05),0 6px 20px rgba(0,0,0,.04)}
+.card h3{margin:12px 0 6px;font-size:19px}
+.card p{margin:0;color:var(--muted)}
+.icon{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--primary);color:var(--on-primary)}
+.icon svg{width:24px;height:24px}
+.price-note{margin-top:22px;font-weight:600}
+.about{background:var(--surface)}
+.about p{max-width:65ch;margin:0}
+.two-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+.hours{list-style:none;margin:0;padding:0}
+.hours li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}
+.hours li:last-child{border-bottom:0}
+.contact dl{margin:0}
+.contact dt{font-weight:600;margin-top:14px}
+.contact dt:first-child{margin-top:0}
+.contact dd{margin:2px 0 0;color:var(--muted)}
+.btn-primary{background:var(--primary);color:var(--on-primary);margin-top:22px}
+.btn-primary:hover{filter:brightness(1.08)}
+.site-footer{background:#111;color:#ddd;padding:28px 0;font-size:14px}
+.site-footer p{margin:4px 0}
+.site-footer a{color:#fff}
+{% block extra_css %}{% endblock %}
+@media (max-width:600px){
+  body{font-size:16px}
+  .hero .wrap{padding-top:52px;padding-bottom:60px}
+  section{padding:48px 0}
+  .hero-deco{width:180px;height:180px}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+
+<div class="demo-banner" role="note" aria-label="Luonnoksen tiedot">
+  <div class="wrap">
+    <p><strong>{{ banner }}</strong></p>
+    <p>
+      Luonnoksen tekijä: {{ sender.name }}{% if sender.company_name %}, {{ sender.company_name }}{% endif %}
+      {% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}
+      {% if sender.website %} · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website }}</a>{% endif %}
+    </p>
+  </div>
+</div>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#top">{{ business.name }}</a>
+    <nav aria-label="Päävalikko">
+      <ul class="nav">
+        <li><a href="#palvelut">{{ services_title }}</a></li>
+        <li><a href="#tietoa">Tietoa meistä</a></li>
+        <li><a href="#aukioloajat">Aukioloajat</a></li>
+        <li><a href="#yhteystiedot">Yhteystiedot</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top" aria-labelledby="hero-title">
+    <div class="wrap">
+      <h1 id="hero-title">{{ content.hero_title }}</h1>
+      <p>{{ content.hero_subtitle }}</p>
+      {% if tel %}
+      <a class="btn btn-light" href="tel:{{ tel }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>
+        Soita {{ business.phone }}
+      </a>
+      {% endif %}
+      <svg class="hero-deco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">{% block deco %}{% endblock %}</svg>
+    </div>
+  </section>
+
+  <section id="palvelut" aria-labelledby="palvelut-title">
+    <div class="wrap">
+      <h2 id="palvelut-title">{{ services_title }}</h2>
+      <p class="lead">{% block services_lead %}Tutustukaa palveluihimme.{% endblock %}</p>
+      <div class="grid">
+        {% for service in content.services %}
+        <article class="card">
+          <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{% block service_icon scoped %}{% endblock %}</svg></div>
+          <h3>{{ service.name }}</h3>
+          <p>{{ service.description }}</p>
+        </article>
+        {% endfor %}
+      </div>
+      <p class="price-note">{{ content.price_note }}</p>
+    </div>
+  </section>
+
+  <section class="about" id="tietoa" aria-labelledby="tietoa-title">
+    <div class="wrap">
+      <h2 id="tietoa-title">Tietoa meistä</h2>
+      <p>{{ content.about }}</p>
+    </div>
+  </section>
+
+  <section aria-label="Aukioloajat ja yhteystiedot">
+    <div class="wrap two-col">
+      <div id="aukioloajat">
+        <h2>Aukioloajat</h2>
+        {% if content.opening_hours %}
+        <ul class="hours">
+          {% for line in content.opening_hours %}
+          {% set parts = line.split(': ', 1) %}
+          <li><span>{{ parts[0] | capitalize }}</span><span>{{ parts[1] if parts | length > 1 else '' }}</span></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="lead">Kysykää aukioloajat puhelimitse.</p>
+        {% endif %}
+      </div>
+      <div id="yhteystiedot" class="contact">
+        <h2>Yhteystiedot</h2>
+        <dl>
+          {% if business.address %}<dt>Osoite</dt><dd>{{ business.address }}</dd>{% endif %}
+          {% if business.phone %}<dt>Puhelin</dt><dd>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}</dd>{% endif %}
+        </dl>
+        {% if business.maps_url %}
+        <a class="btn btn-primary" href="{{ business.maps_url }}" rel="noopener noreferrer">Avaa Google Mapsissa</a>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>&copy; {{ business.name }}{% if business.city %}, {{ business.city }}{% endif %}</p>
+    <p>{{ banner }} Luonnoksen teki {{ sender.name }}{% if sender.company_name %} ({{ sender.company_name }}){% endif %}{% if sender.phone %}, {{ sender.phone }}{% endif %}.</p>
+  </div>
+</footer>
+</body>
+</html>

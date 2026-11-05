@@ -118,15 +118,19 @@ class FakeOpenAI:
 
     calls: list[dict[str, Any]] = []
     reply: str = "  Hei, testiviesti.  "
+    # Jos ei tyhjä, vastaukset otetaan järjestyksessä (esim. hylätty + korjattu uudelleenyritys)
+    replies: list[str] = []
 
     def __init__(self, api_key: str) -> None:
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **kwargs: Any) -> SimpleNamespace:
         FakeOpenAI.calls.append(kwargs)
+        text = FakeOpenAI.replies.pop(0) if FakeOpenAI.replies else FakeOpenAI.reply
         return SimpleNamespace(
             model="gpt-4o-mini-test",
-            choices=[SimpleNamespace(message=SimpleNamespace(content=FakeOpenAI.reply))],
+            choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+            usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=400),
         )
 
 
@@ -134,6 +138,7 @@ class FakeOpenAI:
 def fake_openai(monkeypatch: pytest.MonkeyPatch) -> type[FakeOpenAI]:
     FakeOpenAI.calls = []
     FakeOpenAI.reply = "  Hei, testiviesti.  "
+    FakeOpenAI.replies = []
     monkeypatch.setattr("app.main.OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
     return FakeOpenAI

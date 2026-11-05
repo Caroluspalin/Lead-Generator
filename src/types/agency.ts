@@ -15,6 +15,46 @@ export const PIPELINE_STATUSES: PipelineStatus[] = [
 
 export type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history' | 'settings';
 
+// Demosivu (backend demo_site.py): AI kirjoittaa vain nämä tekstit, HTML tulee pohjasta
+export interface DemoService {
+  name: string;
+  description: string;
+}
+
+export interface DemoContent {
+  hero_title: string;
+  hero_subtitle: string;
+  about: string;
+  services: DemoService[];
+  price_note: string;
+}
+
+export interface DemoStoredContent extends DemoContent {
+  opening_hours: string[];
+}
+
+export type DemoStatus = 'draft' | 'published' | 'expired';
+
+export interface Demo {
+  id: number;
+  lead_id: number;
+  template: string;
+  color_scheme: string;
+  content: DemoStoredContent;
+  public_token: string;
+  preview_url: string;
+  status: DemoStatus;
+  created_at: string;
+  published_at: string | null;
+  expires_at: string | null;
+}
+
+export interface DemoTemplateOption {
+  id: string;
+  label: string;
+  color_schemes: { id: string; label: string }[];
+}
+
 // PUT /sender-profile -runko
 export interface SenderProfileInput {
   name: string;

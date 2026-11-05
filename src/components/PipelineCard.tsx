@@ -15,6 +15,7 @@ import {
   Loader2,
   PhoneCall,
   Ban,
+  LayoutTemplate,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
@@ -22,6 +23,7 @@ import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
 import CallScriptModal from './CallScriptModal';
+import DemoModal from './DemoModal';
 import { ScoreBadge, RatingDisplay } from './ScoreBadge';
 
 interface PipelineCardProps {
@@ -46,6 +48,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [findingEmail, setFindingEmail] = useState(false);
   const [callScriptOpen, setCallScriptOpen] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(false);
   const { findEmail, setDoNotContact } = usePipeline();
 
   const handleToggleDoNotContact = async () => {
@@ -320,6 +323,14 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           </button>
         </div>
         <button
+          onClick={() => setDemoOpen(true)}
+          disabled={agency.do_not_contact}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-sky-700 bg-sky-50 hover:bg-sky-100 border-2 border-sky-200 hover:border-sky-300 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <LayoutTemplate size={15} />
+          Generate demo
+        </button>
+        <button
           onClick={handleToggleDoNotContact}
           className="w-full text-xs font-medium text-slate-500 hover:text-rose-700 py-1 transition-colors"
         >
@@ -338,6 +349,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         onClose={() => setCallScriptOpen(false)}
         agency={agency}
       />
+      <DemoModal isOpen={demoOpen} onClose={() => setDemoOpen(false)} agency={agency} />
     </motion.div>
   );
 };

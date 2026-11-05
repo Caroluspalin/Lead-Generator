@@ -1,0 +1,8 @@
+{% extends "base.html.j2" %}
+{% block extra_css %}
+.hero{background:radial-gradient(circle at 85% 15%,rgba(255,255,255,.18),transparent 45%),linear-gradient(140deg,var(--hero-from),var(--hero-to))}
+.card{border-top:4px solid var(--primary)}
+{% endblock %}
+{% block deco %}<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>{% endblock %}
+{% block services_lead %}Tutustukaa palveluihimme ja varatkaa aika puhelimitse.{% endblock %}
+{% block service_icon %}<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>{% endblock %}

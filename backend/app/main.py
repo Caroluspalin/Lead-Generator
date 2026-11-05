@@ -18,7 +18,7 @@ from urllib.parse import quote_plus, urlparse
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 from pydantic import BaseModel
@@ -27,12 +27,32 @@ import requests
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
 from .models import (
-    Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate, utc_now,
+    Demo, Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate, utc_now,
+)
+from .demo_site import (
+    DemoBusiness,
+    DemoContent,
+    DemoGenerationError,
+    DemoSender,
+    DemoStoredContent,
+    DEMO_SYSTEM_PROMPT,
+    PLACE_DETAILS_FIELD_MASK,
+    TEMPLATES,
+    build_demo_prompt,
+    fetch_opening_hours,
+    new_public_token,
+    parse_ai_content,
+    render_demo_html,
+    retry_prompt,
+    template_for_primary_type,
+    templates_catalog,
+    validate_template_choice,
 )
 from .utils.scraper import scrape_website_text
 from .utils.website_check import analyze_website
 from .utils.contact_finder import find_contact_email
 from .scoring import lead_score
+from .text_quality import FORBIDDEN_PATTERNS, PRICE_RE, find_forbidden_words, word_count  # noqa: F401
 from .auth import verify_token, AuthUser
 
 # --- CONFIGURATION ---
@@ -743,6 +763,8 @@ def delete_lead(
     db_lead = session.get(Lead, lead_id)
     if not db_lead or db_lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found")
+    for demo in session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).all():
+        session.delete(demo)
     session.delete(db_lead)
     session.commit()
     return {"ok": True}
@@ -756,6 +778,13 @@ EMAIL_MODEL = os.getenv("EMAIL_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 EMAIL_REASONING_EFFORT = os.getenv("EMAIL_REASONING_EFFORT", "").strip().lower()
 # Reasoning-tokenit lasketaan max_completion_tokens-rajaan -> lisävara, ettei vastaus katkea tyhjäksi
 REASONING_TOKEN_HEADROOM = 4000
+# Demosivujen sisältö: oletuksena sama malli kuin sähköposteissa
+SITE_MODEL = os.getenv("SITE_MODEL", "").strip() or EMAIL_MODEL
+SITE_REASONING_EFFORT = os.getenv("SITE_REASONING_EFFORT", EMAIL_REASONING_EFFORT).strip().lower()
+# Demolinkin pohja-URL sähköposteissa. Paikallisesti backend itse; Vaihe B vaihtaa julkiseen osoitteeseen.
+DEMO_PUBLIC_BASE_URL = os.getenv("DEMO_PUBLIC_BASE_URL", "http://127.0.0.1:8000").strip().rstrip("/")
+DEMO_LINK_PLACEHOLDER = "[DEMO_LINKKI]"
+DEMO_OFFER = f"Tein teille valmiin luonnoksen, voitte katsoa sen täältä: {DEMO_LINK_PLACEHOLDER}"
 
 # Lisätään koodissa jokaisen viestin loppuun, jotta ne ovat aina mukana (ei luoteta malliin)
 OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastaa vain "ei kiitos", niin en ota enää yhteyttä.'
@@ -802,31 +831,6 @@ OFFERS: Dict[str, str] = {
 }
 DEFAULT_OFFER = "Voin tehdä sivuistanne lyhyen ilmaisen katsauksen ja kertoa, mitä parantaisin."
 
-# Kielletyt sanat/fraasit: (näytettävä nimi, regex). Taivutusmuodot mukana; "ihan" ei osu "ihana"-kuvioon.
-FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    (label, re.compile(pattern, re.IGNORECASE))
-    for label, pattern in [
-        ("ihana", r"\bihan(a|aa|an|at|ia|ista|imp)\w*"),
-        ("upea", r"\bupe(a|i)\w*"),
-        ("mahtava", r"\bmahtav\w*"),
-        ("ainutlaatuinen", r"\bainutlaatui\w*"),
-        ("intohimo", r"\bintohimo\w*"),
-        ("ratkaisu", r"\bratkaisu\w*"),
-        ("kokonaisvaltainen", r"\bkokonaisvaltai\w*"),
-        ("digitaalinen läsnäolo", r"\bdigitaali\w*\s+läsnäolo\w*"),
-        ("nostaa seuraavalle tasolle", r"\b(seuraavalle|uudelle)\s+tasolle\b"),
-        ("innovatiivinen", r"\binnovatiivi\w*"),
-        ("räätälöity", r"\bräätälöi\w*"),
-        ("huippu", r"\bhuippu\w*"),
-        ("saumaton", r"\bsaumat\w*"),
-        ("synergia", r"\bsynergi\w*"),
-        ("keskustella tarkemmin", r"\bkeskustel\w*\s+(asiasta\s+)?tarkemmin\b"),
-        ("liiketoiminnan kasvu", r"\bliiketoimin\w*\s+kasv\w*"),
-        ("saattaa (arvailu)", r"\bsaatta(a|vat|isi)\b"),
-    ]
-]
-PRICE_RE = re.compile(r"\d[\d\s.,]*\s*(€|e\b|euro)", re.IGNORECASE)
-
 _SIGN_OFF_RE = re.compile(
     r"^\s*(ystävällisin terveisin|parhain terveisin|terveisin|t\.|kiittäen|kiitos ja mukavaa)\b.*$",
     re.IGNORECASE,
@@ -849,14 +853,6 @@ def describe_website_problem(website_status: Optional[str], website_issue: Optio
     if not descriptions:
         return STATUS_DESCRIPTIONS.get(website_status)
     return " ja ".join(descriptions)
-
-
-def find_forbidden_words(text: str) -> list[str]:
-    return [label for label, pattern in FORBIDDEN_PATTERNS if pattern.search(text)]
-
-
-def word_count(text: str) -> int:
-    return len(re.findall(r"\w+", text))
 
 
 def check_generated_text(text: str, *, kind: str, lead_id: int, model: str, max_words: Optional[int] = None) -> list[str]:
@@ -917,8 +913,39 @@ def strip_model_sign_off(text: str) -> str:
     return "\n".join(lines).rstrip()
 
 
-def finalize_email_body(text: str, profile: SenderProfile) -> str:
-    return f"{strip_model_sign_off(text)}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
+_LINK_PLACEHOLDER_RE = re.compile(r"\[[^\]\n]{0,30}linkki[^\]\n]{0,30}\]", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def insert_demo_link(text: str, demo_url: Optional[str]) -> str:
+    """Demolinkki lisätään aina koodissa: paikkamerkki korvataan, mallin keksimät osoitteet poistetaan."""
+    text = _URL_RE.sub("", text)
+    if demo_url is None:
+        return _LINK_PLACEHOLDER_RE.sub("", text)
+    if _LINK_PLACEHOLDER_RE.search(text):
+        text = _LINK_PLACEHOLDER_RE.sub(demo_url, text, count=1)
+        return _LINK_PLACEHOLDER_RE.sub("", text)
+    return f"{text.rstrip()}\n\nLuonnos: {demo_url}"
+
+
+def finalize_email_body(text: str, profile: SenderProfile, demo_url: Optional[str] = None) -> str:
+    body = insert_demo_link(strip_model_sign_off(text), demo_url)
+    return f"{body}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
+
+
+def demo_public_url(demo: Demo) -> str:
+    return f"{DEMO_PUBLIC_BASE_URL}/demo/{demo.public_token}"
+
+
+def get_active_demo(session: Session, lead: Lead) -> Optional[Demo]:
+    demo = session.exec(select(Demo).where(Demo.lead_id == lead.id, Demo.user_id == lead.user_id)).first()
+    if demo is None or demo.status == "expired" or (demo.expires_at and _as_utc(demo.expires_at) <= utc_now()):
+        return None
+    return demo
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 EMAIL_SYSTEM_PROMPT = f"""Kirjoitat suomeksi lyhyen ensimmäisen yhteydenoton sähköpostin paikalliselle yritykselle.
@@ -939,6 +966,8 @@ PAKOLLISET SÄÄNNÖT:
 4. Yksi lause siitä, miksi sillä on väliä heidän asiakkailleen (käytä vihjettä). Ei pelottelua, ei liioittelua.
 5. Tarjous: käytä TARJOUS-kohdan lausetta (voit muotoilla hieman). Pieni ja konkreettinen.
    Älä ehdota "keskustelua tarkemmin" tai palaveria.
+   Jos TARJOUS sisältää [DEMO_LINKKI], kirjoita se täsmälleen sellaisenaan (hakasulkeineen) lauseen loppuun.
+   Älä koskaan kirjoita itse mitään verkko-osoitetta.
 6. Lopeta yhteen kevyeen kysymykseen tai toteamukseen (esim. "Kiinnostaisiko?").
 7. Jäänmurtaja VERKKOSIVUN SISÄLLÖSTÄ vain, jos sieltä löytyy jotain konkreettista ja erityistä
    (esim. tietty palvelu, merkki, historia). Muuten EI jäänmurtajaa ollenkaan. Älä kehu yritystä yleisesti.
@@ -990,7 +1019,7 @@ class CallScriptResponse(BaseModel):
     model: str
 
 
-def _prompt_facts(lead: Lead, profile: SenderProfile) -> list[str]:
+def _prompt_facts(lead: Lead, profile: SenderProfile, *, has_demo: bool = False) -> list[str]:
     parts = [
         "LÄHETTÄJÄ (minä):",
         f"- Nimi: {profile.name}",
@@ -1017,12 +1046,15 @@ def _prompt_facts(lead: Lead, profile: SenderProfile) -> list[str]:
             parts.append(f"MIKSI SILLÄ ON VÄLIÄ (vihje): {why}")
     else:
         parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
-    parts.append(f"TARJOUS: {OFFERS.get(lead.website_status or '', DEFAULT_OFFER)}")
+    offer = DEMO_OFFER if has_demo else OFFERS.get(lead.website_status or "", DEFAULT_OFFER)
+    parts.append(f"TARJOUS: {offer}")
     return parts
 
 
-def build_email_user_prompt(lead: Lead, profile: SenderProfile, instruction: Optional[str] = None) -> str:
-    parts = _prompt_facts(lead, profile)
+def build_email_user_prompt(
+    lead: Lead, profile: SenderProfile, instruction: Optional[str] = None, *, has_demo: bool = False
+) -> str:
+    parts = _prompt_facts(lead, profile, has_demo=has_demo)
     if lead.website_context:
         parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan, käytä vain jos jotain konkreettista ja erityistä):\n{lead.website_context}")
     parts.append("\nKirjoita sähköposti tämän perusteella.")
@@ -1066,11 +1098,29 @@ def chat_completion_params(model: str, reasoning_effort: str, max_tokens: int) -
     return params
 
 
-async def _chat_completion(system_prompt: str, user_prompt: str, max_tokens: int) -> tuple[str, str]:
-    """Palauttaa (teksti, malli). OpenAI-kutsu blokkaa -> taustasäikeeseen."""
+class ChatResult(BaseModel):
+    text: str
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+async def _chat_completion(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    *,
+    model: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+) -> ChatResult:
+    """OpenAI-kutsu blokkaa -> taustasäikeeseen. Oletuksena EMAIL_MODEL-konfiguraatio."""
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
-    params = chat_completion_params(EMAIL_MODEL, EMAIL_REASONING_EFFORT, max_tokens)
+    params = chat_completion_params(
+        model or EMAIL_MODEL,
+        EMAIL_REASONING_EFFORT if reasoning_effort is None else reasoning_effort,
+        max_tokens,
+    )
 
     def _call():
         return client.chat.completions.create(
@@ -1082,7 +1132,13 @@ async def _chat_completion(system_prompt: str, user_prompt: str, max_tokens: int
         )
 
     response = await asyncio.to_thread(_call)
-    return (response.choices[0].message.content or "").strip(), response.model
+    usage = getattr(response, "usage", None)
+    return ChatResult(
+        text=(response.choices[0].message.content or "").strip(),
+        model=response.model,
+        input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+        output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+    )
 
 
 # 6. GENEROI SÄHKÖPOSTI (AI)
@@ -1112,12 +1168,16 @@ async def generate_email(
         except Exception as e:
             logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
-    text, model = await _chat_completion(
-        EMAIL_SYSTEM_PROMPT, build_email_user_prompt(db_lead, profile, req.instruction), max_tokens=500
+    demo = get_active_demo(session, db_lead)
+    result = await _chat_completion(
+        EMAIL_SYSTEM_PROMPT,
+        build_email_user_prompt(db_lead, profile, req.instruction, has_demo=demo is not None),
+        max_tokens=500,
     )
-    text = strip_model_sign_off(text)
+    model = result.model
+    text = strip_model_sign_off(result.text)
     check_generated_text(text, kind="sähköposti", lead_id=lead_id, model=model, max_words=MAX_EMAIL_WORDS)
-    body = finalize_email_body(text, profile)
+    body = finalize_email_body(text, profile, demo_public_url(demo) if demo else None)
     subject = email_subject(db_lead)
 
     session.add(EmailDraft(user_id=user.id, lead_id=lead_id, subject=subject, body=body, model=model))
@@ -1139,13 +1199,272 @@ async def generate_call_script(
         raise HTTPException(500, "OPENAI_API_KEY not configured")
 
     # Ei scrapingia: puhelu ei tarvitse jäänmurtajaa sivun sisällöstä
-    script, model = await _chat_completion(
+    result = await _chat_completion(
         CALL_SCRIPT_SYSTEM_PROMPT, build_call_script_prompt(db_lead, profile), max_tokens=450
     )
-    script = strip_markdown(script)
+    model = result.model
+    script = strip_markdown(result.text)
     check_generated_text(script, kind="puhelinskripti", lead_id=lead_id, model=model)
     return CallScriptResponse(script=script, model=model)
 
+
+# --- DEMOSIVUT ---
+
+# Hinnat per 1M tokenia (OpenAI-hinnasto 11/2026) kustannuslokia varten; tuntematon malli -> ei arviota
+MODEL_PRICES_PER_1M: Dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-6.1-terra": (1.00, 5.00),
+    "gpt-6.1-sol": (2.00, 10.00),
+    "gpt-6-luna": (0.10, 0.50),
+}
+PLACE_DETAILS_ENTERPRISE_USD = 20.00 / 1000
+
+
+class DemoGenerateRequest(BaseModel):
+    template: Optional[str] = None
+    color_scheme: Optional[str] = None
+
+
+class DemoUpdateRequest(BaseModel):
+    template: Optional[str] = None
+    color_scheme: Optional[str] = None
+    content: Optional[DemoContent] = None
+
+
+class DemoOut(BaseModel):
+    id: int
+    lead_id: int
+    template: str
+    color_scheme: str
+    content: DemoStoredContent
+    public_token: str
+    preview_url: str
+    status: str
+    created_at: datetime
+    published_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+
+def _demo_out(demo: Demo) -> DemoOut:
+    assert demo.id is not None
+    return DemoOut(
+        id=demo.id,
+        lead_id=demo.lead_id,
+        template=demo.template,
+        color_scheme=demo.color_scheme,
+        content=DemoStoredContent.model_validate_json(demo.content_json),
+        public_token=demo.public_token,
+        preview_url=demo_public_url(demo),
+        status=demo.status,
+        created_at=demo.created_at,
+        published_at=demo.published_at,
+        expires_at=demo.expires_at,
+    )
+
+
+def _safe_web_url(url: Optional[str]) -> Optional[str]:
+    # Vain http(s)-linkit demon banneriin (ei javascript: tms.)
+    return url if url and url.lower().startswith(("http://", "https://")) else None
+
+
+def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lead: Lead, profile: SenderProfile) -> str:
+    return render_demo_html(
+        template=demo_template,
+        color_scheme=scheme,
+        content=content,
+        business=DemoBusiness(
+            name=lead.name, city=lead.city, address=lead.address, phone=lead.phone,
+            maps_url=_safe_web_url(lead.maps_url),
+        ),
+        sender=DemoSender(
+            name=profile.name, company_name=profile.company_name, phone=profile.phone,
+            website=_safe_web_url(profile.website),
+        ),
+    )
+
+
+def _get_owned_demo(session: Session, lead_id: int, user: AuthUser) -> tuple[Lead, Demo]:
+    lead = session.get(Lead, lead_id)
+    if not lead or lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+    demo = session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).first()
+    if demo is None:
+        raise HTTPException(404, "Demo not found")
+    return lead, demo
+
+
+def _can_fetch_place_details(lead: Lead) -> bool:
+    return (
+        USE_LIVE_GOOGLE
+        and "AIza" in GOOGLE_API_KEY
+        and bool(lead.google_place_id)
+        and not (lead.google_place_id or "").startswith(("dev-", "manual-"))
+    )
+
+
+async def generate_demo_content(lead: Lead) -> tuple[DemoContent, list[ChatResult]]:
+    """AI-sisältö, validointi ja yksi uudelleenyritys. Heittää DemoGenerationError jos ei kelpaa."""
+    allowed_text = " ".join(filter(None, [lead.name, lead.city, lead.address, lead.website_context]))
+    prompt = build_demo_prompt(
+        name=lead.name, city=lead.city, primary_type=lead.primary_type, website_context=lead.website_context
+    )
+    results: list[ChatResult] = []
+    problems: list[str] = []
+    for attempt in range(2):
+        result = await _chat_completion(
+            DEMO_SYSTEM_PROMPT,
+            prompt if attempt == 0 else retry_prompt(prompt, problems),
+            max_tokens=1500,
+            model=SITE_MODEL,
+            reasoning_effort=SITE_REASONING_EFFORT,
+        )
+        results.append(result)
+        content, problems = parse_ai_content(result.text, allowed_text=allowed_text)
+        if content is not None:
+            return DemoContent(**content.model_dump()), results
+        logger.warning(f"Demosisältö hylättiin (liidi {lead.id}, yritys {attempt + 1}/2): {problems[:5]}")
+    raise DemoGenerationError("; ".join(problems[:10]))
+
+
+def _log_demo_cost(lead_id: int, results: list[ChatResult], place_details_calls: int) -> float:
+    total = place_details_calls * PLACE_DETAILS_ENTERPRISE_USD
+    for r in results:
+        prices = next((p for name, p in MODEL_PRICES_PER_1M.items() if r.model.startswith(name)), None)
+        if prices:
+            total += r.input_tokens / 1e6 * prices[0] + r.output_tokens / 1e6 * prices[1]
+    tokens = ", ".join(f"{r.model} in {r.input_tokens} / out {r.output_tokens}" for r in results)
+    logger.info(
+        f"Demo generoitu liidille {lead_id}: AI-kutsuja {len(results)} ({tokens}), "
+        f"Place Details {place_details_calls} kpl ({PLACE_DETAILS_FIELD_MASK}), arvio ~${total:.4f}"
+    )
+    return total
+
+
+@app.get("/demo-templates")
+def list_demo_templates(_user: AuthUser = Depends(verify_token)) -> list[dict[str, object]]:
+    return templates_catalog()
+
+
+@app.post("/leads/{lead_id}/demo", response_model=DemoOut)
+async def generate_demo(
+    lead_id: int,
+    req: DemoGenerateRequest = DemoGenerateRequest(),
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    lead = _get_contactable_lead(session, lead_id, user)
+    profile = _require_sender_profile(session, user)
+    if not OPENAI_API_KEY:
+        raise HTTPException(500, "OPENAI_API_KEY not configured")
+    try:
+        template, scheme = validate_template_choice(
+            req.template or template_for_primary_type(lead.primary_type), req.color_scheme
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    try:
+        content, results = await generate_demo_content(lead)
+    except DemoGenerationError as e:
+        raise HTTPException(502, f"Demo content failed validation: {e}")
+
+    # Aukioloajat vasta nyt, yksi Place Details -kutsu (ei tallenneta erikseen, vain osana demoa)
+    hours: Optional[list[str]] = None
+    place_calls = 0
+    if _can_fetch_place_details(lead) and lead.google_place_id:
+        place_calls = 1
+        hours = await asyncio.to_thread(fetch_opening_hours, lead.google_place_id, GOOGLE_API_KEY)
+    stored = DemoStoredContent(**content.model_dump(), opening_hours=hours or [])
+    _log_demo_cost(lead_id, results, place_calls)
+
+    html = _render_for(template, scheme, stored, lead, profile)
+    demo = session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).first()
+    if demo is None:
+        demo = Demo(
+            user_id=user.id, lead_id=lead_id, template=template, color_scheme=scheme,
+            content_json=stored.model_dump_json(), html=html, public_token=new_public_token(),
+        )
+    else:
+        demo.template, demo.color_scheme = template, scheme
+        demo.content_json, demo.html = stored.model_dump_json(), html
+        demo.status, demo.expires_at = "draft", None
+    session.add(demo)
+    session.commit()
+    session.refresh(demo)
+    return _demo_out(demo)
+
+
+@app.get("/leads/{lead_id}/demo", response_model=DemoOut)
+def read_demo(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    _, demo = _get_owned_demo(session, lead_id, user)
+    return _demo_out(demo)
+
+
+@app.patch("/leads/{lead_id}/demo", response_model=DemoOut)
+def update_demo(
+    lead_id: int,
+    req: DemoUpdateRequest,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    """Pohjan/värien vaihto ja tekstien muokkaus ilman uutta AI-kutsua (renderöidään uudelleen)."""
+    lead, demo = _get_owned_demo(session, lead_id, user)
+    profile = _require_sender_profile(session, user)
+    try:
+        template, scheme = validate_template_choice(req.template or demo.template, req.color_scheme or (
+            None if req.template and req.template != demo.template else demo.color_scheme
+        ))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    stored = DemoStoredContent.model_validate_json(demo.content_json)
+    if req.content is not None:
+        stored = DemoStoredContent(**req.content.model_dump(), opening_hours=stored.opening_hours)
+
+    demo.template, demo.color_scheme = template, scheme
+    demo.content_json = stored.model_dump_json()
+    demo.html = _render_for(template, scheme, stored, lead, profile)
+    session.add(demo)
+    session.commit()
+    session.refresh(demo)
+    return _demo_out(demo)
+
+
+@app.delete("/leads/{lead_id}/demo")
+def delete_demo(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    _, demo = _get_owned_demo(session, lead_id, user)
+    session.delete(demo)
+    session.commit()
+    return {"ok": True}
+
+
+DEMO_RESPONSE_HEADERS = {
+    "X-Robots-Tag": "noindex, nofollow",
+    # Demo on staattinen: ei skriptejä, ei ulkoisia resursseja, inline-CSS sallittu
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+}
+
+
+@app.get("/demo/{public_token}", response_class=HTMLResponse, include_in_schema=False)
+def view_demo(public_token: str, session: Session = Depends(get_session)) -> HTMLResponse:
+    """Julkinen esikatselu ilman kirjautumista: token on ainoa avain, joten se on pitkä ja satunnainen."""
+    demo = session.exec(select(Demo).where(Demo.public_token == public_token)).first()
+    if demo is None:
+        return HTMLResponse("Not found", status_code=404, headers=DEMO_RESPONSE_HEADERS)
+    if demo.status == "expired" or (demo.expires_at and _as_utc(demo.expires_at) <= utc_now()):
+        return HTMLResponse("Tämä luonnos ei ole enää saatavilla.", status_code=410, headers=DEMO_RESPONSE_HEADERS)
+    return HTMLResponse(demo.html, headers=DEMO_RESPONSE_HEADERS)
 
 # 7. LÄHETÄ SÄHKÖPOSTI (SMTP)
 
