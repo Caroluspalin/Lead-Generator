@@ -749,7 +749,13 @@ def delete_lead(
 
 # --- AI EMAIL SERVICE ---
 
-OPENAI_MODEL = "gpt-4o-mini"
+# Sähköpostien ja puhelinskriptien malli. gpt-4o-mini poistuu OpenAI:lta 14.1.2027 (deprecations-sivu).
+EMAIL_MODEL = os.getenv("EMAIL_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+# Reasoning-malleille (GPT-6-sarja): none | low | medium | high. Tyhjä = ei reasoning-parametria (gpt-4o-mini).
+# OpenAI: temperature on sallittu vain kun reasoning effort on "none" tai mallilla ei ole reasoningia.
+EMAIL_REASONING_EFFORT = os.getenv("EMAIL_REASONING_EFFORT", "").strip().lower()
+# Reasoning-tokenit lasketaan max_completion_tokens-rajaan -> lisävara, ettei vastaus katkea tyhjäksi
+REASONING_TOKEN_HEADROOM = 4000
 
 # Lisätään koodissa jokaisen viestin loppuun, jotta ne ovat aina mukana (ei luoteta malliin)
 OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastaa vain "ei kiitos", niin en ota enää yhteyttä.'
@@ -1026,20 +1032,31 @@ def _require_sender_profile(session: Session, user: AuthUser) -> SenderProfile:
     return profile
 
 
+def chat_completion_params(model: str, reasoning_effort: str, max_tokens: int) -> Dict[str, object]:
+    """Chat Completions -parametrit mallin tyypin mukaan (konfiguraatiosta, ei mallinimestä päätellen)."""
+    params: Dict[str, object] = {"model": model, "max_completion_tokens": max_tokens}
+    if reasoning_effort:
+        params["reasoning_effort"] = reasoning_effort
+    if reasoning_effort and reasoning_effort != "none":
+        params["max_completion_tokens"] = max_tokens + REASONING_TOKEN_HEADROOM
+    else:
+        params["temperature"] = 0.7
+    return params
+
+
 async def _chat_completion(system_prompt: str, user_prompt: str, max_tokens: int) -> tuple[str, str]:
     """Palauttaa (teksti, malli). OpenAI-kutsu blokkaa -> taustasäikeeseen."""
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
+    params = chat_completion_params(EMAIL_MODEL, EMAIL_REASONING_EFFORT, max_tokens)
 
     def _call():
         return client.chat.completions.create(
-            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=max_tokens,
-            temperature=0.7,
+            **params,
         )
 
     response = await asyncio.to_thread(_call)

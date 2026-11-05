@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.main import (
     OPT_OUT_LINE,
+    REASONING_TOKEN_HEADROOM,
+    chat_completion_params,
     build_signature,
     check_generated_text,
     describe_website_problem,
@@ -355,3 +357,44 @@ def test_unmarking_do_not_contact_allows_generation_again(
 ) -> None:
     client_a.patch(f"/leads/{dnc_lead['id']}", json={"do_not_contact": False})
     assert client_a.post(f"/leads/{dnc_lead['id']}/generate-email", json={}).status_code == 200
+
+
+# --- Mallikonfiguraatio ---
+
+def test_params_for_classic_model() -> None:
+    assert chat_completion_params("gpt-4o-mini", "", 500) == {
+        "model": "gpt-4o-mini", "max_completion_tokens": 500, "temperature": 0.7,
+    }
+
+
+def test_params_for_reasoning_model_drop_temperature() -> None:
+    params = chat_completion_params("gpt-6.1-terra", "low", 500)
+    assert params == {"model": "gpt-6.1-terra", "max_completion_tokens": 500 + REASONING_TOKEN_HEADROOM, "reasoning_effort": "low"}
+    assert "temperature" not in params
+
+
+def test_params_for_reasoning_none_keep_temperature() -> None:
+    assert chat_completion_params("gpt-6.1-terra", "none", 500) == {
+        "model": "gpt-6.1-terra", "max_completion_tokens": 500, "reasoning_effort": "none", "temperature": 0.7,
+    }
+
+
+def test_configured_model_is_used(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.main.EMAIL_MODEL", "gpt-6.1-terra")
+    monkeypatch.setattr("app.main.EMAIL_REASONING_EFFORT", "low")
+    lead = make_lead(website_status="NO WEBSITE")
+    client_a.post(f"/leads/{lead['id']}/generate-email", json={})
+    client_a.post(f"/leads/{lead['id']}/generate-call-script")
+    for call in fake_openai.calls:
+        assert call["model"] == "gpt-6.1-terra"
+        assert call["reasoning_effort"] == "low"
+        assert "temperature" not in call
+
+
+def test_default_model_is_gpt_4o_mini() -> None:
+    from app.main import EMAIL_MODEL, EMAIL_REASONING_EFFORT
+    assert EMAIL_MODEL == "gpt-4o-mini"
+    assert EMAIL_REASONING_EFFORT == ""

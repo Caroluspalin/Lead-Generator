@@ -8,6 +8,8 @@ os.environ["USE_LIVE_GOOGLE"] = "false"
 os.environ["AUTH_DISABLED"] = "false"
 os.environ["GOOGLE_API_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["EMAIL_MODEL"] = ""
+os.environ["EMAIL_REASONING_EFFORT"] = ""
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_JWT_SECRET"] = ""
 for _smtp_var in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"):
