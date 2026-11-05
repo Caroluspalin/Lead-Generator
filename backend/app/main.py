@@ -887,6 +887,22 @@ def email_subject(lead: Lead) -> str:
     return "Kysymys nettisivuistanne"
 
 
+_MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+_MD_BOLD_RE = re.compile(r"(\*\*|__)(.+?)\1")
+_MD_BULLET_RE = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
+
+
+def strip_markdown(text: str) -> str:
+    """Pelkkä teksti modaaliin ja kopiointiin: poistaa otsikot, lihavoinnit ja luettelomerkit, tiivistää tyhjät rivit."""
+    text = _MD_HEADING_RE.sub("", text)
+    text = _MD_BOLD_RE.sub(r"\2", text)
+    text = _MD_BULLET_RE.sub("", text)
+    # "1. Avaus\n\nHei..." (otsikko omalla rivillä) -> "1. Avaus: Hei..."
+    text = re.sub(r"^(\d\.\s[^\n:]{1,40}?):?\s*\n+(?=\S)", r"\1: ", text, flags=re.MULTILINE)
+    text = re.sub(r"\n{2,}(?=\d\.\s)", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def build_signature(profile: SenderProfile) -> str:
     lines = [profile.name, profile.company_name, profile.phone, profile.website]
     return "\n".join(line for line in lines if line)
@@ -914,6 +930,8 @@ PAKOLLISET SÄÄNNÖT:
 2. Aloita "Hei," ja heti ensimmäinen lause kertoo kuka olen ja miten löysin yrityksen,
    esim. "Olen Palin ja teen nettisivuja paikallisille yrityksille. Etsin parturi-kampaamoja Kauniaisista ja huomasin, että..."
    Käytä LÄHETTÄJÄ-kohdan nimeä ja esittelyä, toimialaa ja kaupunkia (taivuta luontevasti).
+   Älä käytä yrityksen pitkää virallista nimeä (esim. "Parturi-Kampaamo Taina Lantiainen").
+   Käytä luontevaa lyhyttä muotoa (esim. "Tainan kampaamo"), "teidän kampaamonne/ravintolanne" tai jätä nimi pois.
 3. HAVAINTO kerrotaan omana, varmana havaintona konkreettisesti (esim. "Kun avasin sivunne, selain varoitti...",
    "Googlen kautta löytyvä osoitteenne ei avaudu", "Löysin teidät vain Facebookista").
    Älä arvaile ("saattaa", "voi olla") kun havainto on annettu.
@@ -948,6 +966,10 @@ RAKENNE (käytä täsmälleen näitä otsikoita):
 SÄÄNNÖT:
 - Te-muoto johdonmukaisesti. Lyhyitä lauseita, luonteva puhekieli.
 - Käytä LÄHETTÄJÄ-kohdan oikeaa nimeä (ei paikkamerkkejä).
+- Älä käytä yrityksen pitkää virallista nimeä (esim. "Parturi-Kampaamo Taina Lantiainen").
+  Käytä luontevaa lyhyttä muotoa (esim. "Tainan kampaamo"), "teidän kampaamonne/ravintolanne" tai jätä nimi pois.
+- Pelkkä teksti: EI markdown-muotoilua (ei #-otsikoita, ei **lihavointia**, ei luettelomerkkejä).
+  Jokainen kohta omalla rivillään muodossa "1. Avaus: ...".
 - Ei teknistä jargonia, ei liioittelua, ei pelottelua, ei kiellettyjä sanoja
   (ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen, digitaalinen läsnäolo, seuraavalle tasolle).
 - Palauta vain runko otsikoineen."""
@@ -1120,6 +1142,7 @@ async def generate_call_script(
     script, model = await _chat_completion(
         CALL_SCRIPT_SYSTEM_PROMPT, build_call_script_prompt(db_lead, profile), max_tokens=450
     )
+    script = strip_markdown(script)
     check_generated_text(script, kind="puhelinskripti", lead_id=lead_id, model=model)
     return CallScriptResponse(script=script, model=model)
 

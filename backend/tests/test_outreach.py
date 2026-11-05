@@ -14,6 +14,7 @@ from app.main import (
     describe_website_problem,
     email_subject,
     find_forbidden_words,
+    strip_markdown,
     strip_model_sign_off,
 )
 from app.models import Lead, SenderProfile
@@ -398,3 +399,47 @@ def test_default_model_is_gpt_4o_mini() -> None:
     from app.main import EMAIL_MODEL, EMAIL_REASONING_EFFORT
     assert EMAIL_MODEL == "gpt-4o-mini"
     assert EMAIL_REASONING_EFFORT == ""
+
+
+# --- Pikakorjaukset: markdown ja pitkä virallinen nimi ---
+
+EXPECTED_PLAIN = (
+    "1. Avaus: Hei, Palin täällä. Onko teillä hetki, vai soitanko myöhemmin?\n"
+    "2. Havainto: Kun avasin sivunne, selain varoitti.\n"
+    '3. Jos "ei kiinnosta": Selvä, kiitos ajastanne, mukavaa päivää!'
+)
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "### 1. Avaus\n\nHei, Palin täällä. Onko teillä hetki, vai soitanko myöhemmin?\n\n### 2. Havainto\n\n"
+        'Kun avasin sivunne, selain varoitti.\n\n### 3. Jos "ei kiinnosta"\n\nSelvä, kiitos ajastanne, mukavaa päivää!',
+        "**1. Avaus:** Hei, Palin täällä. Onko teillä hetki, vai soitanko myöhemmin?\n\n**2. Havainto:** "
+        'Kun avasin sivunne, selain varoitti.\n\n**3. Jos "ei kiinnosta":** Selvä, kiitos ajastanne, mukavaa päivää!',
+        EXPECTED_PLAIN,
+    ],
+)
+def test_strip_markdown_from_call_script(markdown: str) -> None:
+    assert strip_markdown(markdown) == EXPECTED_PLAIN
+
+
+def test_call_script_endpoint_returns_plain_text(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
+) -> None:
+    fake_openai.reply = "### 1. Avaus\n\n**Hei**, Palin täällä."
+    lead = make_lead(website_status="NO WEBSITE")
+    script = client_a.post(f"/leads/{lead['id']}/generate-call-script").json()["script"]
+    assert script == "1. Avaus: Hei, Palin täällä."
+    assert "EI markdown-muotoilua" in fake_openai.calls[-1]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("path", ["generate-email", "generate-call-script"])
+def test_prompts_forbid_long_official_name(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any], path: str
+) -> None:
+    lead = make_lead(website_status="NO WEBSITE")
+    client_a.post(f"/leads/{lead['id']}/{path}", json={})
+    system = fake_openai.calls[-1]["messages"][0]["content"]
+    assert "Älä käytä yrityksen pitkää virallista nimeä" in system
+    assert "teidän kampaamonne/ravintolanne" in system
