@@ -8,11 +8,22 @@ from sqlmodel import SQLModel, create_engine, Session
 _backend_dir = Path(__file__).resolve().parent.parent
 load_dotenv(_backend_dir / ".env")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///agency_hunter.db")
 
-# Supabase/Heroku palauttaa "postgres://" — SQLAlchemy 2.x vaatii "postgresql://"
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+def normalize_database_url(url: str) -> str:
+    """Pakottaa Postgres-URLit psycopg (v3) -ajuriin.
+
+    Supabase/Heroku antaa "postgres://", jota SQLAlchemy 2.x ei hyväksy, ja pelkkä
+    "postgresql://" valitsee ajurin SQLAlchemy-version oletuksen mukaan. Eksplisiittinen
+    ajuri jätetään ennalleen.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///agency_hunter.db"))
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 _echo = os.getenv("SQL_ECHO", "false").lower() == "true"

@@ -4,7 +4,7 @@ sqlmodel==0.0.48
 SQLAlchemy==2.1.8
 pydantic==2.14.3
 starlette==1.10.0
-psycopg2-binary==2.9.13
+psycopg[binary]==3.3.8
 requests==2.34.2
 beautifulsoup4==4.15.0
 python-dotenv==1.2.4
