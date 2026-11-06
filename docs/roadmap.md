@@ -109,6 +109,10 @@
   - Saavutettavuus: tekstikontrastit ≥ 4.5:1 (WCAG AA), näkyvä `:focus-visible`-rengas, linkit alleviivattu hillitysti (vahvistuu hoverilla), label/aria-attribuutit lomakkeisiin, dialogeihin ja ikoninapeille, History-rivin toiminnot näkyvät myös näppäimistöfokuksella
   - Layout: lyhyemmät navigaationimet, sivuotsikko + kuvaus, PipelineCardin yhteystiedot listana ja toiminnot yhdellä rivillä, "Pro Plan" poistettu
   - Tarkistettu Playwrightilla 1280 ja 1440 px, `docs/media`-kuvakaappaukset päivitetty
+- **Phase 15**: Demolinkillinen sähköposti luotettavammaksi:
+  - Luettavat demo-osoitteet `/{nimi}-{satunnainen}` (esim. `taina-lantiainen-k7x2m`), `Demo.public_slug` (migraatio `9148408efe32`); vanhat token-osoitteet toimivat, Worker hyväksyy molemmat, törmäykset käsitellään
+  - Sähköpostin rakenne kun demo on julkaistu: malli kirjoittaa vain kappaleet 1–2 (kuka olen + miten löysin, mitä asiakkaalle tapahtuu nyt per ongelmatyyppi), koodi kokoaa linkin omalle rivilleen, riskittömyyden ja seuraavan askeleen; ei loppukysymystä; aihe "Tein teille luonnoksen nettisivuista"
+  - `SenderProfile.brand_name` (migraatio `3d717a6775b2`) + Settings-kenttä, allekirjoitus nimi / brändi · sivusto / puhelin
 
 ## Seuraavaksi
 
