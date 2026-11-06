@@ -14,6 +14,12 @@ os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_JWT_SECRET"] = ""
 for _smtp_var in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"):
     os.environ[_smtp_var] = ""
+# Ei koskaan oikeaa R2-bucketia tai Unsplashia testeissä (boto3 ohittaa requests-eston)
+for _external_var in (
+    "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "DEMO_PUBLIC_BASE_URL",
+    "UNSPLASH_ACCESS_KEY",
+):
+    os.environ[_external_var] = ""
 
 from collections.abc import Iterator  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
@@ -54,6 +60,9 @@ def block_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("openai.OpenAI", _blocked)
     monkeypatch.setattr("app.main.scrape_website_text", _blocked)
     monkeypatch.setattr("time.sleep", lambda _s: None)
+    # Toinen varmistus: oikea R2-asiakas ei saa syntyä testissä (fake store korvaa sen)
+    monkeypatch.setattr("app.demo_publish.R2ObjectStore", _blocked)
+    monkeypatch.setattr("app.main.R2ObjectStore", _blocked)
 
 
 @pytest.fixture

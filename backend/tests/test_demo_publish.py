@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from app.demo_publish import R2Config, load_r2_config, object_key
+from app.demo_publish import R2Config, R2ObjectStore, load_r2_config, object_key
 from app.main import run_demo_expiry
 from app.models import Demo
 from tests.conftest import FakeOpenAI
@@ -91,7 +91,6 @@ def test_object_key() -> None:
 
 
 def test_r2_client_settings() -> None:
-    from app.demo_publish import R2ObjectStore
     client = R2ObjectStore(CONFIG)._client
     assert client.meta.endpoint_url == "https://acc.r2.cloudflarestorage.com"
     assert client.meta.region_name == "auto"
@@ -265,11 +264,11 @@ def test_email_link_only_for_published_demo(
     assert "TARJOUS: Voin tehdä teille ilmaisen luonnoksen" in fake_openai.calls[-1]["messages"][1]["content"]
 
     published = _publish(client_a, demo)
-    fake_openai.reply = "Hei,\n\nTein teille valmiin luonnoksen, voitte katsoa sen täältä: [DEMO_LINKKI]\n\nKiinnostaisiko?"
+    fake_openai.reply = "Hei,\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: [DEMO_LINKKI]\n\nKiinnostaisiko?"
     body = client_a.post(f"/leads/{lead_id}/generate-email", json={}).json()["body"]
-    assert f"voitte katsoa sen täältä: {published['public_url']}" in body
+    assert f"Tein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {published['public_url']}" in body
     assert "testserver" not in body and "[DEMO_LINKKI]" not in body
-    assert "TARJOUS: Tein teille valmiin luonnoksen" in fake_openai.calls[-1]["messages"][1]["content"]
+    assert "TARJOUS: Tein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: [DEMO_LINKKI]" in fake_openai.calls[-1]["messages"][1]["content"]
 
     client_a.post(f"/leads/{lead_id}/demo/unpublish")
     fake_openai.reply = "Hei,\n\nTein luonnoksen: [DEMO_LINKKI]"
@@ -284,4 +283,20 @@ def test_email_demo_link_added_by_code_if_model_drops_placeholder(
     fake_openai.reply = "Hei,\n\nTein teille luonnoksen, katsokaa: https://keksitty.example/abc\n\nKiinnostaisiko?"
     body = client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={}).json()["body"]
     assert "keksitty.example" not in body
-    assert f"Luonnos: {published['public_url']}" in body
+    # Luonnosta koskeva lause korvataan linkkilauseella (ei toistoa), ennen loppukysymystä
+    assert f"Hei,\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {published['public_url']}\n\nKiinnostaisiko?" in body
+    assert body.count("luonnoksen") == 1
+
+
+def test_test_environment_never_sees_real_r2_or_unsplash() -> None:
+    # Regressio: backend/.env:n oikeat R2-avaimet vuotivat testeihin ja testi latasi objektin oikeaan bucketiin
+    import os
+
+    from app import main
+    assert load_r2_config() is None
+    assert main.get_object_store() is None
+    for key in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "DEMO_PUBLIC_BASE_URL", "UNSPLASH_ACCESS_KEY"):
+        assert os.environ.get(key) == ""
+    assert main.UNSPLASH_ACCESS_KEY == ""
+    with pytest.raises(RuntimeError):
+        main.R2ObjectStore(CONFIG)
