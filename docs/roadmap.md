@@ -87,13 +87,16 @@
   - Hero-kuvasta karsitaan tuotteet, merkit, hyllyt ja pullot (kuvaus, alt, tagit); fallback parhaaseen + varoitusloki
   - Tekstit: arkikieli, yhden lauseen palvelukuvaukset, uudet kielletyt fraasit (autamme, tarjoamme laadukasta, tervetuloa huolehtimaan), toistuvien fraasien tarkistus koko sivulta (uudelleenyritys + varoitusloki), yläotsikko ei toista yrityksen nimeä
   - Visuaalinen ilme: Unsplash-kuvat (hero + 2–3 tunnelmakuvaa, attribuutio, hotlinking, download tracking, kuvanvalitsin modaalissa, gradientti fallbackina), otsikkofontti per pohja upotettuna, yrityksen nimi heron päätasona, palvelukohtaiset ikonit, ruudukko ilman yksinäistä korttia, ohut demobanneri, mobiilin kiinteä soittonappi
+- **Phase 13b**: Demojen julkaisu (Cloudflare R2 + Worker):
+  - `boto3==1.43.118` S3-API:lla R2:een, Worker `wrangler@4.152.0` palvelee `/{token}` R2-bindingistä samoilla suojaheadereilla, 410 vanhentuneelle
+  - Publish / Unpublish -endpointit ja UI, julkaistu versio päivittyy muokatessa, poisto R2:sta demon/liidin poistossa
+  - Automaattinen vanheneminen 30 pv (Hired-liidin demo jatketaan), lifespan-taustatehtävä
+  - Sähköpostiin vain julkaistun demon linkki
+  - Oma domain myöhemmin pelkällä `DEMO_PUBLIC_BASE_URL`-muutoksella + domain Workeriin Cloudflaressa
+  - Workerin testit CI:hin (Node, tyyppien poisto)
 
 ## Seuraavaksi
 
-### Phase 13b: Demojen julkaisu (suunnitelma, odottaa hyväksyntää)
-
-- Hosting-vertailu ja suositus tehty (ks. Phase 13a -raportti), toteutus vasta hyväksynnän jälkeen
-- Julkaisu ja poisto API:lla backendistä, automaattinen vanheneminen 30 pv jos liidi ei ole Hired, oma domain myöhemmin
 
 ### Phase 11b: Supabase RLS -policyt (tulevaisuudessa)
 

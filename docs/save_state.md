@@ -165,7 +165,11 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
   - Demomerkintä aina: ohut yksirivinen palkki ylhäällä (12 px) — leveällä näytöllä "Tämä on luonnos, jonka {lähettäjä} teki yritykselle {yritys}. Ei yrityksen virallinen sivu. · puhelin · sivusto", mobiilissa "Luonnos – ei virallinen sivu · {lähettäjä} · puhelin" (display:none-vaihto, ei toistoa ruudunlukijalle). Footerissa vain yrityksen nimi ja kaupunki. `<meta name="robots" content="noindex, nofollow">` + X-Robots-Tag. CSP: `img-src data: https://images.unsplash.com; font-src data:`
   - Aukioloajat: yksi Place Details (New) -kutsu `GET places.googleapis.com/v1/places/{id}?languageCode=fi`, `X-Goog-FieldMask: regularOpeningHours` (Place Details Enterprise -SKU, $20/1000, 1000 ilmaista/kk) vain kun `USE_LIVE_GOOGLE=true`, avain on ja place id on oikea (ei dev-/manual-)
   - Kustannusloki per generointi: AI-tokenit (`MODEL_PRICES_PER_1M`) + Place Details + Unsplash-pyyntöjen määrä. Live v2 (Taina, gpt-6.1-terra low, oikeat Unsplash-kuvat): AI 902 in / 218 out ≈ $0.002 + Place Details $0.02 + Unsplash $0 (1 haku + 4 lataustapahtumaa; hero-vaihto +1 per uusi kuva) = ~$0.022 per demo
-  - Sähköposti: jos liidillä on voimassa oleva demo, TARJOUS = "Tein teille valmiin luonnoksen, voitte katsoa sen täältä: [DEMO_LINKKI]"; `insert_demo_link()` korvaa paikkamerkin koodissa, poistaa mallin kirjoittamat URLit ja lisää "Luonnos: <url>" jos paikkamerkki puuttui. Linkin pohja `DEMO_PUBLIC_BASE_URL` (oletus http://127.0.0.1:8000 → toimii vain paikallisesti ennen Vaihetta B)
+  - Sähköposti: vain jos liidillä on **julkaistu** ja voimassa oleva demo (`get_published_demo`), TARJOUS = "Tein teille valmiin luonnoksen, voitte katsoa sen täältä: [DEMO_LINKKI]"; `insert_demo_link()` korvaa paikkamerkin julkisella osoitteella koodissa, poistaa mallin kirjoittamat URLit ja lisää "Luonnos: <url>" jos paikkamerkki puuttui. Luonnoksen (draft) linkkiä ei koskaan laiteta sähköpostiin
+  - **Julkaisu (Phase 13b, Cloudflare R2 + Worker)**: `app/demo_publish.py` lataa HTML:n R2:een S3-API:lla (boto3, `region=auto`, checksumit `when_required`) avaimella `demos/{token}.html`, metadata `expires-at`, `Cache-Control: no-store`. Worker (`worker/src/index.ts`, R2-binding `DEMOS`) palvelee `GET /{token}` samoilla suojaheadereilla (+ `frame-ancestors 'none'`), 404 tuntematon/väärän muotoinen token (ei R2-hakua), 410 jos `expires-at` mennyt, `robots.txt` Disallow kaikki. Julkinen linkki = `{DEMO_PUBLIC_BASE_URL}/{token}` → oma domain vaihtuu pelkällä env-muutoksella + domainin kytkennällä Workeriin Cloudflaressa
+  - Julkaisun tilat: `POST /leads/{id}/demo/publish` (409 DNC, 428 profiili, 503 ei konfiguroitu, 502 lataus epäonnistui → pysyy draftina) renderöi tuoreena ja asettaa `published`, `published_at`, `expires_at = +DEMO_TTL_DAYS` (30). `POST .../unpublish` poistaa R2:sta (502 jos poisto epäonnistuu) → draft. PATCH ja uudelleengenerointi päivittävät julkaistun version samaan osoitteeseen (lataus ennen committia). Demon ja liidin poisto poistaa myös R2-objektin (best effort)
+  - Vanheneminen: `run_demo_expiry()` lifespanin taustatehtävänä (60 s käynnistyksestä, sitten `DEMO_EXPIRY_INTERVAL_SECONDS`, oletus 6 h, vain jos R2 konfiguroitu): vanhentunut + liidi Hired → jatketaan 30 pv (uusi `expires-at` R2:een); muut → poisto R2:sta + `expired`. Jos R2-poisto epäonnistuu, Worker palauttaa silti 410 metadatan perusteella
+  - `DemoOut`: `preview_url` (backendin `/demo/{token}`, lasketaan pyynnön osoitteesta), `public_url` (vain julkaistulle), `publishing_enabled`. UI: Publish (30 days) / Unpublish, julkinen linkki + kopioi, voimassaolopäivä
   - UI: PipelineCardin "Generate demo" → DemoModal: pohjan valinta ennen generointia, iframe-esikatselu (`sandbox=""`), pohja- ja värivalinta (PATCH heti), tekstien muokkaus (3–6 palvelua), Save texts, Open in new tab, Regenerate (vahvistus), Delete
 - **Puhelinskripti** (`CALL_SCRIPT_SYSTEM_PROMPT`): sama malli, profiili ja havainto; rakenne 1. Avaus (nimi + esittely + "Onko teillä hetki, vai soitanko myöhemmin?") → 2. Havainto (yksi arkikielinen lause) → 3. Tarjous + yksi suora kysymys (ei konsulttimaisia kysymyksiä) → 4. Jos "ei kiinnosta": täsmälleen "Selvä, kiitos ajastanne, mukavaa päivää!" → 5. Jos kysyvät hintaa: riippuu tarpeesta + ehdota luonnosta/tapaamista, ei euromääriä. Ei scrapingia eikä Deep Scan -sisältöä. Prompti: pelkkä teksti numeroiduilla riveillä; `strip_markdown()` poistaa koodissa #-otsikot, lihavoinnit ja luettelomerkit. Sähköposti- ja skriptiprompti kieltävät yrityksen pitkän virallisen nimen avauksessa (lyhyt muoto, "teidän kampaamonne" tai ei nimeä)
 - **Do not contact**: `Lead.do_not_contact` estää generate-email, generate-call-script ja send-email (409). UI: "Mark do not contact" / "Allow contact again" PipelineCardissa, AI Draft ja Call script disabloitu
@@ -242,7 +246,12 @@ EMAIL_MODEL=gpt-4o-mini        # suositus: gpt-6.1-terra (gpt-4o-mini poistuu 14
 EMAIL_REASONING_EFFORT=        # GPT-6-malleille: none | low | medium | high (suositus terralle: low)
 SITE_MODEL=                    # demosivujen sisältö, tyhjä = EMAIL_MODEL
 SITE_REASONING_EFFORT=         # tyhjä = EMAIL_REASONING_EFFORT
-DEMO_PUBLIC_BASE_URL=http://127.0.0.1:8000   # demolinkin pohja sähköposteissa (Vaihe B: julkinen osoite)
+DEMO_PUBLIC_BASE_URL=          # julkaistujen demojen osoite, https (Worker workers.dev tai oma domain)
+R2_ACCOUNT_ID=                 # Cloudflare-tilin ID
+R2_ACCESS_KEY_ID=              # R2 API -token (Object Read & Write, vain demo-bucket)
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=agency-hunter-demos
+DEMO_TTL_DAYS=30
 UNSPLASH_ACCESS_KEY=           # demosivujen kuvat, tyhjä = gradientti
 UNSPLASH_APP_NAME=agency_hunter   # attribuutiolinkkien utm_source
 SMTP_HOST=         # esim. smtp.gmail.com
@@ -277,6 +286,8 @@ backend/app/demo_site.py       — Demosivut: sisältöskeema + validointi, pohj
 backend/app/templates/demo/    — Jinja2-pohjat: base.html.j2 + beauty/restaurant/services, fonts/ (woff2 + OFL)
 backend/app/demo_icons.py      — Palveluiden SVG-ikonit ja avainsanasäännöt
 backend/app/utils/unsplash.py  — Unsplash-haku, kuvien valinta, attribuutio, download tracking
+backend/app/demo_publish.py    — R2-julkaisu (boto3 S3 API): publish/unpublish, konfiguraatio
+worker/                        — Cloudflare Worker: src/index.ts (demojen jakelu R2:sta), wrangler.toml, test/
 backend/alembic.ini, backend/migrations/ — Alembic-migraatiot (versions/)
 backend/app/database.py        — DB-yhteys (SQLite dev, Postgres tuotannossa)
 backend/app/auth.py            — Supabase JWT -verifiointi (ES256/RS256 JWKS + HS256 legacy, verify_token FastAPI-dependency)
