@@ -64,6 +64,8 @@ class SenderProfile(SQLModel, table=True):
     user_id: str = Field(index=True, unique=True)
     name: str
     company_name: Optional[str] = None
+    # Allekirjoituksessa näkyvä nimi (esim. "Palin Web"); company_name voi olla virallinen (Tmi ...)
+    brand_name: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None  # portfolio
     short_intro: str  # esim. "teen nettisivuja paikallisille yrityksille Espoossa"
@@ -73,6 +75,7 @@ class SenderProfile(SQLModel, table=True):
 class SenderProfileUpdate(SQLModel):
     name: str = Field(min_length=1, max_length=100)
     company_name: Optional[str] = Field(default=None, max_length=100)
+    brand_name: Optional[str] = Field(default=None, max_length=60)
     phone: Optional[str] = Field(default=None, max_length=40)
     website: Optional[str] = Field(default=None, max_length=200)
     short_intro: str = Field(min_length=5, max_length=200)

@@ -21,7 +21,7 @@ from app.models import Lead, SenderProfile
 from tests.conftest import FakeOpenAI
 
 JARGON = ("SSL", "HTTPS", "DNS", "viewport", "HTTP 5", "HTTP 4", "parked", "sertifikaat", "domain")
-SIGNATURE = "Terveisin,\nPalin\n040 123 4567\nhttps://palin.fi"
+SIGNATURE = "Terveisin,\nPalin\npalin.fi\n040 123 4567"
 
 
 # --- Havainnot ---
@@ -121,7 +121,7 @@ def _profile(**overrides: Any) -> SenderProfile:
 def test_signature_from_profile() -> None:
     assert build_signature(_profile()) == "Palin"
     assert build_signature(_profile(company_name="Palin Web", phone="040 1", website="https://palin.fi")) == (
-        "Palin\nPalin Web\n040 1\nhttps://palin.fi"
+        "Palin\nPalin Web · palin.fi\n040 1"
     )
 
 

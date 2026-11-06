@@ -8,7 +8,7 @@ import threading
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from collections import deque
-from typing import AsyncIterator, List, Optional, Dict
+from typing import AsyncIterator, Callable, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus, urlparse
@@ -727,6 +727,7 @@ def upsert_sender_profile(
     profile.name = name
     profile.short_intro = intro
     profile.company_name = _clean(data.company_name)
+    profile.brand_name = _clean(data.brand_name)
     profile.phone = _clean(data.phone)
     profile.website = _clean(data.website)
     profile.updated_at = utc_now()
@@ -954,9 +955,22 @@ def strip_markdown(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def display_website(url: Optional[str]) -> Optional[str]:
+    """Allekirjoitukseen ilman https:// ja loppukauttaviivaa (palinweb.fi)."""
+    if not url:
+        return None
+    shown = re.sub(r"^https?://", "", url.strip(), flags=re.IGNORECASE).rstrip("/")
+    return shown or None
+
+
 def build_signature(profile: SenderProfile) -> str:
-    lines = [profile.name, profile.company_name, profile.phone, profile.website]
-    return "\n".join(line for line in lines if line)
+    """Nimi / brändi · sivusto / puhelin. Puuttuvat osat jätetään pois (ei tyhjiä rivejä tai irtopisteitä).
+
+    Ilman brand_namea käytetään company_namea, jotta vanhojen profiilien allekirjoitus ei kutistu.
+    """
+    brand = profile.brand_name or profile.company_name
+    middle = " · ".join(part for part in (brand, display_website(profile.website)) if part)
+    return "\n".join(line for line in (profile.name, middle, profile.phone) if line)
 
 
 def strip_model_sign_off(text: str) -> str:
@@ -1020,6 +1034,108 @@ def add_demo_link_to_body(body: str, demo_url: str) -> str:
 def finalize_email_body(text: str, profile: SenderProfile, demo_url: Optional[str] = None) -> str:
     body = insert_demo_link(strip_model_sign_off(text), demo_url)
     return f"{body}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
+
+
+# --- Sähköposti julkaistun demon kanssa ---
+# Malli kirjoittaa vain kappaleet 1–2 (kuka olen + miten löysin, mitä asiakkaille tapahtuu nyt).
+# Kappaleet 3–5 ja allekirjoitus tulevat koodista, joten linkki, riskittömyys ja seuraava askel
+# ovat aina mukana, eikä viesti pääty mielipidekysymykseen ("Mitä pidätte?").
+
+DEMO_EMAIL_MAX_WORDS = 110  # koko viesti ennen allekirjoitusta
+DEMO_MODEL_MAX_WORDS = 55  # mallin kappaleet 1–2; koodin osuus on n. 50 sanaa
+
+DEMO_LINK_PARAGRAPH = "Tein teille luonnoksen siitä, miltä sivunne voisivat näyttää:\n{url}\nVoitte katsoa sen suoraan puhelimella."
+DEMO_RISK_PARAGRAPH = (
+    "Luonnos on ilmainen eikä sido teitä mihinkään. Jos se näyttää hyvältä, "
+    "viimeistelen sen teidän omilla tiedoillanne ja kuvillanne."
+)
+DEMO_NEXT_STEP_WITH_PHONE = "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin tai soittaa minulle numeroon {phone}."
+DEMO_NEXT_STEP = "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin."
+
+# Mitä asiakkaalle konkreettisesti tapahtuu nyt (vihje kappaleeseen 2). Tarkin osuma issue-tekstistä ensin.
+CUSTOMER_IMPACT_BY_ISSUE: list[tuple[str, str]] = [
+    ("social media only", "Googlesta asiakas löytää teidät vain Facebookin kautta, eikä sieltä näe palveluitanne, hintoja tai aukioloaikoja yhdellä silmäyksellä."),
+    ("DNS not resolving", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea lainkaan.'),
+    ("connection", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea lainkaan.'),
+    ("parked domain", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, hän päätyy sivulle, jolla ei ole teidän tietojanne.'),
+    ("HTTP 404", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, hän näkee "sivua ei löydy" -ilmoituksen.'),
+    ("HTTP 410", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, hän näkee "sivua ei löydy" -ilmoituksen.'),
+    ("HTTP 5", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, hän näkee virheilmoituksen palveluiden ja aukioloaikojen sijaan.'),
+    ("SSL certificate", "Kun asiakas avaa sivunne, selain näyttää ensin varoituksen, ettei yhteys ole turvallinen, ja moni palaa siitä takaisin hakutuloksiin."),
+    ("no HTTPS", 'Selain merkitsee sivunne osoiteriville "ei turvallinen", mikä saa osan kävijöistä epäröimään.'),
+    ("redirects to HTTP", 'Selain merkitsee sivunne osoiteriville "ei turvallinen", mikä saa osan kävijöistä epäröimään.'),
+    ("no viewport meta", "Puhelimella sivunne näkyy pienenä tietokoneversiona, jota pitää suurentaa sormilla."),
+]
+CUSTOMER_IMPACT_BY_STATUS: Dict[str, str] = {
+    "NO WEBSITE": "Asiakas löytää teidät Google-kartalta, mutta ei näe palveluitanne, hintoja eikä aukioloaikoja, vaan joutuu soittamaan tai etsimään tiedot muualta.",
+    "BROKEN WEBSITE": 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea.',
+    "INSECURE": "Kun asiakas avaa sivunne, selain varoittaa, ettei yhteys ole turvallinen.",
+    "NOT MOBILE": "Puhelimella sivunne näkyy pienenä tietokoneversiona, jota pitää suurentaa sormilla.",
+}
+# UNKNOWN / WEBSITE OK: ei väitetä ongelmaa, kerrotaan mitä luonnos tekee helpommaksi
+CUSTOMER_IMPACT_DEFAULT = "Uudella sivulla palvelut, aukioloajat ja yhteystiedot löytyvät puhelimellakin yhdellä silmäyksellä."
+
+_GREETING_LINE_RE = re.compile(r"^\s*(hei|moi|hyvä vastaanottaja|hei teille|tervehdys)\b[^\n]{0,40}[,!.]?\s*$", re.IGNORECASE)
+_SENTENCE_RE = re.compile(r"[^.!?]+[.!?]+[\"”)]*|[^.!?]+$")
+_DRAFT_MENTION_RE = re.compile(r"\bluonno(s|ks)", re.IGNORECASE)
+
+
+def customer_impact(website_status: Optional[str], website_issue: Optional[str]) -> str:
+    if website_status in (None, "UNKNOWN", "WEBSITE OK"):
+        return CUSTOMER_IMPACT_DEFAULT
+    first_issue = (website_issue or "").split(";")[0].strip()
+    match = next((text for key, text in CUSTOMER_IMPACT_BY_ISSUE if first_issue.startswith(key)), None)
+    return match or CUSTOMER_IMPACT_BY_STATUS.get(website_status, CUSTOMER_IMPACT_DEFAULT)
+
+
+def demo_email_subject(lead: Lead) -> str:
+    # Ei yritysmäinen; "uusista" kun yrityksellä on jo jonkinlainen sivu
+    if lead.website_status == "NO WEBSITE":
+        return "Tein teille luonnoksen nettisivuista"
+    return "Tein teille luonnoksen uusista nettisivuista"
+
+
+def _drop_sentences(paragraph: str, predicate: Callable[[str], bool]) -> str:
+    kept = [s for s in _SENTENCE_RE.findall(paragraph) if s.strip() and not predicate(s)]
+    return " ".join(s.strip() for s in kept)
+
+
+def clean_demo_paragraphs(text: str) -> list[str]:
+    """Mallin kappaleet 1–2 siistittynä: ei tervehdystä, linkkejä, luonnosmainintaa eikä kysymyksiä.
+
+    Koodi kirjoittaa linkin, tarjouksen ja seuraavan askeleen, joten mallin vastaavat lauseet
+    poistetaan toiston ja loppukysymysten ("Mitä pidätte...?") estämiseksi. Yli 2 kappaletta -> 2 ensimmäistä.
+    """
+    text = _URL_RE.sub("", _LINK_PLACEHOLDER_RE.sub("", strip_model_sign_off(text)))
+    paragraphs: list[str] = []
+    # Kappaleet ensin: strip_markdown nielee #-otsikkoa edeltävän tyhjän rivin
+    for raw in re.split(r"\n\s*\n", text):
+        lines = [ln for ln in strip_markdown(raw).splitlines() if ln.strip() and not _GREETING_LINE_RE.match(ln)]
+        paragraph = " ".join(ln.strip() for ln in lines)
+        paragraph = _drop_sentences(
+            paragraph,
+            lambda s: s.rstrip().rstrip('"”)').endswith("?") or bool(_DRAFT_MENTION_RE.search(s)),
+        )
+        paragraph = re.sub(r"\s{2,}", " ", paragraph).strip()
+        if paragraph:
+            paragraphs.append(paragraph)
+    return paragraphs[:2]
+
+
+def demo_next_step(profile: SenderProfile) -> str:
+    return DEMO_NEXT_STEP_WITH_PHONE.format(phone=profile.phone) if profile.phone else DEMO_NEXT_STEP
+
+
+def build_demo_email_body(text: str, profile: SenderProfile, demo_url: str) -> str:
+    """Hei + mallin kappaleet 1–2 + linkki omalla rivillään + riskittömyys + seuraava askel + allekirjoitus."""
+    parts = ["Hei,", *clean_demo_paragraphs(text), DEMO_LINK_PARAGRAPH.format(url=demo_url), DEMO_RISK_PARAGRAPH, demo_next_step(profile)]
+    head = "\n\n".join(parts)
+    return f"{head}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
+
+
+def email_head(body: str) -> str:
+    """Viesti ennen allekirjoitusta (sanamäärän tarkistukseen)."""
+    return body.split(f"\n\n{SIGN_OFF}\n", 1)[0]
 
 
 # --- Demojen julkaisu (R2 + Worker) ---
@@ -1164,6 +1280,32 @@ PAKOLLISET SÄÄNNÖT:
 11. ÄLÄ kirjoita lopputervehdystä, allekirjoitusta tai "jos ei kiinnosta" -riviä — ne lisätään automaattisesti.
 12. Palauta VAIN viestin teksti (ei subject-riviä)."""
 
+DEMO_EMAIL_SYSTEM_PROMPT = f"""Kirjoitat suomeksi KAKSI lyhyttä kappaletta ensimmäisen yhteydenoton sähköpostiin paikalliselle
+yritykselle. Lähettäjä on yksityinen tekijä (tiedot LÄHETTÄJÄ-kohdassa), joka on jo tehnyt yritykselle luonnoksen
+nettisivuista. Viestin muut osat (tervehdys, linkki luonnokseen, tarjous, yhteydenottopyyntö, allekirjoitus)
+lisätään automaattisesti — älä kirjoita niitä.
+
+KAPPALE 1: kuka olen ja miten löysin yrityksen. Yksi tai kaksi lausetta, esim.
+   "Olen Palin ja teen nettisivuja paikallisille yrityksille. Etsin parturi-kampaamoja Kauniaisista ja löysin teidät Googlesta."
+   Käytä LÄHETTÄJÄ-kohdan nimeä ja esittelyä, toimialaa ja kaupunkia (taivuta luontevasti).
+KAPPALE 2: mitä asiakkaille tapahtuu nyt, konkreettisesti ASIAKKAAN TILANNE -kohdan mukaan. Yksi tai kaksi lausetta.
+   Kerro se omana havaintona asiakkaan näkökulmasta, ei yleistä "moni etsii netistä" -lausetta.
+   Ei pelottelua, ei liioittelua, ei lupauksia.
+
+SÄÄNNÖT:
+- Te-muoto johdonmukaisesti (teidän, teille, sivunne, voitte). Ei koskaan sinä-muotoa.
+- Älä käytä yrityksen pitkää virallista nimeä (esim. "Parturi-Kampaamo Taina Lantiainen"). Käytä luontevaa
+  lyhyttä muotoa (esim. "Tainan kampaamo"), "teidän kampaamonne/ravintolanne" tai jätä nimi pois.
+- EI kysymyksiä lainkaan. EI mielipidekysymyksiä ("Mitä pidätte...?", "Mitä mieltä olette...?", "Kiinnostaisiko?").
+- Älä mainitse luonnosta, linkkiä, hintaa tai tarjousta. Älä kirjoita verkko-osoitteita.
+- Ei tervehdystä ("Hei"), ei lopputervehdystä, ei allekirjoitusta.
+- Yhteensä enintään noin {DEMO_MODEL_MAX_WORDS} sanaa. Erota kappaleet tyhjällä rivillä.
+- KIELLETYT sanat ja fraasit: ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen,
+  digitaalinen läsnäolo, nostaa seuraavalle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia,
+  liiketoiminnan kasvu, keskustella tarkemmin, saattaa. Ei teknistä jargonia (SSL, HTTPS, DNS, sertifikaatti,
+  domain, viewport, virhekoodit).
+- Palauta VAIN nämä kaksi kappaletta."""
+
 CALL_SCRIPT_SYSTEM_PROMPT = """Kirjoitat suomeksi lyhyen (n. 30 sekuntia puhuttuna) puhelinrungon soittajalle, joka soittaa
 paikalliselle yritykselle ensimmäistä kertaa. Kuulostaa tavalliselta ihmiseltä, ei myyntikoulutukselta.
 
@@ -1254,6 +1396,32 @@ def build_email_user_prompt(
     if lead.website_context:
         parts.append(f"\nVERKKOSIVUN SISÄLTÖ (Deep Scan, käytä vain jos jotain konkreettista ja erityistä):\n{lead.website_context}")
     parts.append("\nKirjoita sähköposti tämän perusteella.")
+    if instruction:
+        parts.append(f"\nLisäohje: {instruction}")
+    return "\n".join(parts)
+
+
+def build_demo_email_user_prompt(lead: Lead, profile: SenderProfile, instruction: Optional[str] = None) -> str:
+    parts = [
+        "LÄHETTÄJÄ (minä):",
+        f"- Nimi: {profile.name}",
+        f"- Yritys: {profile.brand_name or profile.company_name or '(ei yritysnimeä, esiinny omalla nimellä)'}",
+        f"- Esittely: {profile.short_intro}",
+        "",
+        "VASTAANOTTAJA:",
+        f"- Yritys: {lead.name}",
+        f"- Kaupunki: {lead.city}",
+    ]
+    if lead.primary_type:
+        parts.append(f"- Toimiala (Googlen luokka englanniksi, käännä luontevasti suomeksi): {lead.primary_type}")
+    problem = describe_website_problem(lead.website_status, lead.website_issue)
+    parts.append("")
+    if problem:
+        parts.append(f"HAVAINTO (varma, tein sen itse): {problem}")
+    else:
+        parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
+    parts.append(f"ASIAKKAAN TILANNE NYT (kappale 2): {customer_impact(lead.website_status, lead.website_issue)}")
+    parts.append("\nKirjoita kappaleet 1 ja 2.")
     if instruction:
         parts.append(f"\nLisäohje: {instruction}")
     return "\n".join(parts)
@@ -1367,16 +1535,27 @@ async def generate_email(
         except Exception as e:
             logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
-    result = await _chat_completion(
-        EMAIL_SYSTEM_PROMPT,
-        build_email_user_prompt(db_lead, profile, req.instruction, has_demo=demo is not None),
-        max_tokens=500,
-    )
-    model = result.model
-    text = strip_model_sign_off(result.text)
-    check_generated_text(text, kind="sähköposti", lead_id=lead_id, model=model, max_words=MAX_EMAIL_WORDS)
-    body = finalize_email_body(text, profile, demo_public_url(demo) if demo else None)
-    subject = email_subject(db_lead)
+    demo_url = demo_public_url(demo) if demo else None
+    if demo_url:
+        # Malli kirjoittaa vain kappaleet 1–2, loput koodista (ks. build_demo_email_body)
+        result = await _chat_completion(
+            DEMO_EMAIL_SYSTEM_PROMPT, build_demo_email_user_prompt(db_lead, profile, req.instruction), max_tokens=300
+        )
+        model = result.model
+        body = build_demo_email_body(result.text, profile, demo_url)
+        check_generated_text(email_head(body), kind="sähköposti", lead_id=lead_id, model=model, max_words=DEMO_EMAIL_MAX_WORDS - 20)
+        subject = demo_email_subject(db_lead)
+    else:
+        result = await _chat_completion(
+            EMAIL_SYSTEM_PROMPT,
+            build_email_user_prompt(db_lead, profile, req.instruction),
+            max_tokens=500,
+        )
+        model = result.model
+        text = strip_model_sign_off(result.text)
+        check_generated_text(text, kind="sähköposti", lead_id=lead_id, model=model, max_words=MAX_EMAIL_WORDS)
+        body = finalize_email_body(text, profile)
+        subject = email_subject(db_lead)
 
     session.add(EmailDraft(user_id=user.id, lead_id=lead_id, subject=subject, body=body, model=model))
     session.commit()

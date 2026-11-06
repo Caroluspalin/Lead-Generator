@@ -43,7 +43,7 @@ def test_generate_email_saves_draft(
     res = client_a.post(f"/leads/{lead['id']}/generate-email", json={"instruction": "lyhyempi"})
     assert res.status_code == 200
     body = res.json()
-    assert body["body"] == "Hei, testiviesti.\n\nTerveisin,\nPalin\n040 123 4567\nhttps://palin.fi\n\n" + OPT_OUT_LINE
+    assert body["body"] == "Hei, testiviesti.\n\nTerveisin,\nPalin\npalin.fi\n040 123 4567\n\n" + OPT_OUT_LINE
     assert body["model"] == "gpt-4o-mini-test"
     assert body["subject"] == "Kysymys nettisivuista"
 

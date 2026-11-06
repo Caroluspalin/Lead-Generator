@@ -264,11 +264,12 @@ def test_email_link_only_for_published_demo(
     assert "TARJOUS: Voin tehdä teille ilmaisen luonnoksen" in fake_openai.calls[-1]["messages"][1]["content"]
 
     published = _publish(client_a, demo)
-    fake_openai.reply = "Hei,\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: [DEMO_LINKKI]\n\nKiinnostaisiko?"
+    fake_openai.reply = "Olen Palin ja teen nettisivuja.\n\nAsiakas ei näe aukioloaikojanne. [DEMO_LINKKI]"
     body = client_a.post(f"/leads/{lead_id}/generate-email", json={}).json()["body"]
-    assert f"Tein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {published['public_url']}" in body
+    # Linkki omalla rivillään koodin kappaleessa, julkinen osoite (ei backendin esikatselua)
+    assert f"miltä sivunne voisivat näyttää:\n{published['public_url']}\nVoitte katsoa" in body
     assert "testserver" not in body and "[DEMO_LINKKI]" not in body
-    assert "TARJOUS: Tein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: [DEMO_LINKKI]" in fake_openai.calls[-1]["messages"][1]["content"]
+    assert "Kirjoitat suomeksi KAKSI lyhyttä kappaletta" in fake_openai.calls[-1]["messages"][0]["content"]
 
     client_a.post(f"/leads/{lead_id}/demo/unpublish")
     fake_openai.reply = "Hei,\n\nTein luonnoksen: [DEMO_LINKKI]"
@@ -276,15 +277,15 @@ def test_email_link_only_for_published_demo(
     assert PUBLIC_BASE not in after and "[DEMO_LINKKI]" not in after
 
 
-def test_email_demo_link_added_by_code_if_model_drops_placeholder(
+def test_demo_email_drops_model_links_draft_sentences_and_questions(
     client_a: TestClient, demo: dict[str, Any], store: FakeStore, fake_openai: type[FakeOpenAI]
 ) -> None:
     published = _publish(client_a, demo)
     fake_openai.reply = "Hei,\n\nTein teille luonnoksen, katsokaa: https://keksitty.example/abc\n\nKiinnostaisiko?"
     body = client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={}).json()["body"]
-    assert "keksitty.example" not in body
-    # Luonnosta koskeva lause korvataan linkkilauseella (ei toistoa), ennen loppukysymystä
-    assert f"Hei,\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {published['public_url']}\n\nKiinnostaisiko?" in body
+    assert "keksitty.example" not in body and "Kiinnostaisiko" not in body
+    # Linkki ja luonnos vain koodin kappaleessa, kerran
+    assert body.count(published["public_url"]) == 1
     assert body.count("luonnoksen") == 1
 
 

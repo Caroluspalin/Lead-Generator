@@ -7,6 +7,7 @@ import { apiFetch } from '../lib/api';
 const EMPTY: SenderProfileInput = {
   name: '',
   company_name: '',
+  brand_name: '',
   phone: '',
   website: '',
   short_intro: '',
@@ -35,6 +36,7 @@ const SettingsView: React.FC = () => {
         setForm({
           name: data.name,
           company_name: data.company_name ?? '',
+          brand_name: data.brand_name ?? '',
           phone: data.phone ?? '',
           website: data.website ?? '',
           short_intro: data.short_intro,
@@ -128,10 +130,45 @@ const SettingsView: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
+              <label htmlFor="sender-brand" className={labelClass}>
+                Brand name
+              </label>
+              <input
+                id="sender-brand"
+                value={form.brand_name ?? ''}
+                onChange={update('brand_name')}
+                maxLength={60}
+                className={inputClass}
+                placeholder="Palin Web"
+                aria-describedby="sender-brand-help"
+              />
+              <p id="sender-brand-help" className="mt-1 text-xs text-fg-subtle">
+                Shown in the email signature next to your website.
+              </p>
+            </div>
+            <div>
               <label htmlFor="sender-company" className={labelClass}>
                 Company
               </label>
-              <input id="sender-company" value={form.company_name ?? ''} onChange={update('company_name')} maxLength={100} className={inputClass} />
+              <input
+                id="sender-company"
+                value={form.company_name ?? ''}
+                onChange={update('company_name')}
+                maxLength={100}
+                className={inputClass}
+                aria-describedby="sender-company-help"
+              />
+              <p id="sender-company-help" className="mt-1 text-xs text-fg-subtle">
+                Official name. Used in the signature only if brand name is empty.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label htmlFor="sender-website" className={labelClass}>
+                Portfolio website
+              </label>
+              <input id="sender-website" value={form.website ?? ''} onChange={update('website')} maxLength={200} className={inputClass} placeholder="https://..." />
             </div>
             <div>
               <label htmlFor="sender-phone" className={labelClass}>
@@ -139,12 +176,6 @@ const SettingsView: React.FC = () => {
               </label>
               <input id="sender-phone" value={form.phone ?? ''} onChange={update('phone')} maxLength={40} className={inputClass} />
             </div>
-          </div>
-          <div>
-            <label htmlFor="sender-website" className={labelClass}>
-              Portfolio website
-            </label>
-            <input id="sender-website" value={form.website ?? ''} onChange={update('website')} maxLength={200} className={inputClass} placeholder="https://..." />
           </div>
         </div>
         <div className="flex justify-end px-card py-3 border-t border-line">

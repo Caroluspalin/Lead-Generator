@@ -80,6 +80,7 @@ export interface DemoTemplateOption {
 export interface SenderProfileInput {
   name: string;
   company_name: string | null;
+  brand_name: string | null; // allekirjoituksessa näkyvä nimi, esim. "Palin Web"
   phone: string | null;
   website: string | null;
   short_intro: string;
