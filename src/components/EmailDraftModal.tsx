@@ -201,10 +201,10 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            className="relative w-full max-w-2xl max-h-[94vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-purple-50">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-purple-50 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-indigo-100 rounded-lg">
                   <Sparkles size={18} className="text-indigo-600" />
@@ -225,7 +225,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
             </div>
 
             {/* Body */}
-            <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-4 flex-1 min-h-0 overflow-y-auto">
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
                   <div className="relative">
@@ -293,7 +293,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
 
             {/* Footer — Iterate & Actions */}
             {!loading && draft && (
-              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 space-y-3">
+              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 space-y-3 shrink-0">
                 {/* Instruction + Regenerate */}
                 <div className="flex gap-2">
                   <input
@@ -345,7 +345,8 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                   </button>
                 )}
 
-                {!agency.email && (
+                {/* Piilotetaan kun vastaanottaja on kirjoitettu käsin */}
+                {!agency.email && !recipientEmail.trim() && (
                   <div role="status" className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
                     <AlertTriangle size={16} className="shrink-0" />
                     <span className="flex-1 min-w-[12rem]">
