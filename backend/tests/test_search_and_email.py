@@ -180,3 +180,13 @@ def test_email_prompt_includes_website_issue(
     assert "SSL" not in user_prompt
     system_prompt = fake_openai.calls[0]["messages"][0]["content"]
     assert "Te-muoto" in system_prompt
+
+
+def test_mock_data_is_clearly_fictional(client_a: TestClient) -> None:
+    results = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
+    for r in results:
+        assert r["phone"] is None or r["phone"].startswith("040 000 00")
+        assert r["website"] is None or r["website"].endswith(".example")
+        assert "Esimerkkikatu" in r["address"]
+        assert r["primary_type"] == "barber_shop"
+    assert results[0]["name"] == "Parturi Esimerkki"

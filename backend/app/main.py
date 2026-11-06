@@ -439,35 +439,54 @@ class GooglePlacesService:
 
 # --- ENDPOINTS ---
 
+# Mock-hakusana -> Googlen primary_type, jotta demo saa oikean pohjan myös dev-tilassa
+_MOCK_PRIMARY_TYPES: list[tuple[tuple[str, ...], str]] = [
+    (("parturi", "barber"), "barber_shop"),
+    (("kampaamo", "kauneus", "hius", "salon"), "hair_salon"),
+    (("kahvila", "cafe", "kahvi"), "cafe"),
+    (("ravintola", "lounas", "pizzeria", "restaurant"), "restaurant"),
+]
+
+
+def _mock_primary_type(business_type: str) -> Optional[str]:
+    t = business_type.lower()
+    return next((ptype for keys, ptype in _MOCK_PRIMARY_TYPES if any(k in t for k in keys)), None)
+
+
 def _mock_places(business_type: str, city: str) -> List[Dict]:
-    """Dev-data: vaihtelevat arvot jotta pisteytys ja merkinnät näkyvät UI:ssa ilman API-kutsuja."""
-    bt = business_type.title()
+    """Dev-data: keksityt yritykset (ei oikeita nimiä, numeroita tai sivustoja), vaihtelevat pisteet ja tilat.
+
+    Numerot 040 000 00xx ja .example-verkkotunnukset (RFC 2606) ovat selvästi fiktiivisiä.
+    """
+    bt = business_type.strip().capitalize()
+    low = business_type.strip().lower()
     # (nimi, website, website_status, website_issue, rating, review_count, business_status)
     rows: List[tuple] = [
-        (f"{bt} Keskusta", None, "NO WEBSITE", None, 4.7, 132, "OPERATIONAL"),
-        (f"{bt} Studio Aino", "www.example-aino.fi", "BROKEN WEBSITE", "HTTP 500", 4.4, 58, "OPERATIONAL"),
-        (f"{bt} Vanhatalo", "www.example-vanhatalo.fi", "INSECURE", "SSL certificate expired", 4.6, 87, "OPERATIONAL"),
-        (f"{bt} & Co", "www.example-co.fi", "NOT MOBILE", "no viewport meta", 4.1, 21, "OPERATIONAL"),
-        (f"{bt} Express", "www.example-express.fi", "WEBSITE OK", None, 3.9, 240, "OPERATIONAL"),
-        (f"Uusi {business_type}", None, "NO WEBSITE", None, None, 0, "OPERATIONAL"),
-        (f"{bt} Kulma", None, "NO WEBSITE", None, 4.9, 12, "CLOSED_TEMPORARILY"),
-        (f"Vanha {business_type}", None, "NO WEBSITE", None, 3.2, 7, "CLOSED_PERMANENTLY"),
-        (f"{bt} Premium", "www.example-premium.fi", "WEBSITE OK", None, 4.8, 410, "OPERATIONAL"),
-        (f"{bt} Linna", "www.example-linna.fi", "UNKNOWN", "HTTP 403", 4.5, 64, "OPERATIONAL"),
+        (f"{bt} Esimerkki", None, "NO WEBSITE", None, 4.7, 132, "OPERATIONAL"),
+        (f"{bt} Malli & Poika", "malli-ja-poika.example", "BROKEN WEBSITE", "HTTP 500", 4.4, 58, "OPERATIONAL"),
+        (f"{bt} Kuvitelma", "kuvitelma.example", "INSECURE", "SSL certificate expired", 4.6, 87, "OPERATIONAL"),
+        (f"{bt} Fiktio", "fiktio.example", "NOT MOBILE", "no viewport meta", 4.1, 21, "OPERATIONAL"),
+        (f"{bt} Express Demo", "express-demo.example", "WEBSITE OK", None, 3.9, 240, "OPERATIONAL"),
+        (f"Uusi {low} Testilä", None, "NO WEBSITE", None, None, 0, "OPERATIONAL"),
+        (f"{bt} Kulma Esimerkki", None, "NO WEBSITE", None, 4.9, 12, "CLOSED_TEMPORARILY"),
+        (f"Vanha {low} Mallila", None, "NO WEBSITE", None, 3.2, 7, "CLOSED_PERMANENTLY"),
+        (f"{bt} Premium Esimerkki", "premium-esimerkki.example", "WEBSITE OK", None, 4.8, 410, "OPERATIONAL"),
+        (f"{bt} Linna Esimerkki", "linna-esimerkki.example", "UNKNOWN", "HTTP 403", 4.5, 64, "OPERATIONAL"),
     ]
+    primary_type = _mock_primary_type(business_type)
     return [
         {
             "place_id": f"dev-{i}",
             "name": name,
             "address": f"Esimerkkikatu {i}, {city}",
-            "phone": f"040 123 45{i:02d}" if i % 3 else None,
+            "phone": f"040 000 00{i:02d}" if i % 4 else None,
             "website": website,
             "website_status": status,
             "website_issue": issue,
             "rating": rating,
             "review_count": reviews,
             "business_status": business_status,
-            "primary_type": None,
+            "primary_type": primary_type,
             "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus(f'{name} {city}')}",
         }
         for i, (name, website, status, issue, rating, reviews, business_status) in enumerate(rows, start=1)
