@@ -170,13 +170,20 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(data.detail || `${res.status}`);
+        // Backend luokittelee SMTP-virheen: "SMTP login error during login: <vihje> Server reply: …"
+        const detail = await readDetail(res);
+        const split = detail.indexOf(': ');
+        if (detail.startsWith('SMTP ') && split > 0) {
+          toast.error(`Email not sent: ${detail.slice(0, split)}`, { description: detail.slice(split + 2), duration: 10000 });
+        } else {
+          toast.error(`Email not sent: ${detail || `server error ${res.status}`}`);
+        }
+        return;
       }
       toast.success(`Email sent to ${recipientEmail}`);
       setRecipientEmail('');
-    } catch (err) {
-      toast.error(`Failed to send: ${(err as Error).message}`);
+    } catch {
+      toast.error('Email not sent: could not reach the backend.');
     } finally {
       setSending(false);
     }

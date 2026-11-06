@@ -4,12 +4,9 @@ import csv
 import io
 import logging
 import re
-import smtplib
 import threading
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from collections import deque
 from typing import AsyncIterator, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -64,6 +61,7 @@ from .demo_site import (
 from .utils.scraper import scrape_website_text
 from .utils.website_check import analyze_website
 from .utils.contact_finder import find_contact_email
+from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
 from .text_quality import FORBIDDEN_PATTERNS, PRICE_RE, find_forbidden_words, word_count  # noqa: F401
 from .auth import verify_token, AuthUser
@@ -1833,22 +1831,13 @@ async def send_email(
     if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM]):
         raise HTTPException(500, "SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD and SMTP_FROM in .env")
 
-    msg = MIMEMultipart()
-    msg["From"] = SMTP_FROM
-    msg["To"] = req.to
-    msg["Subject"] = req.subject
-    msg.attach(MIMEText(req.body, "plain", "utf-8"))
-
-    def _send():
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-
+    cfg = SmtpConfig(host=SMTP_HOST, port=SMTP_PORT, user=SMTP_USER, password=SMTP_PASSWORD, from_addr=SMTP_FROM)
+    msg = build_message(SMTP_FROM, req.to, req.subject, req.body)
     try:
-        await asyncio.to_thread(_send)
-    except Exception as e:
-        logger.error(f"SMTP error: {e}")
-        raise HTTPException(500, f"Email sending failed: {e}")
+        await asyncio.to_thread(send_mail, cfg, msg)
+    except SmtpFailure as f:
+        # Viesti on luokiteltu ja turvallinen (ei tunnuksia); sama teksti lokiin ja UI:hin
+        logger.error(f"SMTP {f.kind} failure at {f.stage}: {f.user_message()}")
+        raise HTTPException(502, f.user_message())
 
     return SendEmailResponse(ok=True, message=f"Email sent to {req.to}")
