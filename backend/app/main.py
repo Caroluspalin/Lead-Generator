@@ -7,7 +7,7 @@ import re
 import smtplib
 import threading
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from collections import deque
@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus, urlparse
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Engine, func
@@ -30,6 +30,16 @@ from .models import (
     Demo, Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate, utc_now,
 )
 from .utils import unsplash
+from .database import engine
+from .demo_publish import (
+    ObjectStore,
+    PublishError,
+    R2Config,
+    R2ObjectStore,
+    load_r2_config,
+    publish_html,
+    unpublish,
+)
 from .demo_site import (
     DemoBusiness,
     DemoImages,
@@ -122,11 +132,30 @@ USE_LIVE_GOOGLE = os.getenv("USE_LIVE_GOOGLE", "False").lower() == "true"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Julkaistujen demojen elinaika ja vanhenemisajon väli
+DEMO_TTL_DAYS = int(os.getenv("DEMO_TTL_DAYS", "30"))
+DEMO_EXPIRY_INTERVAL_SECONDS = int(os.getenv("DEMO_EXPIRY_INTERVAL_SECONDS", str(6 * 3600)))
+
+
+async def _demo_expiry_loop() -> None:
+    # Ensimmäinen ajo hetken päästä käynnistyksestä, sitten säännöllisesti
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await asyncio.to_thread(run_demo_expiry)
+        except Exception as e:
+            logger.error(f"Demojen vanhenemisajo epäonnistui: {e}")
+        await asyncio.sleep(DEMO_EXPIRY_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Tietokannan alustus käynnistyessä
     create_db_and_tables()
+    expiry_task = asyncio.create_task(_demo_expiry_loop()) if get_object_store() else None
     yield
+    if expiry_task:
+        expiry_task.cancel()
 
 
 # App Initialization
@@ -767,6 +796,7 @@ def delete_lead(
     if not db_lead or db_lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found")
     for demo in session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).all():
+        _take_offline(demo)
         session.delete(demo)
     session.delete(db_lead)
     session.commit()
@@ -784,8 +814,6 @@ REASONING_TOKEN_HEADROOM = 4000
 # Demosivujen sisältö: oletuksena sama malli kuin sähköposteissa
 SITE_MODEL = os.getenv("SITE_MODEL", "").strip() or EMAIL_MODEL
 SITE_REASONING_EFFORT = os.getenv("SITE_REASONING_EFFORT", EMAIL_REASONING_EFFORT).strip().lower()
-# Demolinkin pohja-URL sähköposteissa. Paikallisesti backend itse; Vaihe B vaihtaa julkiseen osoitteeseen.
-DEMO_PUBLIC_BASE_URL = os.getenv("DEMO_PUBLIC_BASE_URL", "http://127.0.0.1:8000").strip().rstrip("/")
 # Unsplash-kuvat demosivuille. Ilman avainta demo käyttää gradienttia.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
 # Unsplashin attribuutiolinkkien utm_source (sovelluksen nimi Unsplashin developer-portaalissa)
@@ -940,15 +968,99 @@ def finalize_email_body(text: str, profile: SenderProfile, demo_url: Optional[st
     return f"{body}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
 
 
-def demo_public_url(demo: Demo) -> str:
-    return f"{DEMO_PUBLIC_BASE_URL}/demo/{demo.public_token}"
+# --- Demojen julkaisu (R2 + Worker) ---
+
+_object_store_cache: dict[R2Config, R2ObjectStore] = {}
 
 
-def get_active_demo(session: Session, lead: Lead) -> Optional[Demo]:
+def get_r2_config() -> Optional[R2Config]:
+    return load_r2_config()
+
+
+def get_object_store() -> Optional[ObjectStore]:
+    """None jos R2-asetukset puuttuvat. Testit korvaavat tämän fake-storella."""
+    config = get_r2_config()
+    if config is None:
+        return None
+    if config not in _object_store_cache:
+        _object_store_cache[config] = R2ObjectStore(config)
+    return _object_store_cache[config]
+
+
+def demo_public_url(demo: Demo) -> Optional[str]:
+    """Julkinen linkki vain julkaistulle demolle: {DEMO_PUBLIC_BASE_URL}/{token}."""
+    config = get_r2_config()
+    if demo.status != "published" or config is None:
+        return None
+    return config.public_url(demo.public_token)
+
+
+def _is_expired(demo: Demo) -> bool:
+    return demo.status == "expired" or bool(demo.expires_at and _as_utc(demo.expires_at) <= utc_now())
+
+
+def get_published_demo(session: Session, lead: Lead) -> Optional[Demo]:
+    """Sähköpostiin kelpaa vain julkaistu ja voimassa oleva demo (luonnoksen linkki ei toimi vastaanottajalla)."""
     demo = session.exec(select(Demo).where(Demo.lead_id == lead.id, Demo.user_id == lead.user_id)).first()
-    if demo is None or demo.status == "expired" or (demo.expires_at and _as_utc(demo.expires_at) <= utc_now()):
+    if demo is None or demo.status != "published" or _is_expired(demo) or demo_public_url(demo) is None:
         return None
     return demo
+
+
+def _take_offline(demo: Demo) -> bool:
+    """Poistaa julkaistun demon R2:sta. Virheessä Worker palauttaa silti 410 vanhenemisen jälkeen."""
+    if demo.status != "published":
+        return True
+    store = get_object_store()
+    return unpublish(store, demo.public_token) if store else False
+
+
+def _republish_if_published(demo: Demo) -> None:
+    """Muokkauksen jälkeen julkaistu versio päivitetään samaan osoitteeseen. Virhe -> 502 ennen committia."""
+    if demo.status != "published":
+        return
+    store = get_object_store()
+    if store is None:
+        raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
+    try:
+        publish_html(store, demo.public_token, demo.html, demo.expires_at)
+    except PublishError as e:
+        raise HTTPException(502, str(e))
+
+
+def run_demo_expiry(now: Optional[datetime] = None, bind: Optional[Engine] = None) -> dict[str, int]:
+    """Vanhentuneet julkaisut: Hired-liidin demo jatketaan, muut poistetaan R2:sta ja merkitään expired."""
+    now = now or utc_now()
+    store = get_object_store()
+    counts = {"expired": 0, "extended": 0, "failed": 0}
+    if store is None:
+        return counts
+    with Session(bind or engine) as session:
+        due = [
+            d for d in session.exec(select(Demo).where(Demo.status == "published")).all()
+            if d.expires_at and _as_utc(d.expires_at) <= now
+        ]
+        for demo in due:
+            lead = session.get(Lead, demo.lead_id)
+            if lead is not None and lead.pipeline_status == "Hired":
+                demo.expires_at = now + timedelta(days=DEMO_TTL_DAYS)
+                try:
+                    publish_html(store, demo.public_token, demo.html, demo.expires_at)
+                    counts["extended"] += 1
+                except PublishError as e:
+                    logger.error(f"Demon jatko epäonnistui (liidi {demo.lead_id}): {e}")
+                    counts["failed"] += 1
+                    continue
+            else:
+                if not unpublish(store, demo.public_token):
+                    counts["failed"] += 1
+                demo.status = "expired"
+                counts["expired"] += 1
+            session.add(demo)
+        session.commit()
+    if any(counts.values()):
+        logger.info(f"Demojen vanhenemisajo: {counts}")
+    return counts
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -1175,7 +1287,7 @@ async def generate_email(
         except Exception as e:
             logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
-    demo = get_active_demo(session, db_lead)
+    demo = get_published_demo(session, db_lead)
     result = await _chat_completion(
         EMAIL_SYSTEM_PROMPT,
         build_email_user_prompt(db_lead, profile, req.instruction, has_demo=demo is not None),
@@ -1247,14 +1359,16 @@ class DemoOut(BaseModel):
     color_scheme: str
     content: DemoStoredContent
     public_token: str
-    preview_url: str
+    preview_url: str  # backendin esikatselu (myös luonnokset)
+    public_url: Optional[str] = None  # julkaistun demon osoite sähköpostiin
+    publishing_enabled: bool = False
     status: str
     created_at: datetime
     published_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
 
 
-def _demo_out(demo: Demo) -> DemoOut:
+def _demo_out(demo: Demo, request: Request) -> DemoOut:
     assert demo.id is not None
     return DemoOut(
         id=demo.id,
@@ -1263,7 +1377,9 @@ def _demo_out(demo: Demo) -> DemoOut:
         color_scheme=demo.color_scheme,
         content=DemoStoredContent.model_validate_json(demo.content_json),
         public_token=demo.public_token,
-        preview_url=demo_public_url(demo),
+        preview_url=f"{str(request.base_url).rstrip('/')}/demo/{demo.public_token}",
+        public_url=demo_public_url(demo),
+        publishing_enabled=get_r2_config() is not None,
         status=demo.status,
         created_at=demo.created_at,
         published_at=demo.published_at,
@@ -1392,6 +1508,7 @@ def list_demo_templates(_user: AuthUser = Depends(verify_token)) -> list[dict[st
 @app.post("/leads/{lead_id}/demo", response_model=DemoOut)
 async def generate_demo(
     lead_id: int,
+    request: Request,
     background_tasks: BackgroundTasks,
     req: DemoGenerateRequest = DemoGenerateRequest(),
     session: Session = Depends(get_session),
@@ -1436,27 +1553,32 @@ async def generate_demo(
     else:
         demo.template, demo.color_scheme = template, scheme
         demo.content_json, demo.html = stored.model_dump_json(), html
-        demo.status, demo.expires_at = "draft", None
+        if demo.status == "expired":
+            demo.status, demo.expires_at, demo.published_at = "draft", None, None
+        # Julkaistu demo päivittyy samaan osoitteeseen (sama token)
+        await asyncio.to_thread(_republish_if_published, demo)
     session.add(demo)
     session.commit()
     session.refresh(demo)
-    return _demo_out(demo)
+    return _demo_out(demo, request)
 
 
 @app.get("/leads/{lead_id}/demo", response_model=DemoOut)
 def read_demo(
     lead_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
 ):
     _, demo = _get_owned_demo(session, lead_id, user)
-    return _demo_out(demo)
+    return _demo_out(demo, request)
 
 
 @app.patch("/leads/{lead_id}/demo", response_model=DemoOut)
 def update_demo(
     lead_id: int,
     req: DemoUpdateRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
@@ -1494,10 +1616,65 @@ def update_demo(
     demo.template, demo.color_scheme = template, scheme
     demo.content_json = stored.model_dump_json()
     demo.html = _render_for(template, scheme, stored, lead, profile)
+    _republish_if_published(demo)
     session.add(demo)
     session.commit()
     session.refresh(demo)
-    return _demo_out(demo)
+    return _demo_out(demo, request)
+
+
+@app.post("/leads/{lead_id}/demo/publish", response_model=DemoOut)
+def publish_demo(
+    lead_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    """Julkaisee demon R2:een: {DEMO_PUBLIC_BASE_URL}/{token}, vanhenee DEMO_TTL_DAYS päivän päästä."""
+    lead, demo = _get_owned_demo(session, lead_id, user)
+    if lead.do_not_contact:
+        raise HTTPException(409, "Lead is marked do not contact")
+    profile = _require_sender_profile(session, user)
+    store = get_object_store()
+    if store is None:
+        raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
+
+    # Renderöidään tuoreena (esim. lähettäjäprofiilin yhteystiedot ovat voineet muuttua)
+    stored = DemoStoredContent.model_validate_json(demo.content_json)
+    demo.html = _render_for(demo.template, demo.color_scheme, stored, lead, profile)
+    now = utc_now()
+    expires_at = now + timedelta(days=DEMO_TTL_DAYS)
+    try:
+        publish_html(store, demo.public_token, demo.html, expires_at)
+    except PublishError as e:
+        raise HTTPException(502, str(e))
+    demo.status, demo.published_at, demo.expires_at = "published", now, expires_at
+    session.add(demo)
+    session.commit()
+    session.refresh(demo)
+    logger.info(f"Demo julkaistu (liidi {lead_id}), vanhenee {expires_at.date()}")
+    return _demo_out(demo, request)
+
+
+@app.post("/leads/{lead_id}/demo/unpublish", response_model=DemoOut)
+def unpublish_demo(
+    lead_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    _, demo = _get_owned_demo(session, lead_id, user)
+    if demo.status == "published":
+        store = get_object_store()
+        if store is None:
+            raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
+        if not unpublish(store, demo.public_token):
+            raise HTTPException(502, "R2 delete failed, try again")
+    demo.status, demo.published_at, demo.expires_at = "draft", None, None
+    session.add(demo)
+    session.commit()
+    session.refresh(demo)
+    return _demo_out(demo, request)
 
 
 @app.delete("/leads/{lead_id}/demo")
@@ -1507,6 +1684,7 @@ def delete_demo(
     user: AuthUser = Depends(verify_token),
 ):
     _, demo = _get_owned_demo(session, lead_id, user)
+    _take_offline(demo)
     session.delete(demo)
     session.commit()
     return {"ok": True}

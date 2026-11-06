@@ -1,0 +1,12 @@
+# Cloudflare Worker, joka palvelee julkaistut demosivut R2-bucketista.
+# Osoite: https://<name>.<tilisi-alidomain>.workers.dev/<token>
+# Oma domain (demo.<domain>.fi) lisätään myöhemmin Cloudflaren hallintapaneelista
+# (Workers & Pages -> tämä Worker -> Settings -> Domains & Routes), ei koodimuutoksia.
+name = "agency-hunter-demos"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "DEMOS"
+bucket_name = "agency-hunter-demos"

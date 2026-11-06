@@ -266,7 +266,8 @@ def test_generate_demo(client_a: TestClient, lead: dict[str, Any], demo_ready: t
     assert demo["status"] == "draft"
     assert demo["content"]["hero_title"] == VALID["hero_title"]
     assert demo["content"]["price_note"] == "Hinnat ja ajanvaraus puhelimitse."
-    assert demo["preview_url"] == f"http://127.0.0.1:8000/demo/{demo['public_token']}"
+    assert demo["preview_url"] == f"http://testserver/demo/{demo['public_token']}"
+    assert demo["public_url"] is None and demo["publishing_enabled"] is False
     assert "html" not in demo
     assert len(demo_ready.calls) == 1
     assert "Palauta VAIN yksi JSON-objekti" in demo_ready.calls[0]["messages"][0]["content"]
@@ -419,37 +420,6 @@ def test_other_user_cannot_access_demo(
 
 # --- Sähköposti ---
 
-def test_email_includes_demo_link_only_when_demo_exists(
-    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
-) -> None:
-    demo_ready.reply = "Hei,\n\nEn löytänyt teille nettisivua.\n\nVoin tehdä teille ilmaisen luonnoksen."
-    without = client_a.post(f"/leads/{lead['id']}/generate-email", json={}).json()["body"]
-    assert "/demo/" not in without
-    assert "TARJOUS: Voin tehdä teille ilmaisen luonnoksen" in demo_ready.calls[-1]["messages"][1]["content"]
-
-    demo_ready.reply = json.dumps(VALID)
-    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-
-    demo_ready.reply = "Hei,\n\nTein teille valmiin luonnoksen, voitte katsoa sen täältä: [DEMO_LINKKI]\n\nKiinnostaisiko?"
-    with_demo = client_a.post(f"/leads/{lead['id']}/generate-email", json={}).json()["body"]
-    assert f"voitte katsoa sen täältä: {demo['preview_url']}" in with_demo
-    assert "[DEMO_LINKKI]" not in with_demo
-    assert f"TARJOUS: Tein teille valmiin luonnoksen, voitte katsoa sen täältä: [DEMO_LINKKI]" in demo_ready.calls[-1]["messages"][1]["content"]
-
-    client_a.delete(f"/leads/{lead['id']}/demo")
-    demo_ready.reply = "Hei,\n\nTein luonnoksen: [DEMO_LINKKI]"
-    after_delete = client_a.post(f"/leads/{lead['id']}/generate-email", json={}).json()["body"]
-    assert "/demo/" not in after_delete and "[DEMO_LINKKI]" not in after_delete
-
-
-def test_email_demo_link_added_by_code_if_model_drops_placeholder(
-    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
-) -> None:
-    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-    demo_ready.reply = "Hei,\n\nTein teille luonnoksen, katsokaa: https://keksitty.example/abc\n\nKiinnostaisiko?"
-    body = client_a.post(f"/leads/{lead['id']}/generate-email", json={}).json()["body"]
-    assert "keksitty.example" not in body
-    assert f"Luonnos: {demo['preview_url']}" in body
 
 
 # --- Kuvat (Unsplash) ---

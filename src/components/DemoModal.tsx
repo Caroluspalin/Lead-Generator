@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus } from 'lucide-react';
+import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus, Globe, Copy, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Demo, DemoContent, DemoPhoto, DemoTemplateOption, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
@@ -27,7 +27,8 @@ const inputClass =
 const errorMessage = (status: number): string => {
   if (status === 428) return 'Add your sender profile in Settings (sidebar) before generating a demo.';
   if (status === 409) return 'This lead is marked do not contact.';
-  if (status === 502) return 'The AI content did not pass validation twice. Try generating again.';
+  if (status === 502) return 'The AI content did not pass validation twice, or the upload failed. Try again.';
+  if (status === 503) return 'Publishing is not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env).';
   return `Server error: ${status}`;
 };
 
@@ -45,7 +46,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
   const [draft, setDraft] = useState<DemoContent | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<'generate' | 'save' | 'delete' | null>(null);
+  const [busy, setBusy] = useState<'generate' | 'save' | 'delete' | 'publish' | null>(null);
   const [error, setError] = useState('');
   const [previewVersion, setPreviewVersion] = useState(0);
 
@@ -121,6 +122,34 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
       toast.error('Failed to update demo');
     } finally {
       setBusy(null);
+    }
+  };
+
+  const setPublished = async (publish: boolean) => {
+    if (!publish && !window.confirm('Take the demo offline? The link in sent emails stops working.')) return;
+    setBusy('publish');
+    try {
+      const res = await apiFetch(`/leads/${agency.id}/demo/${publish ? 'publish' : 'unpublish'}`, { method: 'POST' });
+      if (!res.ok) {
+        toast.error(errorMessage(res.status));
+        return;
+      }
+      applyDemo(await res.json());
+      toast.success(publish ? 'Demo published' : 'Demo taken offline');
+    } catch {
+      toast.error('Failed to update publishing');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copyPublicUrl = async () => {
+    if (!demo?.public_url) return;
+    try {
+      await navigator.clipboard.writeText(demo.public_url);
+      toast.success('Link copied');
+    } catch {
+      toast.error('Failed to copy');
     }
   };
 
@@ -422,7 +451,59 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
                       </div>
                     )}
 
-                    <div className="pt-2 border-t border-slate-200 flex flex-wrap gap-2">
+                    <div className="pt-2 border-t border-slate-200 space-y-2">
+                      {demo.status === 'published' && demo.public_url ? (
+                        <>
+                          <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200">
+                            <Globe size={14} className="text-emerald-700 shrink-0" />
+                            <a
+                              href={demo.public_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-emerald-800 font-medium truncate hover:underline"
+                            >
+                              {demo.public_url}
+                            </a>
+                            <button
+                              type="button"
+                              onClick={copyPublicUrl}
+                              aria-label="Copy public link"
+                              className="ml-auto p-1 rounded text-emerald-700 hover:bg-emerald-100"
+                            >
+                              <Copy size={13} />
+                            </button>
+                          </div>
+                          {demo.expires_at && (
+                            <p className="text-[11px] text-slate-500">
+                              Online until {new Date(demo.expires_at).toLocaleDateString('fi-FI')} (extended automatically if the lead is Hired)
+                            </p>
+                          )}
+                          <button
+                            onClick={() => setPublished(false)}
+                            disabled={busy !== null}
+                            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-60"
+                          >
+                            {busy === 'publish' ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}
+                            Unpublish
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setPublished(true)}
+                          disabled={busy !== null || !demo.publishing_enabled}
+                          title={demo.publishing_enabled ? undefined : 'Set R2_* and DEMO_PUBLIC_BASE_URL in backend .env'}
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {busy === 'publish' ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+                          {demo.status === 'expired' ? 'Publish again (30 days)' : 'Publish (30 days)'}
+                        </button>
+                      )}
+                      {!demo.publishing_enabled && (
+                        <p className="text-[11px] text-slate-500">Publishing is not configured yet. Preview works locally.</p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
                       <a
                         href={demo.preview_url}
                         target="_blank"

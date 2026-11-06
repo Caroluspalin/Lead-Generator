@@ -39,6 +39,10 @@ cd backend && alembic downgrade -1                              # peru viimeisin
 # Backend-testit (backend/-kansiosta, venv aktiivisena)
 cd backend && source venv/bin/activate && pip install -r requirements-dev.txt && pytest
 
+# Demo-Worker (Cloudflare): testit ja deploy (worker/-kansiosta)
+cd worker && npm test                      # Workerin yksikkötestit (Node, ei wrangleria)
+cd worker && npm ci && npx wrangler login && npx wrangler deploy
+
 # Frontend-tarkistukset (samat kuin CI:ssä)
 npm run lint && npm run build
 ```

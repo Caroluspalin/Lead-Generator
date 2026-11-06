@@ -60,7 +60,9 @@ export interface Demo {
   color_scheme: string;
   content: DemoStoredContent;
   public_token: string;
-  preview_url: string;
+  preview_url: string; // backendin esikatselu (myös luonnokset)
+  public_url: string | null; // julkaistu osoite (Worker / oma domain)
+  publishing_enabled: boolean;
   status: DemoStatus;
   created_at: string;
   published_at: string | null;

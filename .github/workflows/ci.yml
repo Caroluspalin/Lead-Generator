@@ -26,6 +26,19 @@ jobs:
       # conftest.py asettaa kaikki env-muuttujat tyhjiksi / mock-tilaan, ei API-avaimia
       - run: pytest
 
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Testit ajetaan Noden tyyppien poistolla, wrangleria ei tarvita CI:ssä
+      - run: npm test
+
   frontend:
     runs-on: ubuntu-latest
     steps:

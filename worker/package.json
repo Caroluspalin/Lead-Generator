@@ -1,0 +1,14 @@
+{
+  "name": "agency-hunter-demos-worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "test": "node --experimental-strip-types --no-warnings --test \"test/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "wrangler": "4.152.0"
+  }
+}
