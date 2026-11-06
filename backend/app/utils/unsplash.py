@@ -32,6 +32,14 @@ _PEOPLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Hero-kuvaan ei tuotemerkkejä: logot ja tuotehyllyt voivat antaa vaikutelman, että yritys
+# käyttää tai myy kyseisiä merkkejä. Tunnistus kuvauksesta, alt-tekstistä ja tageista.
+_PRODUCTS_RE = re.compile(
+    r"\b(products?|brands?|branded|logos?|labels?|shelf|shelves|shelving|bottles?|cosmetics?|packaging|"
+    r"merchandise|retail|shampoos?|conditioners?|skincare|skin care|haircare|hair care products?|jars?|tubes?)\b",
+    re.IGNORECASE,
+)
+
 # Hakusanat englanniksi (lang-parametri on Unsplashilla beta-ominaisuus, joka vaatii erillisen hakemuksen).
 # Avain täsmätään primary_typen alkuun/sisältöön; yrityksen nimellä ei koskaan haeta.
 _QUERIES: list[tuple[tuple[str, ...], list[str]]] = [
@@ -72,6 +80,7 @@ class DemoPhoto(BaseModel):
     photographer_url: str  # user.links.html
     download_location: str
     has_people: bool = False
+    has_products: bool = False
 
 
 def image_queries(primary_type: Optional[str], template: str) -> list[str]:
@@ -95,6 +104,8 @@ def _to_photo(item: dict[str, object]) -> Optional[DemoPhoto]:
         user_links = user.get("links") or {}
         assert isinstance(user_links, dict)
         text = " ".join(str(item.get(k) or "") for k in ("alt_description", "description"))
+        tags = item.get("tags") or []
+        tag_text = " ".join(str(t.get("title") or "") for t in tags if isinstance(t, dict)) if isinstance(tags, list) else ""
         return DemoPhoto(
             id=str(item["id"]),
             raw_url=str(urls["raw"]),
@@ -103,6 +114,7 @@ def _to_photo(item: dict[str, object]) -> Optional[DemoPhoto]:
             photographer_url=str(user_links["html"]),
             download_location=str(links["download_location"]),
             has_people=bool(_PEOPLE_RE.search(text)),
+            has_products=bool(_PRODUCTS_RE.search(f"{text} {tag_text}")),
         )
     except (KeyError, TypeError, AssertionError, ValueError):
         return None
@@ -149,13 +161,33 @@ def find_candidates(primary_type: Optional[str], template: str, access_key: str)
     return candidates
 
 
+def _hero_rank(photo: DemoPhoto) -> int:
+    """0 = ei ihmisiä eikä tuotteita, 1 = ihmisiä, 2 = tuotteita, 3 = molempia. Tuotemerkit ovat pahempia."""
+    return (2 if photo.has_products else 0) + (1 if photo.has_people else 0)
+
+
+def pick_hero(candidates: list[DemoPhoto]) -> Optional[DemoPhoto]:
+    """Paras hero-kuva. Jos puhdasta ei ole, käytetään parasta jäljelle jäänyttä ja lokitetaan varoitus."""
+    if not candidates:
+        return None
+    hero = min(candidates, key=_hero_rank)  # min on vakaa: tasatilanteessa hakutuloksen järjestys
+    if _hero_rank(hero) > 0:
+        reasons = [r for r, flag in (("ihmisiä", hero.has_people), ("tuotteita/merkkejä", hero.has_products)) if flag]
+        logger.warning(
+            f"Unsplash: ei puhdasta hero-kuvaa {len(candidates)} ehdokkaasta, käytetään parasta jäljelle jäänyttä "
+            f"({hero.id}: {', '.join(reasons)})"
+        )
+    return hero
+
+
 def choose_images(candidates: list[DemoPhoto]) -> tuple[Optional[DemoPhoto], list[DemoPhoto], list[DemoPhoto]]:
-    """(hero, mood, options). Hero: ensimmäinen ilman ihmisiä (fallback ensimmäinen)."""
+    """(hero, mood, options). Hero: ei ihmisiä eikä tuotemerkkejä jos mahdollista."""
     if not candidates:
         return None, [], []
-    hero = next((p for p in candidates if not p.has_people), candidates[0])
-    # Vaihtoehdot: ihmisettömät ensin, hero mukaan listaan
-    options = sorted(candidates, key=lambda p: p.has_people)[:MAX_OPTIONS]
+    hero = pick_hero(candidates)
+    assert hero is not None
+    # Vaihtoehdot: hero-kelpoisimmat ensin, hero mukaan listaan
+    options = sorted(candidates, key=_hero_rank)[:MAX_OPTIONS]
     if hero not in options:
         options = [hero] + options[: MAX_OPTIONS - 1]
     # Tunnelmakuvat samasta listasta kuin vaihtoehdot: hero-vaihto modaalissa pitää muut kuvat johdonmukaisina

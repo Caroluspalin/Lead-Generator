@@ -84,6 +84,7 @@
   - Demo-banneri + noindex (meta + X-Robots-Tag), tiukka CSP, arvaamaton public_token
   - Demo-malli + CRUD-endpointit, julkinen `/demo/{token}`, DemoModal UI:ssa
   - Sähköposti käyttää demolinkkiä tarjouksena, linkki lisätään koodissa
+  - Hero-kuvasta karsitaan tuotteet, merkit, hyllyt ja pullot (kuvaus, alt, tagit); fallback parhaaseen + varoitusloki
   - Tekstit: arkikieli, yhden lauseen palvelukuvaukset, uudet kielletyt fraasit (autamme, tarjoamme laadukasta, tervetuloa huolehtimaan), toistuvien fraasien tarkistus koko sivulta (uudelleenyritys + varoitusloki), yläotsikko ei toista yrityksen nimeä
   - Visuaalinen ilme: Unsplash-kuvat (hero + 2–3 tunnelmakuvaa, attribuutio, hotlinking, download tracking, kuvanvalitsin modaalissa, gradientti fallbackina), otsikkofontti per pohja upotettuna, yrityksen nimi heron päätasona, palvelukohtaiset ikonit, ruudukko ilman yksinäistä korttia, ohut demobanneri, mobiilin kiinteä soittonappi
 

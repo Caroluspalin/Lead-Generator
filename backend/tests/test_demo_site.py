@@ -829,3 +829,67 @@ def test_eyebrow_repeating_business_name_is_detected() -> None:
 def test_people_regex_catches_clients() -> None:
     assert unsplash._PEOPLE_RE.search("A hair salon interior with hair products and clients")
     assert not unsplash._PEOPLE_RE.search("Three black salon chairs facing circular mirrors")
+
+
+# --- Tuotemerkit hero-kuvassa ---
+
+def _brand_photo(pid: str, *, people: bool = False, products: bool = False) -> DemoPhoto:
+    return _photo(pid, people=people).model_copy(update={"has_products": products})
+
+
+@pytest.mark.parametrize(
+    ("alt", "description", "tags", "expected"),
+    [
+        ("Three black salon chairs facing circular mirrors", None, [], False),
+        ("white shelf with hair products", None, [], True),
+        ("salon interior", "Kevin Murphy brand display", [], True),
+        ("salon interior", None, [{"title": "bottles"}, {"title": "salon"}], True),
+        ("salon interior", None, [{"title": "cosmetics"}], True),
+        ("empty barber chair by the window", None, [{"title": "barber"}, {"title": "chair"}], False),
+    ],
+)
+def test_products_detected_from_alt_description_and_tags(
+    alt: str, description: str | None, tags: list[dict[str, str]], expected: bool
+) -> None:
+    item = _api_photo("x", alt=alt)
+    item["description"] = description
+    item["tags"] = tags
+    photo = unsplash._to_photo(item)
+    assert photo is not None
+    assert photo.has_products is expected
+
+
+def test_hero_skips_brand_and_product_photos() -> None:
+    candidates = [_brand_photo("shelf", products=True), _brand_photo("people", people=True), _brand_photo("clean")]
+    hero, mood, options = unsplash.choose_images(candidates)
+    assert hero is not None and hero.id == "clean"
+    assert [o.id for o in options] == ["clean", "people", "shelf"]
+    assert [m.id for m in mood] == ["people", "shelf"]  # tunnelmakuviin tuotteet ja ihmiset sallittuja
+
+
+def test_hero_prefers_people_over_products_when_no_clean_photo() -> None:
+    hero = unsplash.pick_hero([_brand_photo("shelf", products=True), _brand_photo("people", people=True)])
+    assert hero is not None and hero.id == "people"
+
+
+def test_hero_fallback_logs_warning_when_all_filtered(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    candidates = [_brand_photo("b1", products=True), _brand_photo("b2", products=True, people=True)]
+    with caplog.at_level(logging.WARNING, logger="app.utils.unsplash"):
+        hero = unsplash.pick_hero(candidates)
+    assert hero is not None and hero.id == "b1"  # paras jäljelle jäänyt
+    assert "ei puhdasta hero-kuvaa 2 ehdokkaasta" in caplog.text
+    assert "tuotteita/merkkejä" in caplog.text
+
+
+def test_clean_hero_does_not_warn(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    with caplog.at_level(logging.WARNING, logger="app.utils.unsplash"):
+        unsplash.pick_hero([_brand_photo("clean"), _brand_photo("b", products=True)])
+    assert caplog.text == ""
+
+
+def test_stored_photo_without_has_products_field_still_loads() -> None:
+    data = _photo("old").model_dump()
+    del data["has_products"]
+    assert DemoPhoto.model_validate(data).has_products is False
