@@ -102,6 +102,13 @@
   - Julkaisuvirhe → selkeä viesti, ei sähköpostia; do_not_contact estää koko ketjun
   - Korjaus: testit eristetty oikeasta R2:sta ja Unsplashista (regressio + testi)
   - Selaintesti (Playwright, fake OpenAI + fake R2) kaikille vaiheille
+- **Phase 14**: Sovelluksen ulkoasun uudistus (demosivut ennallaan):
+  - Suunta "Mono": tumma oletusteema, neutraalit harmaat, aksentti lähes valkoinen, ohuet reunat varjojen sijaan (varjo vain modaaleissa/popovereissa), pyöristykset 4/6/8 px, tiiviimpi taulukko
+  - Design tokenit: CSS-muuttujat `src/index.css` (RGB-kanavina, opacity-modifierit toimivat) → semanttiset Tailwind-nimet `tailwind.config.js` (`canvas`, `surface`, `raised`, `line`, `fg`, `accent`, `score-*`, `status-*`, `h-control`, `p-card` ...). Komponenteissa ei kovakoodattuja värejä
+  - Statusvärit vain merkityksellisissä kohdissa: score (numero + ohut pistepalkki taulukossa ja kortissa) ja sivun tila (piste + teksti, yhteinen `StatusBadge`). Pipeline-vaiheet neutraaleja
+  - Saavutettavuus: tekstikontrastit ≥ 4.5:1 (WCAG AA), näkyvä `:focus-visible`-rengas, linkit alleviivattu hillitysti (vahvistuu hoverilla), label/aria-attribuutit lomakkeisiin, dialogeihin ja ikoninapeille, History-rivin toiminnot näkyvät myös näppäimistöfokuksella
+  - Layout: lyhyemmät navigaationimet, sivuotsikko + kuvaus, PipelineCardin yhteystiedot listana ja toiminnot yhdellä rivillä, "Pro Plan" poistettu
+  - Tarkistettu Playwrightilla 1280 ja 1440 px, `docs/media`-kuvakaappaukset päivitetty
 
 ## Seuraavaksi
 

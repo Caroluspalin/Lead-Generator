@@ -191,7 +191,7 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 - **Riippuvuudet**: `backend/requirements.txt` lukittu tarkkoihin versioihin (`==`), testattu Python 3.13:lla puhtaassa venvissä. Päivitä versioita tietoisesti, ei automaattisesti
 - **Testit**: pytest + FastAPI TestClient (`backend/tests/`, dev-riippuvuudet `backend/requirements-dev.txt`). `conftest.py` asettaa env-muuttujat ennen app-importtia (ei `backend/.env`:n oikeita avaimia/kantaa), käyttää in-memory SQLiteä (StaticPool) ja `dependency_overrides`-mekanismia `get_session`- ja `verify_token`-dependencyille. Käyttäjä valitaan `X-Test-User`-headerilla (`client_a` / `client_b` -fixturet) tenant-isolaation testaamiseen. Autouse-fixture estää oikeat kutsut (requests, OpenAI, scraping, SMTP); testit mockaavat tarvitsemansa
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) push- ja pull_request-eventeillä: backend (Python 3.13, pytest) ja frontend (Node 22, `npm ci` + lint + build). Ei API-avaimia
-- **UI hakutuloksille**: LeadTable — score-badge (75+ vihreä, 50+ lime, 25+ keltainen, muuten harmaa), rating + arvostelumäärä, Google Maps -linkki, "Temporarily closed" -merkintä, "In pipeline" jo tallennetuille (Save-nappi piilossa), `website_issue` status-badgen alla. Oletusjärjestys score desc, sarakkeet Score/Business/Rating/Status klikattavia (Status: NO WEBSITE > BROKEN > INSECURE > NOT MOBILE > UNKNOWN > OK). Hakutulosten yläpuolella "N API calls, ~$X" (mock: "Mock data, 0 API calls"). PipelineCard näyttää scoren, ratingin ja issuen. Dashboardin "opportunity"-luku ei laske UNKNOWN-tilaa
+- **UI hakutuloksille**: LeadTable — score (numero + ohut pistepalkki; 75+ vihreä, 50+ lime, 25+ keltainen, muuten harmaa), rating + arvostelumäärä, Google Maps -linkki, "Temporarily closed" -merkintä, "In pipeline" jo tallennetuille (Save-nappi piilossa), `website_issue` status-badgen alla. Oletusjärjestys score desc, sarakkeet Score/Business/Rating/Status klikattavia (Status: NO WEBSITE > BROKEN > INSECURE > NOT MOBILE > UNKNOWN > OK). Hakutulosten yläpuolella "N API calls, ~$X" (mock: "Mock data, 0 API calls"). PipelineCard näyttää scoren, ratingin ja issuen. Dashboardin "opportunity"-luku ei laske UNKNOWN-tilaa
 - **Tietokanta**: Dev SQLite, tuotanto PostgreSQL (Supabase). `DATABASE_URL` tukee `postgres://`- ja `postgresql://`-muotoja, Postgresissa pool_pre_ping + pool_size=5
 
 ## Pisteytys (lead_score)
@@ -277,6 +277,17 @@ VITE_SUPABASE_ANON_KEY=
 
 React 19, Tailwind CSS 3, framer-motion, lucide-react, sonner
 
+## Ulkoasu ja design tokenit
+
+- Tumma teema ("Mono"): neutraalit harmaat, aksentti lähes valkoinen (`accent`, teksti `accent-fg`), ohuet reunat, varjo vain kelluville pinnoille (`shadow-overlay`, `shadow-popover`)
+- Tokenit CSS-muuttujina `src/index.css` (`:root`, RGB-kanavat) → semanttiset nimet `tailwind.config.js`:ssä. Komponentit käyttävät vain näitä (ei `slate-*`/`indigo-*` tms.):
+  - Pinnat: `canvas` (sivu), `surface` (paneelit, kortit), `subtle` (hover), `raised` (sekundaarinapit, chipit); reunat `line`, `line-strong`
+  - Teksti: `fg`, `fg-muted`, `fg-subtle` (kaikki ≥ 4.5:1 jokaisella pinnalla)
+  - Merkitykselliset: `score-hot/good/fair/low`, `status-none/broken/insecure/mobile/unknown/ok`, `success`, `danger`, `warning` (taustat opacity-modifierilla, esim. `bg-danger/10`)
+  - Koot: `h-control` (32 px), `h-control-sm` (28 px), `p-card`, `px-cell-x`/`py-cell-y`, `px-page-x`/`py-page-y`; pyöristykset `rounded-sm` 4, `rounded` 6, `rounded-lg` 8 (isommat poistettu asteikosta)
+- Fokus: globaali `:focus-visible`-rengas (`--color-focus`); kentissä reuna + 1 px outline
+- Linkit: sama väri kuin teksti, hillitty alleviivaus joka vahvistuu hoverilla
+
 ## Tiedostorakenne (avaintiedostot)
 
 ```
@@ -316,6 +327,6 @@ src/components/SidebarNav.tsx   — Sivupalkki-navigaatio (search | pipeline | d
 src/components/SettingsView.tsx — Lähettäjäprofiilin lomake (GET/PUT /sender-profile)
 src/components/DemoModal.tsx   — Demosivun generointi, esikatselu, pohja/värit, tekstien muokkaus
 src/components/LeadTable.tsx    — Hakutulosten taulukko (järjestettävät sarakkeet, score, rating, Maps, In pipeline, website_issue)
-src/components/ScoreBadge.tsx   — ScoreBadge + RatingDisplay (LeadTable ja PipelineCard)
+src/components/ScoreBadge.tsx   — ScoreBadge (numero + pistepalkki), RatingDisplay, StatusBadge (LeadTable, PipelineCard, Dashboard)
 src/types/agency.ts            — SearchResponse, SearchUsage, SearchResult, Agency, SavedAgency, WebsiteStatus, BusinessStatus, PipelineStatus, NavTab
 ```
