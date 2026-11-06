@@ -107,11 +107,11 @@ def test_publish_not_configured_is_503(client_a: TestClient, demo: dict[str, Any
 def test_publish_uploads_html_and_sets_expiry(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
     published = _publish(client_a, demo)
     assert published["status"] == "published"
-    assert published["public_url"] == f"{PUBLIC_BASE}/{demo['public_token']}"
+    assert published["public_url"] == f"{PUBLIC_BASE}/{demo['public_path']}"
     assert published["publishing_enabled"] is True
     assert published["preview_url"].startswith("http://testserver/demo/")
 
-    body, expires_at = store.objects[f"demos/{demo['public_token']}.html"]
+    body, expires_at = store.objects[f"demos/{demo['public_path']}.html"]
     html = body.decode()
     assert '<meta name="robots" content="noindex, nofollow">' in html
     assert "Tämä on luonnos, jonka Palin teki" in html
@@ -144,7 +144,7 @@ def test_edit_of_published_demo_updates_same_url(client_a: TestClient, demo: dic
     edited["hero_subtitle"] = "Uusi alaotsikko joka päivittyy julkaistuun versioon."
     res = client_a.patch(f"/leads/{demo['lead_id']}/demo", json={"content": edited}).json()
     assert res["public_url"] == published["public_url"]
-    body, expires_at = store.objects[f"demos/{demo['public_token']}.html"]
+    body, expires_at = store.objects[f"demos/{demo['public_path']}.html"]
     assert "Uusi alaotsikko" in body.decode()
     assert expires_at is not None  # vanhenemisaika säilyy
 
@@ -163,14 +163,14 @@ def test_regenerate_published_demo_republishes(
     _publish(client_a, demo)
     res = client_a.post(f"/leads/{demo['lead_id']}/demo", json={"template": "services"}).json()
     assert res["status"] == "published"
-    assert "#1d5d8c" in store.objects[f"demos/{demo['public_token']}.html"][0].decode()  # services/ocean
+    assert "#1d5d8c" in store.objects[f"demos/{demo['public_path']}.html"][0].decode()  # services/ocean
 
 
 def test_unpublish_deletes_object(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
     _publish(client_a, demo)
     res = client_a.post(f"/leads/{demo['lead_id']}/demo/unpublish").json()
     assert res["status"] == "draft" and res["public_url"] is None and res["expires_at"] is None
-    assert store.deleted == [f"demos/{demo['public_token']}.html"]
+    assert store.deleted == [f"demos/{demo['public_path']}.html"]
 
 
 def test_unpublish_failure_is_502(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
@@ -187,7 +187,7 @@ def test_deleting_published_demo_removes_from_r2(
     _publish(client_a, demo)
     path = f"/leads/{demo['lead_id']}/demo" if how == "delete_demo" else f"/leads/{demo['lead_id']}"
     assert client_a.delete(path).status_code == 200
-    assert store.deleted == [f"demos/{demo['public_token']}.html"]
+    assert store.deleted == [f"demos/{demo['public_path']}.html"]
 
 
 def test_delete_draft_does_not_touch_r2(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
@@ -211,9 +211,9 @@ def test_expiry_removes_non_hired_demo(
     _publish(client_a, demo)
     _set_expiry(session, datetime.now(timezone.utc) - timedelta(minutes=1))
     assert run_demo_expiry(bind=engine) == {"expired": 1, "extended": 0, "failed": 0}
-    assert store.deleted == [f"demos/{demo['public_token']}.html"]
+    assert store.deleted == [f"demos/{demo['public_path']}.html"]
     assert client_a.get(f"/leads/{demo['lead_id']}/demo").json()["status"] == "expired"
-    assert client_a.get(f"/demo/{demo['public_token']}").status_code == 410
+    assert client_a.get(f"/demo/{demo['public_path']}").status_code == 410
 
 
 def test_expiry_extends_hired_demo(
@@ -225,7 +225,7 @@ def test_expiry_extends_hired_demo(
     _set_expiry(session, now - timedelta(minutes=1))
     assert run_demo_expiry(now=now, bind=engine) == {"expired": 0, "extended": 1, "failed": 0}
     assert store.deleted == []
-    _, new_expiry = store.objects[f"demos/{demo['public_token']}.html"]
+    _, new_expiry = store.objects[f"demos/{demo['public_path']}.html"]
     assert new_expiry == now + timedelta(days=30)
     assert client_a.get(f"/leads/{demo['lead_id']}/demo").json()["status"] == "published"
 

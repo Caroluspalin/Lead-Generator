@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleRequest, isExpired, SECURITY_HEADERS } from '../src/index.ts';
+import { handleRequest, isDemoPath, isExpired, SECURITY_HEADERS } from '../src/index.ts';
 import type { DemoBucket, DemoObject } from '../src/index.ts';
 
 const TOKEN = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43 merkkiä
+const SLUG = 'taina-lantiainen-k7x2m';
 const NOW = new Date('2026-11-06T12:00:00Z');
 
 class FakeBucket implements DemoBucket {
@@ -83,4 +84,57 @@ test('isExpired', () => {
 
 test('headers match backend demo headers (frame-ancestors added on worker)', () => {
   assert.equal(SECURITY_HEADERS['Referrer-Policy'], 'no-referrer');
+});
+
+test('serves demo by readable slug address', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'slug demo', customMetadata: { 'expires-at': '2026-12-06T12:00:00+00:00' } });
+  const res = await handleRequest(get(`/${SLUG}`), env(bucket), NOW);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), 'slug demo');
+  assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+  assert.deepEqual(bucket.keys, [`demos/${SLUG}.html`]);
+});
+
+test('old token address keeps working next to slugs', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${TOKEN}.html`, { body: 'old' });
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'new' });
+  assert.equal(await (await handleRequest(get(`/${TOKEN}`), env(bucket), NOW)).text(), 'old');
+  assert.equal(await (await handleRequest(get(`/${SLUG}`), env(bucket), NOW)).text(), 'new');
+});
+
+test('expired slug demo is 410', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'x', customMetadata: { 'expires-at': '2026-11-01T00:00:00+00:00' } });
+  assert.equal((await handleRequest(get(`/${SLUG}`), env(bucket), NOW)).status, 410);
+});
+
+test('isDemoPath accepts only exact slug or token shapes', () => {
+  for (const ok of [SLUG, TOKEN, 'demo-abcde', 'kahvila-sade-pollo-23456', `${'a'.repeat(40)}-k7x2m`]) {
+    assert.equal(isDemoPath(ok), true, ok);
+  }
+  for (const bad of [
+    'taina-lantiainen', // ei satunnaisosaa
+    'taina-lantiainen-k7x2', // liian lyhyt satunnaisosa
+    'taina-lantiainen-k7x2m9', // liian pitkä
+    'taina-lantiainen-k0x2m', // 0 ei kuulu aakkostoon
+    'Taina-Lantiainen-k7x2m', // isot kirjaimet
+    '-taina-k7x2m',
+    'taina--k7x2m',
+    `${'a'.repeat(41)}-k7x2m`, // nimiosa yli 40
+    'taina/../k7x2m',
+    'demos/taina-lantiainen-k7x2m.html',
+    '',
+  ]) {
+    assert.equal(isDemoPath(bad), false, bad);
+  }
+});
+
+test('malformed slug-like paths are 404 without touching R2', async () => {
+  const bucket = new FakeBucket();
+  for (const path of ['/taina-lantiainen', '/taina-lantiainen-k7x2', '/TAINA-k7x2m', '/taina-lantiainen-k7x2m.html']) {
+    assert.equal((await handleRequest(get(path), env(bucket), NOW)).status, 404, path);
+  }
+  assert.equal(bucket.keys.length, 0);
 });

@@ -266,13 +266,13 @@ def test_generate_demo(client_a: TestClient, lead: dict[str, Any], demo_ready: t
     assert demo["status"] == "draft"
     assert demo["content"]["hero_title"] == VALID["hero_title"]
     assert demo["content"]["price_note"] == "Hinnat ja ajanvaraus puhelimitse."
-    assert demo["preview_url"] == f"http://testserver/demo/{demo['public_token']}"
+    assert demo["preview_url"] == f"http://testserver/demo/{demo['public_path']}"
     assert demo["public_url"] is None and demo["publishing_enabled"] is False
     assert "html" not in demo
     assert len(demo_ready.calls) == 1
     assert "Palauta VAIN yksi JSON-objekti" in demo_ready.calls[0]["messages"][0]["content"]
 
-    page = client_a.get(f"/demo/{demo['public_token']}")
+    page = client_a.get(f"/demo/{demo['public_path']}")
     assert page.status_code == 200
     assert page.headers["x-robots-tag"] == "noindex, nofollow"
     assert "script-src" not in page.headers["content-security-policy"]
@@ -336,6 +336,7 @@ def test_regenerate_keeps_token(client_a: TestClient, lead: dict[str, Any], demo
     second = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "services"}).json()
     assert second["id"] == first["id"]
     assert second["public_token"] == first["public_token"]
+    assert second["public_path"] == first["public_path"]
     assert second["template"] == "services"
 
 
@@ -350,7 +351,7 @@ def test_patch_rerenders_without_ai_call(client_a: TestClient, lead: dict[str, A
     assert len(demo_ready.calls) == calls_before
     updated = res.json()
     assert (updated["template"], updated["color_scheme"]) == ("services", "forest")
-    page = client_a.get(f"/demo/{demo['public_token']}").text
+    page = client_a.get(f"/demo/{demo['public_path']}").text
     assert "Tainan kampaamo" in page and "alkaen 30 €" in page and "#2f6a3f" in page
 
 
@@ -372,14 +373,14 @@ def test_patch_rejects_invalid_content(client_a: TestClient, lead: dict[str, Any
 def test_delete_demo_and_public_link(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     assert client_a.delete(f"/leads/{lead['id']}/demo").json() == {"ok": True}
-    assert client_a.get(f"/demo/{demo['public_token']}").status_code == 404
+    assert client_a.get(f"/demo/{demo['public_path']}").status_code == 404
     assert client_a.get(f"/leads/{lead['id']}/demo").status_code == 404
 
 
 def test_deleting_lead_deletes_demo(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     client_a.delete(f"/leads/{lead['id']}")
-    assert client_a.get(f"/demo/{demo['public_token']}").status_code == 404
+    assert client_a.get(f"/demo/{demo['public_path']}").status_code == 404
 
 
 def test_expired_demo_is_410(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], session: Any) -> None:
@@ -390,7 +391,7 @@ def test_expired_demo_is_410(client_a: TestClient, lead: dict[str, Any], demo_re
     row.status = "expired"
     session.add(row)
     session.commit()
-    assert client_a.get(f"/demo/{demo['public_token']}").status_code == 410
+    assert client_a.get(f"/demo/{demo['public_path']}").status_code == 410
 
 
 def test_unknown_token_is_404(client_a: TestClient) -> None:
@@ -651,7 +652,7 @@ def test_generate_demo_with_images_tracks_downloads(
     assert [m["id"] for m in images["mood"]] == ["b", "c", "d"]
     assert len(images["options"]) == 5
     assert unsplash_ready == ["a", "b", "c", "d"]  # hero + tunnelmakuvat
-    page = client_a.get(f"/demo/{demo['public_token']}")
+    page = client_a.get(f"/demo/{demo['public_path']}")
     assert "img-src data: https://images.unsplash.com" in page.headers["content-security-policy"]
     assert "font-src data:" in page.headers["content-security-policy"]
     assert "photo-a?ixid=xa" in page.text
@@ -662,7 +663,7 @@ def test_generate_demo_without_unsplash_key_uses_gradient(
 ) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     assert demo["content"]["images"] == {"hero": None, "mood": [], "options": []}
-    assert 'class="hero no-image"' in client_a.get(f"/demo/{demo['public_token']}").text
+    assert 'class="hero no-image"' in client_a.get(f"/demo/{demo['public_path']}").text
 
 
 def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]) -> None:
@@ -675,7 +676,7 @@ def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready
     assert "d" not in [m["id"] for m in res["content"]["images"]["mood"]]
     assert unsplash_ready == []  # kaikki neljä (a-d) olivat jo käytössä, vain roolit vaihtuivat
     assert len(demo_ready.calls) == calls_before
-    assert "photo-d?ixid=xd" in client_a.get(f"/demo/{demo['public_token']}").text
+    assert "photo-d?ixid=xd" in client_a.get(f"/demo/{demo['public_path']}").text
 
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "p1"}).json()
     assert res["content"]["images"]["hero"]["id"] == "p1"

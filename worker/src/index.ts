@@ -1,7 +1,8 @@
 /**
  * Julkaistujen demosivujen jakelu R2:sta.
  *
- * GET /<token>  -> R2-objekti demos/<token>.html (backend lataa sen S3-API:lla julkaistaessa)
+ * GET /<polku>  -> R2-objekti demos/<polku>.html (backend lataa sen S3-API:lla julkaistaessa)
+ * Polku on luettava slug (taina-lantiainen-k7x2m) tai ennen slugeja julkaistuilla demoilla 43-merkkinen token.
  * Samat suojaheaderit kuin backendin /demo/<token>: noindex, tiukka CSP, ei välimuistia.
  * Vanhentunut (customMetadata expires-at menneisyydessä) -> 410, vaikka backendin
  * poistoajo olisi myöhässä. Polku on domainista riippumaton: sama koodi toimii
@@ -22,8 +23,12 @@ export interface Env {
   DEMOS: DemoBucket;
 }
 
-// secrets.token_urlsafe(32) -> 43 merkkiä base64url
+// Vanha muoto: secrets.token_urlsafe(32) -> 43 merkkiä base64url
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+// Uusi muoto (backend demo_site.SLUG_RE): nimi max 40 merkkiä + '-' + 5 merkin satunnaisosa ilman 0/o/1/l/i
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-[abcdefghjkmnpqrstuvwxyz23456789]{5}$/;
+
+export const isDemoPath = (path: string): boolean => TOKEN_RE.test(path) || SLUG_RE.test(path);
 
 export const SECURITY_HEADERS: Record<string, string> = {
   'X-Robots-Tag': 'noindex, nofollow',
@@ -57,12 +62,13 @@ export async function handleRequest(request: Request, env: Env, now: Date = new 
     return textResponse(200, 'User-agent: *\nDisallow: /\n');
   }
 
-  const token = path.replace(/^\/+|\/+$/g, '');
-  if (!TOKEN_RE.test(token)) {
+  // Vain tarkka avain: ei listausta, ei osittaisia hakuja, väärän muotoinen polku ei koske R2:een
+  const demoPath = path.replace(/^\/+|\/+$/g, '');
+  if (!isDemoPath(demoPath)) {
     return textResponse(404, 'Not found');
   }
 
-  const object = await env.DEMOS.get(`demos/${token}.html`);
+  const object = await env.DEMOS.get(`demos/${demoPath}.html`);
   if (object === null) {
     return textResponse(404, 'Not found');
   }

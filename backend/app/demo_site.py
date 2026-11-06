@@ -9,10 +9,11 @@ import json
 import logging
 import re
 import secrets
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -363,6 +364,66 @@ _env = Environment(
 
 def new_public_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
+
+
+# --- Luettava julkinen osoite: /{nimi}-{satunnainen}, esim. /taina-lantiainen-k7x2m ---
+# Satunnaisosa ilman sekoittuvia merkkejä (0/o, 1/l/i): 31^5 ≈ 28,6 milj. vaihtoehtoa per nimi.
+# Riittää, koska demot ovat noindex, vanhenevat 30 päivässä eikä osoitteita voi listata
+# (R2-bucket ei ole julkinen, Worker palvelee vain tarkan avaimen, robots.txt Disallow).
+SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+SLUG_SUFFIX_LEN = 5
+SLUG_NAME_MAX = 40
+# Tätä pidemmästä nimestä pudotetaan yleiset toimialasanat ("parturi-kampaamo-taina-lantiainen" -> "taina-lantiainen")
+SLUG_GENERIC_DROP_FROM = 24
+SLUG_ATTEMPTS = 10
+SLUG_RE = re.compile(rf"^[a-z0-9](?:[a-z0-9-]{{0,{SLUG_NAME_MAX - 2}}}[a-z0-9])?-[{SLUG_ALPHABET}]{{{SLUG_SUFFIX_LEN}}}$")
+
+# Yritysmuodot pois aina, toimialasanat vain pitkistä nimistä
+_LEGAL_FORMS = {"oy", "oyj", "ab", "ky", "ay", "tmi", "toiminimi", "ltd", "ry"}
+_GENERIC_WORDS = {
+    "parturi", "kampaamo", "parturikampaamo", "hiusstudio", "hiussalonki", "kauneushoitola", "kauneussalonki",
+    "kynsistudio", "hieronta", "ravintola", "kahvila", "pizzeria", "bistro", "autokorjaamo", "korjaamo",
+    "autohuolto", "rengasliike", "kukkakauppa", "studio", "salon", "salonki", "palvelut", "palvelu",
+}
+_TRANSLIT = str.maketrans({"ä": "a", "ö": "o", "å": "a", "ü": "u", "ß": "ss", "æ": "ae", "ø": "o"})
+
+
+def name_slug(name: str) -> str:
+    """Yrityksen nimestä URL-osa: pienet kirjaimet, ääkköset a/o, väliviivat, max SLUG_NAME_MAX merkkiä."""
+    text = unicodedata.normalize("NFKC", name).lower().translate(_TRANSLIT)
+    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+    words = [w for w in re.split(r"[^a-z0-9]+", text) if w and w not in _LEGAL_FORMS]
+    if len("-".join(words)) > SLUG_GENERIC_DROP_FROM:
+        specific = [w for w in words if w not in _GENERIC_WORDS]
+        words = specific or words
+    slug = ""
+    for word in words:
+        candidate = f"{slug}-{word}" if slug else word
+        if len(candidate) > SLUG_NAME_MAX:
+            break
+        slug = candidate
+    if not slug and words:
+        slug = words[0][:SLUG_NAME_MAX]
+    return slug
+
+
+def random_slug_suffix() -> str:
+    return "".join(secrets.choice(SLUG_ALPHABET) for _ in range(SLUG_SUFFIX_LEN))
+
+
+def new_public_slug(
+    name: str,
+    taken: Callable[[str], bool],
+    *,
+    suffix: Optional[Callable[[], str]] = None,
+) -> str:
+    """Uniikki /{nimi}-{satunnainen}. taken(slug) tarkistaa kannasta; törmäyksessä uusi satunnaisosa."""
+    base = name_slug(name) or "demo"
+    for _ in range(SLUG_ATTEMPTS):
+        slug = f"{base}-{(suffix or random_slug_suffix)()}"
+        if not taken(slug):
+            return slug
+    raise RuntimeError(f"Could not allocate a unique demo address after {SLUG_ATTEMPTS} attempts")
 
 
 def phone_to_tel(phone: Optional[str]) -> Optional[str]:

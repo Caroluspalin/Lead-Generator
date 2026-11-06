@@ -60,6 +60,7 @@ export interface Demo {
   color_scheme: string;
   content: DemoStoredContent;
   public_token: string;
+  public_path: string; // julkinen polku: slug (taina-lantiainen-k7x2m) tai vanhoilla demoilla token
   preview_url: string; // backendin esikatselu (myös luonnokset)
   public_url: string | null; // julkaistu osoite (Worker / oma domain)
   publishing_enabled: boolean;

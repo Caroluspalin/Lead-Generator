@@ -1,6 +1,7 @@
 """Demosivujen julkaisu Cloudflare R2:een (S3-yhteensopiva API) ja poisto.
 
-Worker (worker/src/index.ts) palvelee objektit osoitteessa {DEMO_PUBLIC_BASE_URL}/{token}.
+Worker (worker/src/index.ts) palvelee objektit osoitteessa {DEMO_PUBLIC_BASE_URL}/{polku}.
+Polku = demon slug (esim. taina-lantiainen-k7x2m) tai ennen slugeja luoduilla demoilla token.
 Oman domainin käyttöönotto = DEMO_PUBLIC_BASE_URL-muutos + domain Workeriin Cloudflaressa.
 
 Avaimet vain backend/.env:ssä. R2 API -token: Object Read & Write, vain tähän bucketiin.
@@ -16,8 +17,8 @@ logger = logging.getLogger(__name__)
 OBJECT_PREFIX = "demos/"
 
 
-def object_key(public_token: str) -> str:
-    return f"{OBJECT_PREFIX}{public_token}.html"
+def object_key(public_path: str) -> str:
+    return f"{OBJECT_PREFIX}{public_path}.html"
 
 
 @dataclass(frozen=True)
@@ -32,8 +33,8 @@ class R2Config:
     def endpoint_url(self) -> str:
         return f"https://{self.account_id}.r2.cloudflarestorage.com"
 
-    def public_url(self, public_token: str) -> str:
-        return f"{self.public_base_url}/{public_token}"
+    def public_url(self, public_path: str) -> str:
+        return f"{self.public_base_url}/{public_path}"
 
 
 def load_r2_config() -> Optional[R2Config]:
@@ -102,18 +103,18 @@ class PublishError(Exception):
     pass
 
 
-def publish_html(store: ObjectStore, public_token: str, html: str, expires_at: Optional[datetime]) -> None:
+def publish_html(store: ObjectStore, public_path: str, html: str, expires_at: Optional[datetime]) -> None:
     try:
-        store.put(object_key(public_token), html.encode("utf-8"), expires_at=expires_at)
+        store.put(object_key(public_path), html.encode("utf-8"), expires_at=expires_at)
     except Exception as e:  # botocore-virheet, verkko
         raise PublishError(f"R2 upload failed: {e}") from e
 
 
-def unpublish(store: ObjectStore, public_token: str) -> bool:
+def unpublish(store: ObjectStore, public_path: str) -> bool:
     """True jos poisto onnistui. Virhe vain lokiin: Worker palauttaa silti 410 expires-at-metadatan perusteella."""
     try:
-        store.delete(object_key(public_token))
+        store.delete(object_key(public_path))
         return True
     except Exception as e:
-        logger.error(f"R2-poisto epäonnistui ({object_key(public_token)}): {e}")
+        logger.error(f"R2-poisto epäonnistui ({object_key(public_path)}): {e}")
         return False

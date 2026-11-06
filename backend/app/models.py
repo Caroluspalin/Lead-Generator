@@ -49,6 +49,9 @@ class Demo(SQLModel, table=True):
     content_json: str  # DemoStoredContent JSONina (sis. generointihetken aukioloajat)
     html: str
     public_token: str = Field(index=True, unique=True)
+    # Luettava osoite (/taina-lantiainen-k7x2m). None = demo luotu ennen slugeja: osoite on token,
+    # jotta jo lähetetyt linkit ja R2-objektit pysyvät ennallaan. Ei muutu uudelleengeneroinnissa.
+    public_slug: Optional[str] = Field(default=None, index=True, unique=True)
     status: str = Field(default="draft")
     created_at: datetime = Field(default_factory=utc_now)
     published_at: Optional[datetime] = None

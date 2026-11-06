@@ -16,7 +16,8 @@ from urllib.parse import quote_plus, urlparse
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
-from sqlalchemy import Engine, func
+from sqlalchemy import Engine, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from pydantic import BaseModel, Field
 import requests
@@ -50,6 +51,7 @@ from .demo_site import (
     TEMPLATES,
     build_demo_prompt,
     fetch_opening_hours,
+    new_public_slug,
     new_public_token,
     parse_ai_content,
     render_demo_html,
@@ -1039,12 +1041,24 @@ def get_object_store() -> Optional[ObjectStore]:
     return _object_store_cache[config]
 
 
+def demo_path(demo: Demo) -> str:
+    """Julkisen osoitteen polku ja R2-avaimen nimi: slug, tai token ennen slugeja luoduilla demoilla."""
+    return demo.public_slug or demo.public_token
+
+
+def _demo_path_taken(session: Session, path: str) -> bool:
+    # Slugit ja tokenit jakavat saman polkunimiavaruuden (/demo/{polku}, Worker /{polku})
+    return session.exec(
+        select(Demo.id).where(or_(Demo.public_slug == path, Demo.public_token == path))
+    ).first() is not None
+
+
 def demo_public_url(demo: Demo) -> Optional[str]:
-    """Julkinen linkki vain julkaistulle demolle: {DEMO_PUBLIC_BASE_URL}/{token}."""
+    """Julkinen linkki vain julkaistulle demolle: {DEMO_PUBLIC_BASE_URL}/{slug tai token}."""
     config = get_r2_config()
     if demo.status != "published" or config is None:
         return None
-    return config.public_url(demo.public_token)
+    return config.public_url(demo_path(demo))
 
 
 def _is_expired(demo: Demo) -> bool:
@@ -1064,7 +1078,7 @@ def _take_offline(demo: Demo) -> bool:
     if demo.status != "published":
         return True
     store = get_object_store()
-    return unpublish(store, demo.public_token) if store else False
+    return unpublish(store, demo_path(demo)) if store else False
 
 
 def _republish_if_published(demo: Demo) -> None:
@@ -1075,7 +1089,7 @@ def _republish_if_published(demo: Demo) -> None:
     if store is None:
         raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
     try:
-        publish_html(store, demo.public_token, demo.html, demo.expires_at)
+        publish_html(store, demo_path(demo), demo.html, demo.expires_at)
     except PublishError as e:
         raise HTTPException(502, str(e))
 
@@ -1097,14 +1111,14 @@ def run_demo_expiry(now: Optional[datetime] = None, bind: Optional[Engine] = Non
             if lead is not None and lead.pipeline_status == "Hired":
                 demo.expires_at = now + timedelta(days=DEMO_TTL_DAYS)
                 try:
-                    publish_html(store, demo.public_token, demo.html, demo.expires_at)
+                    publish_html(store, demo_path(demo), demo.html, demo.expires_at)
                     counts["extended"] += 1
                 except PublishError as e:
                     logger.error(f"Demon jatko epäonnistui (liidi {demo.lead_id}): {e}")
                     counts["failed"] += 1
                     continue
             else:
-                if not unpublish(store, demo.public_token):
+                if not unpublish(store, demo_path(demo)):
                     counts["failed"] += 1
                 demo.status = "expired"
                 counts["expired"] += 1
@@ -1440,6 +1454,7 @@ class DemoOut(BaseModel):
     color_scheme: str
     content: DemoStoredContent
     public_token: str
+    public_path: str  # julkisen osoitteen polku: slug, tai token ennen slugeja luoduilla demoilla
     preview_url: str  # backendin esikatselu (myös luonnokset)
     public_url: Optional[str] = None  # julkaistun demon osoite sähköpostiin
     publishing_enabled: bool = False
@@ -1458,7 +1473,8 @@ def _demo_out(demo: Demo, request: Request) -> DemoOut:
         color_scheme=demo.color_scheme,
         content=DemoStoredContent.model_validate_json(demo.content_json),
         public_token=demo.public_token,
-        preview_url=f"{str(request.base_url).rstrip('/')}/demo/{demo.public_token}",
+        public_path=demo_path(demo),
+        preview_url=f"{str(request.base_url).rstrip('/')}/demo/{demo_path(demo)}",
         public_url=demo_public_url(demo),
         publishing_enabled=get_r2_config() is not None,
         status=demo.status,
@@ -1630,16 +1646,27 @@ async def generate_demo(
         demo = Demo(
             user_id=user.id, lead_id=lead_id, template=template, color_scheme=scheme,
             content_json=stored.model_dump_json(), html=html, public_token=new_public_token(),
+            public_slug=new_public_slug(lead.name, lambda slug: _demo_path_taken(session, slug)),
         )
     else:
         demo.template, demo.color_scheme = template, scheme
         demo.content_json, demo.html = stored.model_dump_json(), html
         if demo.status == "expired":
             demo.status, demo.expires_at, demo.published_at = "draft", None, None
-        # Julkaistu demo päivittyy samaan osoitteeseen (sama token)
+        # Julkaistu demo päivittyy samaan osoitteeseen (sama slug/token)
         await asyncio.to_thread(_republish_if_published, demo)
+    is_new = demo.id is None
     session.add(demo)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        if not is_new:
+            raise
+        # Rinnakkainen luonti ehti varata saman osoitteen tarkistuksen jälkeen: uusi satunnaisosa
+        session.rollback()
+        demo.public_slug = new_public_slug(lead.name, lambda slug: _demo_path_taken(session, slug))
+        session.add(demo)
+        session.commit()
     session.refresh(demo)
     return _demo_out(demo, request)
 
@@ -1726,7 +1753,7 @@ def publish_demo(
     now = utc_now()
     expires_at = now + timedelta(days=DEMO_TTL_DAYS)
     try:
-        publish_html(store, demo.public_token, demo.html, expires_at)
+        publish_html(store, demo_path(demo), demo.html, expires_at)
     except PublishError as e:
         raise HTTPException(502, str(e))
     demo.status, demo.published_at, demo.expires_at = "published", now, expires_at
@@ -1749,7 +1776,7 @@ def unpublish_demo(
         store = get_object_store()
         if store is None:
             raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
-        if not unpublish(store, demo.public_token):
+        if not unpublish(store, demo_path(demo)):
             raise HTTPException(502, "R2 delete failed, try again")
     demo.status, demo.published_at, demo.expires_at = "draft", None, None
     session.add(demo)
@@ -1785,10 +1812,15 @@ DEMO_RESPONSE_HEADERS = {
 }
 
 
-@app.get("/demo/{public_token}", response_class=HTMLResponse, include_in_schema=False)
-def view_demo(public_token: str, session: Session = Depends(get_session)) -> HTMLResponse:
-    """Julkinen esikatselu ilman kirjautumista: token on ainoa avain, joten se on pitkä ja satunnainen."""
-    demo = session.exec(select(Demo).where(Demo.public_token == public_token)).first()
+@app.get("/demo/{public_path}", response_class=HTMLResponse, include_in_schema=False)
+def view_demo(public_path: str, session: Session = Depends(get_session)) -> HTMLResponse:
+    """Julkinen esikatselu ilman kirjautumista: slug (nimi + satunnainen osa) tai vanha token.
+
+    Vain tarkka osuma; listausta tai osittaista hakua ei ole.
+    """
+    demo = session.exec(
+        select(Demo).where(or_(Demo.public_slug == public_path, Demo.public_token == public_path))
+    ).first()
     if demo is None:
         return HTMLResponse("Not found", status_code=404, headers=DEMO_RESPONSE_HEADERS)
     if demo.status == "expired" or (demo.expires_at and _as_utc(demo.expires_at) <= utc_now()):
