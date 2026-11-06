@@ -94,6 +94,14 @@
   - Sähköpostiin vain julkaistun demon linkki
   - Oma domain myöhemmin pelkällä `DEMO_PUBLIC_BASE_URL`-muutoksella + domain Workeriin Cloudflaressa
   - Workerin testit CI:hin (Node, tyyppien poisto)
+- **Phase 13c**: Demo + email -ketju:
+  - PipelineCardin "Demo + email": olemassa oleva demo avataan suoraan, muuten generoidaan (lataustila)
+  - DemoModalin pääpainike "Publish & create email" (otsikkorivillä): julkaisu → sähköpostiluonnos julkisella linkillä, vastaanottaja esitäytetty; puuttuva sähköposti → huomautus + Call script
+  - Linkki vain julkaistulle demolle (ei draft/expired/localhost), luonteva linkkilause tarjouskohtaan ilman toistoa, `require_demo_link` → 409 ilman julkaisua
+  - `POST /leads/{id}/email/demo-link`: linkki jo kirjoitettuun luonnokseen ilman AI-kutsua
+  - Julkaisuvirhe → selkeä viesti, ei sähköpostia; do_not_contact estää koko ketjun
+  - Korjaus: testit eristetty oikeasta R2:sta ja Unsplashista (regressio + testi)
+  - Selaintesti (Playwright, fake OpenAI + fake R2) kaikille vaiheille
 
 ## Seuraavaksi
 
