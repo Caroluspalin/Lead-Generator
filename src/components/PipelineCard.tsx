@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
+import { apiFetch } from '../lib/api';
+import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
@@ -49,6 +51,41 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [findingEmail, setFindingEmail] = useState(false);
   const [callScriptOpen, setCallScriptOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
+  const [preparingDemo, setPreparingDemo] = useState(false);
+  // true kun sähköposti avataan "Publish & create email" -ketjusta: backend vaatii julkaistun demon
+  const [emailWithDemo, setEmailWithDemo] = useState(false);
+
+  // Olemassa oleva demo avataan suoraan (ei uutta generointia = ei turhia API-kutsuja)
+  const handleDemoEmail = async () => {
+    setPreparingDemo(true);
+    try {
+      const existing = await apiFetch(`/leads/${agency.id}/demo`);
+      if (existing.ok) {
+        setDemoOpen(true);
+        return;
+      }
+      if (existing.status !== 404) {
+        toast.error(outreachErrorMessage(existing.status, await readDetail(existing)));
+        return;
+      }
+      const res = await apiFetch(`/leads/${agency.id}/demo`, { method: 'POST', body: JSON.stringify({}) });
+      if (!res.ok) {
+        toast.error(outreachErrorMessage(res.status, await readDetail(res)));
+        return;
+      }
+      setDemoOpen(true);
+    } catch {
+      toast.error('Failed to prepare the demo. Is the backend running?');
+    } finally {
+      setPreparingDemo(false);
+    }
+  };
+
+  const openEmailWithDemo = () => {
+    setDemoOpen(false);
+    setEmailWithDemo(true);
+    setEmailModalOpen(true);
+  };
   const { findEmail, setDoNotContact } = usePipeline();
 
   const handleToggleDoNotContact = async () => {
@@ -323,12 +360,13 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           </button>
         </div>
         <button
-          onClick={() => setDemoOpen(true)}
-          disabled={agency.do_not_contact}
+          onClick={handleDemoEmail}
+          disabled={agency.do_not_contact || preparingDemo}
+          title={agency.do_not_contact ? 'This lead is marked do not contact' : undefined}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-sky-700 bg-sky-50 hover:bg-sky-100 border-2 border-sky-200 hover:border-sky-300 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <LayoutTemplate size={15} />
-          Generate demo
+          {preparingDemo ? <Loader2 size={15} className="animate-spin" /> : <LayoutTemplate size={15} />}
+          {preparingDemo ? 'Preparing demo… (can take ~10 s)' : 'Demo + email'}
         </button>
         <button
           onClick={handleToggleDoNotContact}
@@ -341,15 +379,24 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       {/* Modals */}
       <EmailDraftModal
         isOpen={emailModalOpen}
-        onClose={() => setEmailModalOpen(false)}
+        onClose={() => {
+          setEmailModalOpen(false);
+          setEmailWithDemo(false);
+        }}
         agency={agency}
+        requireDemoLink={emailWithDemo}
+        onOpenCallScript={() => {
+          setEmailModalOpen(false);
+          setEmailWithDemo(false);
+          setCallScriptOpen(true);
+        }}
       />
       <CallScriptModal
         isOpen={callScriptOpen}
         onClose={() => setCallScriptOpen(false)}
         agency={agency}
       />
-      <DemoModal isOpen={demoOpen} onClose={() => setDemoOpen(false)} agency={agency} />
+      <DemoModal isOpen={demoOpen} onClose={() => setDemoOpen(false)} agency={agency} onCreateEmail={openEmailWithDemo} />
     </motion.div>
   );
 };

@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus, Globe, Copy, EyeOff } from 'lucide-react';
+import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus, Globe, Copy, EyeOff, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Demo, DemoContent, DemoPhoto, DemoTemplateOption, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
+import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
 
 interface DemoModalProps {
   isOpen: boolean;
   onClose: () => void;
   agency: SavedAgency;
+  // Kutsutaan kun demo on julkaistu: avaa EmailDraftModalin (julkaistu linkki mukaan)
+  onCreateEmail?: () => void;
 }
 
 const MIN_SERVICES = 3;
@@ -24,14 +27,6 @@ const thumbUrl = (photo: DemoPhoto): string =>
 const inputClass =
   'w-full text-sm border-2 border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors';
 
-const errorMessage = (status: number): string => {
-  if (status === 428) return 'Add your sender profile in Settings (sidebar) before generating a demo.';
-  if (status === 409) return 'This lead is marked do not contact.';
-  if (status === 502) return 'The AI content did not pass validation twice, or the upload failed. Try again.';
-  if (status === 503) return 'Publishing is not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env).';
-  return `Server error: ${status}`;
-};
-
 const toEditable = (demo: Demo): DemoContent => ({
   hero_title: demo.content.hero_title,
   hero_subtitle: demo.content.hero_subtitle,
@@ -40,7 +35,7 @@ const toEditable = (demo: Demo): DemoContent => ({
   price_note: demo.content.price_note,
 });
 
-const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
+const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreateEmail }) => {
   const [demo, setDemo] = useState<Demo | null>(null);
   const [templates, setTemplates] = useState<DemoTemplateOption[]>([]);
   const [draft, setDraft] = useState<DemoContent | null>(null);
@@ -73,7 +68,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
         setDemo(data);
         setDraft(toEditable(data));
       } else {
-        setError(errorMessage(demoRes.status));
+        setError(outreachErrorMessage(demoRes.status, await readDetail(demoRes)));
       }
     } catch {
       setError('Failed to load demo. Is the backend running?');
@@ -96,7 +91,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
         body: JSON.stringify(selectedTemplate ? { template: selectedTemplate } : {}),
       });
       if (!res.ok) {
-        setError(errorMessage(res.status));
+        setError(outreachErrorMessage(res.status, await readDetail(res)));
         return;
       }
       applyDemo(await res.json());
@@ -113,7 +108,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
     try {
       const res = await apiFetch(`/leads/${agency.id}/demo`, { method: 'PATCH', body: JSON.stringify(body) });
       if (!res.ok) {
-        toast.error(res.status === 422 ? 'Check the texts: 3–6 services and no empty fields' : errorMessage(res.status));
+        toast.error(res.status === 422 ? 'Check the texts: 3–6 services and no empty fields' : outreachErrorMessage(res.status, await readDetail(res)));
         return;
       }
       applyDemo(await res.json());
@@ -131,13 +126,42 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
     try {
       const res = await apiFetch(`/leads/${agency.id}/demo/${publish ? 'publish' : 'unpublish'}`, { method: 'POST' });
       if (!res.ok) {
-        toast.error(errorMessage(res.status));
+        toast.error(outreachErrorMessage(res.status, await readDetail(res)));
         return;
       }
       applyDemo(await res.json());
       toast.success(publish ? 'Demo published' : 'Demo taken offline');
     } catch {
       toast.error('Failed to update publishing');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Julkaisu ensin; vain onnistuneen julkaisun jälkeen sähköposti (ei koskaan linkitöntä luonnosta vahingossa)
+  const publishAndCreateEmail = async () => {
+    if (!demo || !onCreateEmail) return;
+    if (demo.status === 'published') {
+      onCreateEmail();
+      return;
+    }
+    setBusy('publish');
+    setError('');
+    try {
+      const res = await apiFetch(`/leads/${agency.id}/demo/publish`, { method: 'POST' });
+      if (!res.ok) {
+        const message = outreachErrorMessage(res.status, await readDetail(res));
+        setError(message);
+        toast.error(message);
+        return;
+      }
+      applyDemo(await res.json());
+      toast.success('Demo published');
+      onCreateEmail();
+    } catch {
+      const message = 'Publishing failed. No email was created.';
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(null);
     }
@@ -207,12 +231,26 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Pääpainike otsikkorivillä: näkyy aina, vaikka sivupaneelia vieritetään muokatessa */}
+                {demo && onCreateEmail && (
+                  <button
+                    onClick={publishAndCreateEmail}
+                    disabled={busy !== null}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm shadow-indigo-200 transition-colors disabled:opacity-60"
+                  >
+                    {busy === 'publish' ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                    {demo.status === 'published' ? 'Create email with demo link' : 'Publish & create email'}
+                  </button>
+                )}
+                <button
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto">
@@ -264,7 +302,11 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency }) => {
                   </div>
 
                   <div className="p-5 space-y-4">
-                    {error && <p className="text-sm text-red-600">{error}</p>}
+                    {error && (
+                      <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                        {error}
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       <select
                         value={demo.template}

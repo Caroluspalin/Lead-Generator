@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import requests
 
 # Tuodaan omat moduulit
@@ -819,7 +819,8 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
 # Unsplashin attribuutiolinkkien utm_source (sovelluksen nimi Unsplashin developer-portaalissa)
 UNSPLASH_APP_NAME = os.getenv("UNSPLASH_APP_NAME", "agency_hunter").strip() or "agency_hunter"
 DEMO_LINK_PLACEHOLDER = "[DEMO_LINKKI]"
-DEMO_OFFER = f"Tein teille valmiin luonnoksen, voitte katsoa sen täältä: {DEMO_LINK_PLACEHOLDER}"
+DEMO_LINK_SENTENCE = "Tein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {url}"
+DEMO_OFFER = DEMO_LINK_SENTENCE.format(url=DEMO_LINK_PLACEHOLDER)
 
 # Lisätään koodissa jokaisen viestin loppuun, jotta ne ovat aina mukana (ei luoteta malliin)
 OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastaa vain "ei kiitos", niin en ota enää yhteyttä.'
@@ -952,15 +953,49 @@ _LINK_PLACEHOLDER_RE = re.compile(r"\[[^\]\n]{0,30}linkki[^\]\n]{0,30}\]", re.IG
 _URL_RE = re.compile(r"https?://\S+")
 
 
+# Lause, joka mainitsee luonnoksen (esim. NO WEBSITE -tarjous "Voin tehdä teille ilmaisen luonnoksen...")
+_DRAFT_SENTENCE_RE = re.compile(r"[^.!?\n]*\bluonno(s|ksen|ksia|kse\w*)\b[^.!?\n]*[.!?:]?[^\S\n]*(\S*\[[^\]\n]*linkki[^\]\n]*\])?", re.IGNORECASE)
+_SHORT_CLOSING_MAX = 60
+
+
+def place_demo_link(text: str, demo_url: str) -> str:
+    """Lisää demolinkin tarjouskohtaan ilman toistoa: luonnosta koskeva lause korvataan linkkilauseella,
+    muuten linkkilause omaksi kappaleekseen ennen lyhyttä loppukysymystä (esim. "Kiinnostaisiko?")."""
+    if demo_url in text:
+        return text
+    sentence = DEMO_LINK_SENTENCE.format(url=demo_url)
+    match = _DRAFT_SENTENCE_RE.search(text)
+    if match:
+        lead_ws = len(match.group(0)) - len(match.group(0).lstrip())
+        return text[: match.start() + lead_ws] + sentence + text[match.end():]
+    paragraphs = text.rstrip().split("\n\n")
+    if len(paragraphs) >= 2 and len(paragraphs[-1]) <= _SHORT_CLOSING_MAX:
+        return "\n\n".join(paragraphs[:-1] + [sentence, paragraphs[-1]])
+    return f"{text.rstrip()}\n\n{sentence}"
+
+
 def insert_demo_link(text: str, demo_url: Optional[str]) -> str:
     """Demolinkki lisätään aina koodissa: paikkamerkki korvataan, mallin keksimät osoitteet poistetaan."""
     text = _URL_RE.sub("", text)
     if demo_url is None:
-        return _LINK_PLACEHOLDER_RE.sub("", text)
+        # Ilman julkaistua demoa ei linkkiä eikä linkkiin viittaavaa lausetta
+        text = re.sub(r"[^.!?\n]*\[[^\]\n]*linkki[^\]\n]*\][.!?]?[^\S\n]*", "", text, flags=re.IGNORECASE)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
     if _LINK_PLACEHOLDER_RE.search(text):
         text = _LINK_PLACEHOLDER_RE.sub(demo_url, text, count=1)
         return _LINK_PLACEHOLDER_RE.sub("", text)
-    return f"{text.rstrip()}\n\nLuonnos: {demo_url}"
+    return place_demo_link(text, demo_url)
+
+
+def add_demo_link_to_body(body: str, demo_url: str) -> str:
+    """Valmiiseen luonnokseen (allekirjoitus + opt-out mukana) linkki ilman uutta AI-kutsua."""
+    if demo_url in body:
+        return body
+    marker = f"\n\n{SIGN_OFF}\n"
+    head, sep, tail = body.partition(marker)
+    if not sep:
+        return place_demo_link(body, demo_url)
+    return f"{place_demo_link(head, demo_url)}{sep}{tail}"
 
 
 def finalize_email_body(text: str, profile: SenderProfile, demo_url: Optional[str] = None) -> str:
@@ -1125,6 +1160,17 @@ SÄÄNNÖT:
 
 class EmailGenerateRequest(BaseModel):
     instruction: Optional[str] = None
+    # "Julkaise ja tee sähköposti" -ketju: ilman julkaistua demoa 409, ei hiljaa linkitöntä luonnosta
+    require_demo_link: bool = False
+
+
+class DemoLinkRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class DemoLinkResponse(BaseModel):
+    body: str
+    demo_url: str
 
 
 class EmailGenerateResponse(BaseModel):
@@ -1270,6 +1316,9 @@ async def generate_email(
 ):
     db_lead = _get_contactable_lead(session, lead_id, user)
     profile = _require_sender_profile(session, user)
+    demo = get_published_demo(session, db_lead)
+    if req.require_demo_link and demo is None:
+        raise HTTPException(409, "Demo is not published: email with the demo link cannot be created")
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
 
@@ -1287,7 +1336,6 @@ async def generate_email(
         except Exception as e:
             logger.warning(f"Deep Scan epaonnistui liidille {lead_id}: {e}")
 
-    demo = get_published_demo(session, db_lead)
     result = await _chat_completion(
         EMAIL_SYSTEM_PROMPT,
         build_email_user_prompt(db_lead, profile, req.instruction, has_demo=demo is not None),
@@ -1303,6 +1351,22 @@ async def generate_email(
     session.commit()
 
     return EmailGenerateResponse(subject=subject, body=body, model=model)
+
+
+@app.post("/leads/{lead_id}/email/demo-link", response_model=DemoLinkResponse)
+def add_demo_link(
+    lead_id: int,
+    req: DemoLinkRequest,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    """Lisää julkaistun demon linkin jo kirjoitettuun luonnokseen (ei AI-kutsua)."""
+    db_lead = _get_contactable_lead(session, lead_id, user)
+    demo = get_published_demo(session, db_lead)
+    url = demo_public_url(demo) if demo else None
+    if demo is None or url is None:
+        raise HTTPException(409, "Demo is not published: publish it before adding the link")
+    return DemoLinkResponse(body=add_demo_link_to_body(req.body, url), demo_url=url)
 
 
 # 6b. PUHELINSKRIPTI (AI)

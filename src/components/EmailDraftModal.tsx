@@ -1,14 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, RefreshCw, Sparkles, Send, Loader2 } from 'lucide-react';
+import { X, Copy, RefreshCw, Sparkles, Send, Loader2, AlertTriangle, PhoneCall, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { SavedAgency } from '../types/agency';
+import type { Demo, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
+import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
 
 interface EmailDraftModalProps {
   isOpen: boolean;
   onClose: () => void;
   agency: SavedAgency;
+  // "Publish & create email" -ketju: backend palauttaa 409 jos demoa ei ole julkaistu
+  requireDemoLink?: boolean;
+  onOpenCallScript?: () => void;
 }
 
 interface EmailDraft {
@@ -21,7 +25,11 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
   isOpen,
   onClose,
   agency,
+  requireDemoLink = false,
+  onOpenCallScript,
 }) => {
+  const [publicDemoUrl, setPublicDemoUrl] = useState<string | null>(null);
+  const [addingLink, setAddingLink] = useState(false);
   const [draft, setDraft] = useState<EmailDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState<'scan' | 'generate'>('generate');
@@ -48,15 +56,12 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
           method: 'POST',
           body: JSON.stringify({
             instruction: extraInstruction || undefined,
+            require_demo_link: requireDemoLink || undefined,
           }),
         },
       );
-      if (res.status === 409) {
-        setError('This lead is marked do not contact.');
-        return;
-      }
-      if (res.status === 428) {
-        setError('Add your sender profile in Settings (sidebar) before generating drafts and call scripts.');
+      if (res.status === 409 || res.status === 428) {
+        setError(outreachErrorMessage(res.status, await readDetail(res)));
         return;
       }
       if (!res.ok) {
@@ -71,7 +76,51 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       if (phaseTimer) clearTimeout(phaseTimer);
       setLoading(false);
     }
-  }, [agency.id, agency.website]);
+  }, [agency.id, agency.website, requireDemoLink]);
+
+  // Julkaistun demon osoite: "Add demo link" jo kirjoitettuun luonnokseen ilman uutta AI-kutsua
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    apiFetch(`/leads/${agency.id}/demo`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setPublicDemoUrl(null);
+          return;
+        }
+        const demo: Demo = await res.json();
+        if (!cancelled) setPublicDemoUrl(demo.status === 'published' ? demo.public_url : null);
+      })
+      .catch(() => {
+        if (!cancelled) setPublicDemoUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, agency.id]);
+
+  const addDemoLink = async () => {
+    if (!draft) return;
+    setAddingLink(true);
+    try {
+      const res = await apiFetch(`/leads/${agency.id}/email/demo-link`, {
+        method: 'POST',
+        body: JSON.stringify({ body: draft.body }),
+      });
+      if (!res.ok) {
+        toast.error(outreachErrorMessage(res.status, await readDetail(res)));
+        return;
+      }
+      const data: { body: string } = await res.json();
+      setDraft({ ...draft, body: data.body });
+      toast.success('Demo link added');
+    } catch {
+      toast.error('Failed to add the demo link');
+    } finally {
+      setAddingLink(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -284,6 +333,35 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                     Send
                   </button>
                 </div>
+
+                {publicDemoUrl && !draft.body.includes(publicDemoUrl) && (
+                  <button
+                    onClick={addDemoLink}
+                    disabled={addingLink}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors disabled:opacity-60"
+                  >
+                    {addingLink ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                    Add demo link to this draft
+                  </button>
+                )}
+
+                {!agency.email && (
+                  <div role="status" className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+                    <AlertTriangle size={16} className="shrink-0" />
+                    <span className="flex-1 min-w-[12rem]">
+                      No email address found for this lead. Enter it below, use Find email on the card, or call instead.
+                    </span>
+                    {onOpenCallScript && (
+                      <button
+                        onClick={onOpenCallScript}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors"
+                      >
+                        <PhoneCall size={13} />
+                        Call script
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* Recipient */}
                 <input

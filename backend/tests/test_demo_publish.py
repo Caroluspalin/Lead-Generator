@@ -300,3 +300,123 @@ def test_test_environment_never_sees_real_r2_or_unsplash() -> None:
     assert main.UNSPLASH_ACCESS_KEY == ""
     with pytest.raises(RuntimeError):
         main.R2ObjectStore(CONFIG)
+
+
+# --- "Julkaise ja tee sähköposti" -ketju ---
+
+from app.main import add_demo_link_to_body, place_demo_link  # noqa: E402
+
+URL = f"{PUBLIC_BASE}/TOKEN"
+
+
+def test_place_demo_link_replaces_draft_offer_without_repetition() -> None:
+    text = "Hei,\n\nEn löytänyt sivua.\n\nVoin tehdä teille ilmaisen luonnoksen, jonka näette ennen kuin päätätte mitään.\n\nKiinnostaisiko?"
+    out = place_demo_link(text, URL)
+    assert out == f"Hei,\n\nEn löytänyt sivua.\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {URL}\n\nKiinnostaisiko?"
+
+
+def test_place_demo_link_before_closing_question_when_no_draft_offer() -> None:
+    text = "Hei,\n\nSelain varoitti.\n\nKorjaus on yleensä nopea, voin katsoa sen teille.\n\nKiinnostaisiko?"
+    out = place_demo_link(text, URL)
+    assert out.endswith(f"teille.\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {URL}\n\nKiinnostaisiko?")
+
+
+def test_place_demo_link_is_idempotent() -> None:
+    once = place_demo_link("Hei,\n\nViesti.\n\nKiinnostaisiko?", URL)
+    assert place_demo_link(once, URL) == once
+
+
+def test_add_demo_link_to_full_draft_keeps_signature_and_opt_out() -> None:
+    body = "Hei,\n\nVoin tehdä teille ilmaisen luonnoksen.\n\nKiinnostaisiko?\n\nTerveisin,\nPalin\n\nJos tämä ei ole ajankohtaista, vastaa vain \"ei kiitos\"."
+    out = add_demo_link_to_body(body, URL)
+    assert out.startswith(f"Hei,\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {URL}\n\nKiinnostaisiko?\n\nTerveisin,\nPalin")
+    assert out.endswith('vastaa vain "ei kiitos".')
+
+
+def test_require_demo_link_refuses_without_published_demo(
+    client_a: TestClient, demo: dict[str, Any], store: FakeStore, fake_openai: type[FakeOpenAI]
+) -> None:
+    calls_before = len(fake_openai.calls)
+    res = client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={"require_demo_link": True})
+    assert res.status_code == 409
+    assert "not published" in res.json()["detail"]
+    assert len(fake_openai.calls) == calls_before  # ei AI-kutsua, ei linkitöntä luonnosta
+
+
+def test_require_demo_link_refuses_when_publishing_not_configured(
+    client_a: TestClient, demo: dict[str, Any], fake_openai: type[FakeOpenAI]
+) -> None:
+    assert client_a.post(f"/leads/{demo['lead_id']}/demo/publish").status_code == 503
+    res = client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={"require_demo_link": True})
+    assert res.status_code == 409
+
+
+def test_require_demo_link_with_published_demo(
+    client_a: TestClient, demo: dict[str, Any], store: FakeStore, fake_openai: type[FakeOpenAI]
+) -> None:
+    published = _publish(client_a, demo)
+    fake_openai.reply = "Hei,\n\nEn löytänyt teille nettisivua.\n\nTein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: [DEMO_LINKKI]\n\nKiinnostaisiko?"
+    body = client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={"require_demo_link": True}).json()["body"]
+    assert published["public_url"] in body
+    assert "127.0.0.1" not in body and "localhost" not in body and "testserver" not in body
+    assert body.count("luonnoksen") == 1
+
+
+def test_expired_demo_gives_no_link(
+    client_a: TestClient, demo: dict[str, Any], store: FakeStore, fake_openai: type[FakeOpenAI],
+    session: Session, engine: Engine,
+) -> None:
+    _publish(client_a, demo)
+    _set_expiry(session, datetime.now(timezone.utc) - timedelta(minutes=1))
+    run_demo_expiry(bind=engine)
+    assert client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={"require_demo_link": True}).status_code == 409
+    fake_openai.reply = "Hei,\n\nTein luonnoksen: [DEMO_LINKKI]\n\nKiinnostaisiko?"
+    body = client_a.post(f"/leads/{demo['lead_id']}/generate-email", json={}).json()["body"]
+    assert PUBLIC_BASE not in body and "[DEMO_LINKKI]" not in body
+    assert "Tein luonnoksen" not in body  # linkkiin viittaava lause poistetaan kokonaan
+    assert "\n\n\n" not in body
+
+
+def test_add_demo_link_endpoint(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
+    draft = "Hei,\n\nVoin tehdä teille ilmaisen luonnoksen.\n\nKiinnostaisiko?\n\nTerveisin,\nPalin"
+    res = client_a.post(f"/leads/{demo['lead_id']}/email/demo-link", json={"body": draft})
+    assert res.status_code == 409  # draft-demo: ei linkkiä
+
+    published = _publish(client_a, demo)
+    res = client_a.post(f"/leads/{demo['lead_id']}/email/demo-link", json={"body": draft}).json()
+    assert res["demo_url"] == published["public_url"]
+    assert f"Tein teille jo valmiin luonnoksen, jonka voitte katsoa täältä: {published['public_url']}" in res["body"]
+    assert "ilmaisen luonnoksen" not in res["body"]
+    again = client_a.post(f"/leads/{demo['lead_id']}/email/demo-link", json={"body": res["body"]}).json()["body"]
+    assert again == res["body"]
+
+
+def test_add_demo_link_other_user_and_dnc(
+    client_a: TestClient, client_b: TestClient, demo: dict[str, Any], store: FakeStore
+) -> None:
+    _publish(client_a, demo)
+    assert client_b.post(f"/leads/{demo['lead_id']}/email/demo-link", json={"body": "Hei"}).status_code == 404
+    client_a.patch(f"/leads/{demo['lead_id']}", json={"do_not_contact": True})
+    assert client_a.post(f"/leads/{demo['lead_id']}/email/demo-link", json={"body": "Hei"}).status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", "/demo"),
+        ("post", "/demo/publish"),
+        ("post", "/generate-email"),
+        ("post", "/generate-call-script"),
+        ("post", "/email/demo-link"),
+    ],
+)
+def test_do_not_contact_blocks_whole_chain(
+    client_a: TestClient, demo: dict[str, Any], store: FakeStore, fake_openai: type[FakeOpenAI], method: str, path: str
+) -> None:
+    client_a.patch(f"/leads/{demo['lead_id']}", json={"do_not_contact": True})
+    calls_before = len(fake_openai.calls)
+    res = getattr(client_a, method)(f"/leads/{demo['lead_id']}{path}", json={"body": "Hei"})
+    assert res.status_code == 409
+    assert "do not contact" in res.json()["detail"]
+    assert len(fake_openai.calls) == calls_before
+    assert store.objects == {}
