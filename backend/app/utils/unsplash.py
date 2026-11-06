@@ -27,7 +27,8 @@ MOOD_COUNT = 3
 # Hero-kuvaan ei tunnistettavia kasvoja jos mahdollista: alt/description-tekstien perusteella
 _PEOPLE_RE = re.compile(
     r"\b(person|people|woman|women|man|men|girl|girls|boy|boys|lady|guy|child|children|kid|kids|face|faces|"
-    r"portrait|model|smiling|smile|couple|bride|customer|barber cutting|hairdresser|stylist|selfie)\b",
+    r"portrait|model|smiling|smile|couple|bride|customer|customers|client|clients|barber cutting|hairdresser|"
+    r"stylist|hairstylist|selfie)\b",
     re.IGNORECASE,
 )
 
@@ -157,7 +158,8 @@ def choose_images(candidates: list[DemoPhoto]) -> tuple[Optional[DemoPhoto], lis
     options = sorted(candidates, key=lambda p: p.has_people)[:MAX_OPTIONS]
     if hero not in options:
         options = [hero] + options[: MAX_OPTIONS - 1]
-    return hero, mood_for(hero, candidates), options
+    # Tunnelmakuvat samasta listasta kuin vaihtoehdot: hero-vaihto modaalissa pitää muut kuvat johdonmukaisina
+    return hero, mood_for(hero, options), options
 
 
 def mood_for(hero: Optional[DemoPhoto], pool: list[DemoPhoto]) -> list[DemoPhoto]:

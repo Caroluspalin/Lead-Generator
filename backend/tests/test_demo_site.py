@@ -27,13 +27,13 @@ from app.demo_site import (
 from tests.conftest import FakeOpenAI
 
 VALID: dict[str, Any] = {
-    "hero_title": "Parturi-kampaamo Kauniaisissa",
-    "hero_subtitle": "Hiustenleikkaukset, värjäykset ja kampaukset koko perheelle.",
-    "about": "Olemme paikallinen parturi-kampaamo. Tarjoamme hiustenhoitoa naisille, miehille ja lapsille. Varatkaa aika puhelimitse.",
+    "hero_title": "Hiukset kuntoon Kauniaisissa",
+    "hero_subtitle": "Leikkaukset, värit ja kampaukset koko perheelle.",
+    "about": "Olemme pieni paikallinen liike. Leikkaamme naisten, miesten ja lasten hiukset.",
     "services": [
         {"name": "Hiustenleikkaus", "description": "Leikkaus toiveidenne mukaan, myös lapsille."},
-        {"name": "Värjäys", "description": "Kestovärit, raidat ja sävytykset hiuksillenne sopivasti."},
-        {"name": "Kampaukset", "description": "Juhlakampaukset ja kampaukset erityisiin tilaisuuksiin."},
+        {"name": "Värjäys", "description": "Kestovärit, raidat ja sävytykset."},
+        {"name": "Kampaukset", "description": "Juhlakampaukset häihin ja muihin tilaisuuksiin."},
     ],
 }
 ALLOWED = "Parturi-Kampaamo Taina Lantiainen Kauniainen"
@@ -554,7 +554,7 @@ def test_second_query_only_when_first_is_thin(monkeypatch: pytest.MonkeyPatch) -
 def test_choose_images_prefers_hero_without_people() -> None:
     hero, mood, options = unsplash.choose_images([_photo("p1", people=True), _photo("a"), _photo("b"), _photo("c"), _photo("d")])
     assert hero is not None and hero.id == "a"
-    assert [m.id for m in mood] == ["p1", "b", "c"]
+    assert [m.id for m in mood] == ["b", "c", "d"]  # ihmiskuvat vaihtoehtolistan loppuun
     assert options[0].id == "a" and len(options) == 5
 
 
@@ -593,7 +593,7 @@ def test_render_without_images_uses_gradient() -> None:
 def test_hero_shows_business_name_as_h1_and_ai_title_as_eyebrow() -> None:
     html = _render()
     assert '<h1 id="hero-title">Parturi-Kampaamo Taina Lantiainen</h1>' in html
-    assert '<p class="eyebrow">Parturi-kampaamo Kauniaisissa</p>' in html
+    assert '<p class="eyebrow">Hiukset kuntoon Kauniaisissa</p>' in html
 
 
 def test_banner_is_single_line_and_footer_does_not_repeat_it() -> None:
@@ -678,9 +678,9 @@ def test_generate_demo_with_images_tracks_downloads(
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     images = demo["content"]["images"]
     assert images["hero"]["id"] == "a"
-    assert [m["id"] for m in images["mood"]] == ["p1", "b", "c"]
+    assert [m["id"] for m in images["mood"]] == ["b", "c", "d"]
     assert len(images["options"]) == 5
-    assert unsplash_ready == ["a", "p1", "b", "c"]  # hero + tunnelmakuvat
+    assert unsplash_ready == ["a", "b", "c", "d"]  # hero + tunnelmakuvat
     page = client_a.get(f"/demo/{demo['public_token']}")
     assert "img-src data: https://images.unsplash.com" in page.headers["content-security-policy"]
     assert "font-src data:" in page.headers["content-security-policy"]
@@ -703,9 +703,13 @@ def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "d"}).json()
     assert res["content"]["images"]["hero"]["id"] == "d"
     assert "d" not in [m["id"] for m in res["content"]["images"]["mood"]]
-    assert unsplash_ready == ["d"]  # vain uusi kuva: "a" oli jo käytössä (hero -> tunnelmakuva)
+    assert unsplash_ready == []  # kaikki neljä (a-d) olivat jo käytössä, vain roolit vaihtuivat
     assert len(demo_ready.calls) == calls_before
     assert "photo-d?ixid=xd" in client_a.get(f"/demo/{demo['public_token']}").text
+
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "p1"}).json()
+    assert res["content"]["images"]["hero"]["id"] == "p1"
+    assert unsplash_ready == ["p1"]  # ainoa uusi käyttöön otettu kuva
 
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"hero_image_id": "none"}).json()
     assert res["content"]["images"]["hero"] is None
@@ -718,3 +722,110 @@ def test_text_edit_keeps_images(client_a: TestClient, lead: dict[str, Any], demo
     edited["about"] = "Muokattu esittelyteksti, joka on riittävän pitkä hyväksyttäväksi."
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"content": edited}).json()
     assert res["content"]["images"]["hero"]["id"] == "a"
+
+
+# --- Tekstit: kielletyt fraasit, toisto, yksi lause ---
+
+from app.demo_site import find_repeated_phrases, page_texts  # noqa: E402
+from app.text_quality import find_forbidden_words, repeated_phrases  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("text", "label"),
+    [
+        ("Autamme teitä valitsemaan.", "autamme"),
+        ("Tarjoamme laadukasta hiustenhoitoa.", "tarjoamme laadukasta"),
+        ("Tarjoamme laadukkaita palveluita.", "tarjoamme laadukasta"),
+        ("Tervetuloa huolehtimaan hiuksistanne.", "tervetuloa huolehtimaan"),
+    ],
+)
+def test_new_forbidden_phrases(text: str, label: str) -> None:
+    assert label in find_forbidden_words(text)
+
+
+def test_tervetuloa_and_tarjoamme_alone_are_fine() -> None:
+    assert find_forbidden_words("Tervetuloa! Tarjoamme leikkaukset ja värit.") == []
+
+
+def test_repeated_phrases_reports_longest_only() -> None:
+    texts = ["Varatkaa aika puhelimitse.", "Leikkaukset ja värit. Varatkaa aika puhelimitse!"]
+    assert repeated_phrases(texts) == ["varatkaa aika puhelimitse"]
+
+
+def test_repeated_phrases_ignores_stopword_pairs_and_single_words() -> None:
+    assert repeated_phrases(["Leikkaus ja se on nopea.", "Värjäys ja se on hidas.", "leikkaus"]) == []
+
+
+def test_repeated_phrases_from_old_live_demo() -> None:
+    # Taina v1: "Leikkaamme hiukset ja autamme teitä..." + "Hoidamme hiuksia ja autamme teitä..."
+    texts = ["Leikkaamme hiukset ja autamme teitä ylläpitämään mallia.", "Hoidamme hiuksia ja autamme teitä valitsemaan hoitoa."]
+    assert repeated_phrases(texts) == ["ja autamme teitä"]
+
+
+def test_page_texts_include_template_and_business_name() -> None:
+    texts = page_texts(_content(), business_name="Parturi-Kampaamo Taina Lantiainen", template="beauty")
+    assert "Parturi-Kampaamo Taina Lantiainen" in texts
+    assert TEMPLATES["beauty"].services_lead in texts
+    assert "Hinnat ja ajanvaraus puhelimitse." in texts
+
+
+def test_repetition_with_fixed_template_text_detected() -> None:
+    content = _content(about="Olemme pieni paikallinen liike Kauniaisissa. Varatkaa aika puhelimitse.")
+    assert "varatkaa aika puhelimitse" in find_repeated_phrases(content, business_name="X", template="beauty")
+
+
+def test_valid_test_content_has_no_repeats() -> None:
+    assert find_repeated_phrases(_content(), business_name="Parturi-Kampaamo Taina Lantiainen", template="beauty") == []
+
+
+def test_service_description_must_be_one_sentence() -> None:
+    services = [{"name": "Leikkaus", "description": "Leikkaamme hiukset. Pesu kuuluu hintaan."}] + VALID["services"][1:]
+    problems = content_violations(_content(services=services), allowed_text=ALLOWED)
+    assert any("vain yksi lause" in p for p in problems)
+
+
+def test_service_description_max_length() -> None:
+    services = [{"name": "Leikkaus", "description": "x" * 141}] + VALID["services"][1:]
+    with pytest.raises(ValidationError):
+        _content(services=services)
+
+
+def test_prompt_has_style_rules() -> None:
+    from app.demo_site import DEMO_SYSTEM_PROMPT
+    assert "TÄSMÄLLEEN YKSI lyhyt lause" in DEMO_SYSTEM_PROMPT
+    assert "MIKÄÄN fraasi ei saa toistua sivulla" in DEMO_SYSTEM_PROMPT
+    for word in ("autamme", "tarjoamme laadukasta", "tervetuloa huolehtimaan"):
+        assert word in DEMO_SYSTEM_PROMPT
+
+
+def test_repeated_phrases_trigger_one_retry(
+    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
+) -> None:
+    repetitive = {**VALID, "about": "Olemme pieni paikallinen liike. Leikkaukset, värit ja kampaukset koko perheelle."}
+    demo_ready.replies = [json.dumps(repetitive), json.dumps(VALID)]
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    assert len(demo_ready.calls) == 2
+    assert "toistuva fraasi" in demo_ready.calls[1]["messages"][1]["content"]
+    assert demo["content"]["about"] == VALID["about"]
+
+
+def test_repeated_phrases_twice_accepted_with_warning(
+    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    repetitive = {**VALID, "about": "Olemme pieni paikallinen liike. Leikkaukset, värit ja kampaukset koko perheelle."}
+    demo_ready.replies = [json.dumps(repetitive), json.dumps(repetitive)]
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        res = client_a.post(f"/leads/{lead['id']}/demo", json={})
+    assert res.status_code == 200
+    assert "toistuvat fraasit sivulla" in caplog.text
+
+
+def test_eyebrow_repeating_business_name_is_detected() -> None:
+    content = _content(hero_title="Parturi-kampaamo Kauniaisissa")
+    assert "parturi kampaamo" in find_repeated_phrases(content, business_name="Parturi-Kampaamo Taina Lantiainen", template="beauty")
+
+
+def test_people_regex_catches_clients() -> None:
+    assert unsplash._PEOPLE_RE.search("A hair salon interior with hair products and clients")
+    assert not unsplash._PEOPLE_RE.search("Three black salon chairs facing circular mirrors")

@@ -19,7 +19,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .demo_icons import icon_svg, service_icon_names
-from .text_quality import find_forbidden_words
+from .text_quality import find_forbidden_words, repeated_phrases
 from .utils.unsplash import DemoPhoto, photo_url, unsplash_home_url, with_utm
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ class ColorScheme:
 class DemoTemplate:
     label: str
     services_title: str
+    services_lead: str  # kiinteä teksti; mukana toistotarkistuksessa
     schemes: dict[str, ColorScheme]
 
 
@@ -60,6 +61,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
     "beauty": DemoTemplate(
         label="Hair & beauty",
         services_title="Palvelut",
+        services_lead="Varatkaa aika puhelimitse.",
         schemes={
             "rose": ColorScheme("Rose", "#fdf7f7", "#ffffff", "#2b1d21", "#5f4b52", "#9d2f55", "#ffffff", "#5b1a33", "#9d2f55", "#ffffff"),
             "sage": ColorScheme("Sage", "#f6f8f5", "#ffffff", "#1f2a22", "#4d5a50", "#3f6b4f", "#ffffff", "#24412f", "#4f7d60", "#ffffff"),
@@ -69,6 +71,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
     "restaurant": DemoTemplate(
         label="Restaurant & café",
         services_title="Mitä tarjoamme",
+        services_lead="Tutustukaa valikoimaamme.",
         schemes={
             "terracotta": ColorScheme("Terracotta", "#fbf6f1", "#ffffff", "#2a1f18", "#5e5048", "#a2452a", "#ffffff", "#6b2a17", "#a2452a", "#ffffff"),
             "olive": ColorScheme("Olive", "#f8f8f2", "#ffffff", "#24261b", "#55584a", "#5b6327", "#ffffff", "#353a15", "#5b6327", "#ffffff"),
@@ -78,6 +81,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
     "services": DemoTemplate(
         label="General services",
         services_title="Palvelut",
+        services_lead="Kysykää lisää puhelimitse.",
         schemes={
             "ocean": ColorScheme("Ocean", "#f4f8fb", "#ffffff", "#132230", "#4a5a68", "#1d5d8c", "#ffffff", "#0f3554", "#1d5d8c", "#ffffff"),
             "slate": ColorScheme("Slate", "#f5f6f7", "#ffffff", "#1b1f24", "#50575f", "#36414d", "#ffffff", "#1f262e", "#46525f", "#ffffff"),
@@ -130,7 +134,7 @@ def templates_catalog() -> list[dict[str, object]]:
 class DemoService(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=2, max_length=60)
-    description: str = Field(min_length=10, max_length=220)
+    description: str = Field(min_length=10, max_length=140)  # yksi lyhyt lause
 
 
 class DemoAIContent(BaseModel):
@@ -173,6 +177,7 @@ _INVENTED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 _QUOTE_CHARS = "\"“”„«»"
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?:])\s+")
+_SENTENCE_END_RE = re.compile(r"[.!?](?=\s+[A-ZÅÄÖ])")
 _WORD_RE = re.compile(r"[A-Za-zÅÄÖåäöÉéÜü][\wÅÄÖåäöÉéÜü'-]*")
 
 
@@ -226,6 +231,8 @@ def content_violations(content: DemoAIContent, *, allowed_text: str) -> list[str
         for label, pattern in _INVENTED_PATTERNS:
             if pattern.search(text):
                 problems.append(f"{field}: keksittyä sisältöä ({label})")
+        if field.endswith(".description") and len(_SENTENCE_END_RE.findall(text.rstrip(".!? "))) > 0:
+            problems.append(f"{field}: palvelukuvaus saa olla vain yksi lause")
         if not field.endswith(".name") and field != "hero_title":
             for sentence in _SENTENCE_SPLIT_RE.split(text):
                 for word in _WORD_RE.findall(sentence)[1:]:
@@ -249,6 +256,19 @@ def extract_json_object(text: str) -> dict[str, object]:
     return data
 
 
+def page_texts(content: DemoAIContent, *, business_name: str, template: str, price_note: str = DEFAULT_PRICE_NOTE) -> list[str]:
+    """Kaikki sivulla näkyvät tekstikappaleet toistotarkistusta varten (AI + pohjan kiinteät)."""
+    tpl = TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
+    texts = [business_name, content.hero_title, content.hero_subtitle, content.about, tpl.services_lead, price_note]
+    for s in content.services:
+        texts.extend([s.name, s.description])
+    return texts
+
+
+def find_repeated_phrases(content: DemoAIContent, *, business_name: str, template: str) -> list[str]:
+    return repeated_phrases(page_texts(content, business_name=business_name, template=template))
+
+
 def parse_ai_content(text: str, *, allowed_text: str) -> tuple[Optional[DemoAIContent], list[str]]:
     try:
         content = DemoAIContent.model_validate(extract_json_object(text))
@@ -262,22 +282,33 @@ DEMO_SYSTEM_PROMPT = """Kirjoitat suomenkielisen sisällön paikallisen yritykse
 
 Palauta VAIN yksi JSON-objekti täsmälleen tällä rakenteella (ei muuta tekstiä, ei markdownia):
 {
-  "hero_title": "toimiala ja paikka, 5-60 merkkiä, esim. Parturi-kampaamo Kauniaisissa (pieni yläotsikko yrityksen nimen yläpuolella)",
+  "hero_title": "lyhyt yläotsikko yrityksen nimen yläpuolella, 5-60 merkkiä, EI saa toistaa yrityksen nimen sanoja, esim. Hiukset kuntoon Kauniaisissa",
   "hero_subtitle": "yksi lyhyt, luonteva lause siitä mitä yritys tarjoaa, 10-120 merkkiä",
   "about": "2-4 lyhyttä lausetta yrityksestä, 40-700 merkkiä",
   "services": [{"name": "palvelun nimi, 2-60 merkkiä", "description": "yksi lause, 10-220 merkkiä"}]
 }
 services: 3-6 kappaletta, mieluiten 4 tai 6. Palvelun nimi lyhyt (1-3 sanaa).
 
+KIRJOITUSTYYLI — kuin oikea alan yrittäjä puhuisi asiakkaalle, ei mainostoimisto:
+- Lyhyttä, konkreettista arkikieltä. Kerro mitä tehdään, ei adjektiiveja.
+- Palvelun kuvaus: TÄSMÄLLEEN YKSI lyhyt lause (max ~12 sanaa).
+  Hyvä: "Leikkaus, pesu ja föönaus samalla käynnillä." / "Kestovärit, raidat ja sävytykset."
+  Huono: "Leikkaamme hiukset ja autamme teitä ylläpitämään toivomaanne mallia."
+- about: 2-3 lyhyttä lausetta, max ~300 merkkiä. Älä toista yrityksen nimeä (se on jo sivun otsikkona).
+- MIKÄÄN fraasi ei saa toistua sivulla: älä aloita lauseita samalla tavalla, älä toista samoja sanapareja
+  eri kohdissa (esim. "autamme teitä", "hiusten leikkaus" kahteen kertaan).
+- Sivulla on jo valmiina tekstit "Varatkaa aika puhelimitse." / "Hinnat ja ajanvaraus puhelimitse." — älä toista niitä.
+
 SÄÄNNÖT:
-- Yritys puhuu me-muodossa ("Tarjoamme..."), asiakasta puhutellaan te-muodossa ("Varatkaa aika puhelimitse", "Tervetuloa").
+- Yritys puhuu me-muodossa, asiakasta puhutellaan te-muodossa.
 - Palvelut: alan tyypilliset palvelut. Jos VERKKOSIVUN SISÄLTÖ on annettu, käytä ensisijaisesti sieltä löytyviä palveluita.
 - ÄLÄ keksi faktoja. Ehdottomasti kielletty: hinnat, numerot, vuosiluvut, kokemusvuodet, arvostelut, tähdet,
   asiakkaiden kehut, sitaatit tai lainausmerkit, palkinnot, sertifikaatit, henkilöiden nimet, yrityksen historia.
 - Kirjoita yleisesti paikkansapitävää: mitä palvelu on ja miksi se on asiakkaalle hyödyllinen.
 - Ei yhteystietoja, aukioloaikoja eikä hintoja (ne lisätään sivulle muualta).
 - Kielletyt sanat: ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen, digitaalinen läsnäolo,
-  nostaa seuraavalle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia. Ei mainoskliseitä.
+  nostaa seuraavalle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia, autamme, tarjoamme laadukasta,
+  tervetuloa huolehtimaan. Ei mainoskliseitä.
 - Selkeä, rauhallinen ja asiallinen sävy. Lyhyet lauseet."""
 
 
@@ -430,6 +461,7 @@ def render_demo_html(
     return _env.get_template(f"{template}.html.j2").render(
         template=template,
         services_title=tpl.services_title,
+        services_lead=tpl.services_lead,
         colors=tpl.schemes[color_scheme],
         font=TEMPLATE_FONTS[template],
         font_face_css=font_face_css(template),

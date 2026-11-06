@@ -39,6 +39,7 @@ from .demo_site import (
     DemoStoredContent,
     DEMO_SYSTEM_PROMPT,
     PLACE_DETAILS_FIELD_MASK,
+    find_repeated_phrases,
     TEMPLATES,
     build_demo_prompt,
     fetch_opening_hours,
@@ -1311,8 +1312,13 @@ def _can_fetch_place_details(lead: Lead) -> bool:
     )
 
 
-async def generate_demo_content(lead: Lead) -> tuple[DemoContent, list[ChatResult]]:
-    """AI-sisältö, validointi ja yksi uudelleenyritys. Heittää DemoGenerationError jos ei kelpaa."""
+async def generate_demo_content(lead: Lead, template: str) -> tuple[DemoContent, list[ChatResult]]:
+    """AI-sisältö, validointi ja yksi uudelleenyritys. Heittää DemoGenerationError jos ei kelpaa.
+
+    Kovat virheet (skeema, keksityt faktat, kielletyt sanat) -> uudelleenyritys, toisellakin kerralla 502.
+    Toistuvat fraasit ovat pehmeä virhe: ensimmäisellä kierroksella uudelleenyritys, toisella hyväksytään
+    ja lokitetaan varoitus.
+    """
     allowed_text = " ".join(filter(None, [lead.name, lead.city, lead.address, lead.website_context]))
     prompt = build_demo_prompt(
         name=lead.name, city=lead.city, primary_type=lead.primary_type, website_context=lead.website_context
@@ -1330,6 +1336,13 @@ async def generate_demo_content(lead: Lead) -> tuple[DemoContent, list[ChatResul
         results.append(result)
         content, problems = parse_ai_content(result.text, allowed_text=allowed_text)
         if content is not None:
+            repeats = find_repeated_phrases(content, business_name=lead.name, template=template)
+            if repeats and attempt == 0:
+                problems = [f"toistuva fraasi '{r}' (mikään fraasi ei saa toistua sivulla)" for r in repeats]
+                logger.info(f"Demosisällössä toistoa (liidi {lead.id}), uudelleenyritys: {repeats}")
+                continue
+            if repeats:
+                logger.warning(f"Demo (liidi {lead.id}): toistuvat fraasit sivulla: {repeats}")
             return DemoContent(**content.model_dump()), results
         logger.warning(f"Demosisältö hylättiin (liidi {lead.id}, yritys {attempt + 1}/2): {problems[:5]}")
     raise DemoGenerationError("; ".join(problems[:10]))
@@ -1396,7 +1409,7 @@ async def generate_demo(
         raise HTTPException(422, str(e))
 
     try:
-        content, results = await generate_demo_content(lead)
+        content, results = await generate_demo_content(lead, template)
     except DemoGenerationError as e:
         raise HTTPException(502, f"Demo content failed validation: {e}")
 
