@@ -20,8 +20,8 @@ function App() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 size={28} className="animate-spin text-slate-400" />
+      <div className="min-h-screen flex items-center justify-center bg-canvas">
+        <Loader2 size={24} className="animate-spin text-fg-subtle" />
       </div>
     );
   }
@@ -154,7 +154,7 @@ function AppShell() {
     : leads;
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="flex min-h-screen bg-canvas text-fg font-sans">
       <SidebarNav
         activeTab={activeTab}
         onChangeTab={setActiveTab}
@@ -165,46 +165,53 @@ function AppShell() {
         onClose={() => setShowAddModal(false)}
       />
 
-      <main className="flex-1 overflow-x-hidden px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 min-w-0 overflow-x-hidden px-4 sm:px-page-x py-page-y">
         {activeTab === 'search' && (
           <>
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-8">
+            <header className="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="text-xl font-semibold tracking-tight text-fg">Search</h1>
+              <p className="text-sm text-fg-subtle">Find local businesses with weak or missing websites</p>
+            </header>
+
+            <div className="bg-surface rounded border border-line p-card mb-6">
               <form
                 onSubmit={handleSearch}
-                className="flex flex-col md:flex-row gap-4 items-end"
+                className="flex flex-col md:flex-row gap-2.5 items-end"
               >
                 <div className="flex-1 w-full">
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5 ml-1">
+                  <label htmlFor="search-industry" className="block text-2xs font-medium text-fg-muted mb-1.5">
                     Industry
                   </label>
-                  <div className="relative group">
+                  <div className="relative">
                     <Search
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors"
-                      size={18}
+                      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle"
+                      size={14}
                     />
                     <input
+                      id="search-industry"
                       type="text"
                       value={businessType}
                       onChange={(e) => setBusinessType(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all"
+                      className="w-full h-control pl-8 pr-3 bg-canvas border border-line-strong rounded text-sm text-fg transition-colors"
                     />
                   </div>
                 </div>
 
                 <div className="flex-1 w-full">
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5 ml-1">
+                  <label htmlFor="search-city" className="block text-2xs font-medium text-fg-muted mb-1.5">
                     City
                   </label>
-                  <div className="relative group">
+                  <div className="relative">
                     <MapPin
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors"
-                      size={18}
+                      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle"
+                      size={14}
                     />
                     <input
+                      id="search-city"
                       type="text"
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all"
+                      className="w-full h-control pl-8 pr-3 bg-canvas border border-line-strong rounded text-sm text-fg transition-colors"
                     />
                   </div>
                 </div>
@@ -212,11 +219,11 @@ function AppShell() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full md:w-auto px-8 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow-sm shadow-indigo-200 active:scale-95 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="w-full md:w-auto h-control px-4 bg-accent hover:bg-accent-hover text-accent-fg text-sm font-medium rounded transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
                 >
                   {loading ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 size={14} className="animate-spin" />
                       {loadingSeconds < 5
                         ? 'Scanning grid points...'
                         : loadingSeconds < 20
@@ -224,19 +231,19 @@ function AppShell() {
                           : `Analyzing websites... ${loadingSeconds}s`}
                     </>
                   ) : (
-                    'Find Leads'
+                    'Find leads'
                   )}
                 </button>
               </form>
 
               {error && (
-                <div className="mt-4 p-4 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100 flex items-center gap-3">
-                  <AlertTriangle size={18} className="shrink-0 text-red-500" />
+                <div role="alert" className="mt-3 px-3 py-2 bg-danger/10 text-fg text-sm rounded border border-danger/30 flex items-center gap-3">
+                  <AlertTriangle size={14} className="shrink-0 text-danger" />
                   <span className="flex-1">{error}</span>
                   <button
                     type="button"
                     onClick={() => doSearch()}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition-colors"
+                    className="shrink-0 flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors"
                   >
                     <RefreshCw size={12} />
                     Retry
@@ -246,25 +253,27 @@ function AppShell() {
             </div>
 
             {/* Tulokset ja Filtteri */}
-            <div className="mb-6 flex items-center justify-between">
+            <div className="mb-2.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-slate-800">
+                <h2 className="text-sm font-semibold text-fg">
                   Results{' '}
-                  <span className="text-slate-400 font-normal">
-                    ({filteredLeads.length})
+                  <span className="text-fg-subtle font-normal tabular-nums">
+                    {filteredLeads.length}
                   </span>
                 </h2>
                 <button
+                  type="button"
                   onClick={() =>
                     setShowOpportunitiesOnly(!showOpportunitiesOnly)
                   }
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
+                  aria-pressed={showOpportunitiesOnly}
+                  className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded text-xs font-medium transition-colors border ${
                     showOpportunitiesOnly
-                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      ? 'bg-raised text-fg border-line-strong'
+                      : 'text-fg-muted border-line hover:text-fg hover:bg-subtle'
                   }`}
                 >
-                  <Filter size={14} />
+                  <Filter size={12} />
                   {showOpportunitiesOnly
                     ? 'Opportunities only'
                     : 'Show all'}
@@ -272,12 +281,12 @@ function AppShell() {
               </div>
               {usage && (
                 <span
-                  className="text-xs text-slate-500 tabular-nums"
+                  className="text-xs text-fg-subtle tabular-nums"
                   title={`Geocoding ${usage.geocode_calls}, Text Search ${usage.text_search_calls} (list price, before free tier)`}
                 >
                   {usage.api_calls === 0
-                    ? 'Mock data, 0 API calls'
-                    : `${usage.api_calls} API calls, ~$${usage.estimated_cost_usd.toFixed(2)}`}
+                    ? 'Mock data · 0 API calls'
+                    : `${usage.api_calls} API calls · ~$${usage.estimated_cost_usd.toFixed(2)}`}
                 </span>
               )}
             </div>

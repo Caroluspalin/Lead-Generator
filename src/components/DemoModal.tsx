@@ -25,7 +25,7 @@ const thumbUrl = (photo: DemoPhoto): string =>
   `${photo.raw_url}${photo.raw_url.includes('?') ? '&' : '?'}w=320&h=200&fit=crop&auto=format&q=60`;
 
 const inputClass =
-  'w-full text-sm border-2 border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors';
+  'w-full text-sm font-normal bg-canvas border border-line-strong rounded px-2.5 py-1.5 text-fg transition-colors';
 
 const toEditable = (demo: Demo): DemoContent => ({
   hero_title: demo.content.hero_title,
@@ -200,6 +200,10 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
 
   const currentTemplate = templates.find((t) => t.id === demo?.template);
 
+  const labelClass = 'block text-2xs font-medium text-fg-muted';
+  const secondaryButton =
+    'inline-flex items-center justify-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors disabled:opacity-60';
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -208,24 +212,25 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-backdrop/70"
             onClick={onClose}
           />
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="demo-title"
+            initial={{ opacity: 0, scale: 0.98, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            exit={{ opacity: 0, scale: 0.98, y: 8 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-6xl max-h-[92vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col"
+            className="relative w-full max-w-6xl max-h-[92vh] bg-surface rounded-lg border border-line-strong shadow-overlay overflow-hidden flex flex-col"
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-sky-50 to-indigo-50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-sky-100 rounded-lg">
-                  <LayoutTemplate size={18} className="text-sky-700" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Demo website</h3>
-                  <p className="text-xs text-slate-500">
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-line">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <LayoutTemplate size={16} className="shrink-0 text-fg-muted" />
+                <div className="min-w-0">
+                  <h3 id="demo-title" className="text-base font-semibold text-fg">Demo website</h3>
+                  <p className="text-xs text-fg-subtle truncate">
                     {agency.name}
                     {demo ? ` · ${demo.status}` : ''}
                   </p>
@@ -237,30 +242,30 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                   <button
                     onClick={publishAndCreateEmail}
                     disabled={busy !== null}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm shadow-indigo-200 transition-colors disabled:opacity-60"
+                    className="inline-flex items-center gap-2 h-control px-3.5 text-sm font-medium text-accent-fg bg-accent hover:bg-accent-hover rounded transition-colors disabled:opacity-60"
                   >
-                    {busy === 'publish' ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                    {busy === 'publish' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                     {demo.status === 'published' ? 'Create email with demo link' : 'Publish & create email'}
                   </button>
                 )}
                 <button
                   onClick={onClose}
                   aria-label="Close"
-                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                  className="grid size-control-sm place-content-center rounded text-fg-subtle hover:text-fg hover:bg-raised transition-colors"
                 >
-                  <X size={18} />
+                  <X size={16} />
                 </button>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto">
               {loading ? (
-                <div className="flex items-center justify-center py-24">
-                  <Loader2 size={28} className="animate-spin text-slate-400" />
+                <div role="status" className="flex items-center justify-center py-24">
+                  <Loader2 size={20} className="animate-spin text-fg-subtle" />
                 </div>
               ) : !demo ? (
                 <div className="px-6 py-10 max-w-lg mx-auto text-center space-y-4">
-                  <p className="text-sm text-slate-600">
+                  <p className="text-sm text-fg-muted">
                     Generate a one-page draft website for this lead. The AI writes only the texts; the page is built
                     from a ready-made template and is clearly marked as a draft (noindex).
                   </p>
@@ -279,31 +284,31 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                       ))}
                     </select>
                   )}
-                  {error && <p className="text-sm text-red-600">{error}</p>}
+                  {error && <p role="alert" className="text-sm text-danger">{error}</p>}
                   <button
                     onClick={generate}
                     disabled={busy !== null}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors disabled:opacity-60"
+                    className="inline-flex items-center gap-2 h-control px-4 text-sm font-medium text-accent-fg bg-accent hover:bg-accent-hover rounded transition-colors disabled:opacity-60"
                   >
-                    {busy === 'generate' ? <Loader2 size={16} className="animate-spin" /> : <LayoutTemplate size={16} />}
+                    {busy === 'generate' ? <Loader2 size={14} className="animate-spin" /> : <LayoutTemplate size={14} />}
                     {busy === 'generate' ? 'Generating...' : 'Generate demo'}
                   </button>
                 </div>
               ) : (
                 <div className="grid lg:grid-cols-[1fr_340px]">
-                  <div className="p-4 bg-slate-100 border-b lg:border-b-0 lg:border-r border-slate-200">
+                  <div className="p-4 bg-canvas border-b lg:border-b-0 lg:border-r border-line">
                     <iframe
                       key={previewVersion}
                       title={`Demo preview: ${agency.name}`}
                       src={`${demo.preview_url}?v=${previewVersion}`}
                       sandbox=""
-                      className="w-full h-[60vh] lg:h-[70vh] bg-white rounded-lg border border-slate-200"
+                      className="w-full h-[60vh] lg:h-[70vh] bg-canvas rounded border border-line"
                     />
                   </div>
 
-                  <div className="p-5 space-y-4">
+                  <div className="p-4 space-y-4">
                     {error && (
-                      <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      <p role="alert" className="text-sm text-fg bg-danger/10 border border-danger/30 rounded px-3 py-2">
                         {error}
                       </p>
                     )}
@@ -337,11 +342,11 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                     </div>
 
                     <div>
-                      <span className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
+                      <span className={`${labelClass} mb-1.5`}>
                         Hero image
                       </span>
                       {demo.content.images.options.length === 0 ? (
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-fg-subtle">
                           No photos available (gradient is used). Set UNSPLASH_ACCESS_KEY in backend .env and regenerate.
                         </p>
                       ) : (
@@ -356,18 +361,18 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                                   disabled={busy !== null}
                                   aria-pressed={selected}
                                   aria-label={`Use photo by ${photo.photographer_name}`}
-                                  className={`block w-full overflow-hidden rounded-lg border-2 transition-colors ${
-                                    selected ? 'border-sky-600 ring-2 ring-sky-200' : 'border-transparent hover:border-slate-300'
+                                  className={`block w-full overflow-hidden rounded border transition-colors ${
+                                    selected ? 'border-fg shadow-selected' : 'border-line hover:border-fg-subtle'
                                   }`}
                                 >
                                   <img src={thumbUrl(photo)} alt={photo.alt} className="w-full h-16 object-cover" loading="lazy" />
                                 </button>
-                                <figcaption className="mt-0.5 text-[10px] leading-tight text-slate-400 truncate">
-                                  <a href={withUtm(photo.photographer_url)} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                <figcaption className="mt-0.5 text-2xs leading-tight text-fg-subtle truncate">
+                                  <a href={withUtm(photo.photographer_url)} target="_blank" rel="noopener noreferrer" className="rounded-sm hover:text-fg hover:underline underline-offset-2">
                                     {photo.photographer_name}
                                   </a>{' '}
                                   /{' '}
-                                  <a href={withUtm('https://unsplash.com/')} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                  <a href={withUtm('https://unsplash.com/')} target="_blank" rel="noopener noreferrer" className="rounded-sm hover:text-fg hover:underline underline-offset-2">
                                     Unsplash
                                   </a>
                                 </figcaption>
@@ -379,8 +384,8 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                             onClick={() => demo.content.images.hero && patch({ hero_image_id: 'none' })}
                             disabled={busy !== null}
                             aria-pressed={!demo.content.images.hero}
-                            className={`h-16 rounded-lg border-2 text-[11px] font-medium text-slate-600 bg-gradient-to-br from-slate-100 to-slate-200 ${
-                              !demo.content.images.hero ? 'border-sky-600 ring-2 ring-sky-200' : 'border-transparent hover:border-slate-300'
+                            className={`h-16 rounded border text-2xs font-medium text-fg-muted bg-raised ${
+                              !demo.content.images.hero ? 'border-fg shadow-selected' : 'border-line hover:border-fg-subtle'
                             }`}
                           >
                             No photo
@@ -391,38 +396,38 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
 
                     {draft && (
                       <div className="space-y-3">
-                        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                        <label className={labelClass}>
                           Headline
                           <input
                             value={draft.hero_title}
                             onChange={(e) => setDraft({ ...draft, hero_title: e.target.value })}
                             maxLength={80}
-                            className={`${inputClass} mt-1 normal-case font-normal tracking-normal`}
+                            className={`${inputClass} mt-1`}
                           />
                         </label>
-                        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                        <label className={labelClass}>
                           Subheadline
                           <input
                             value={draft.hero_subtitle}
                             onChange={(e) => setDraft({ ...draft, hero_subtitle: e.target.value })}
                             maxLength={180}
-                            className={`${inputClass} mt-1 normal-case font-normal tracking-normal`}
+                            className={`${inputClass} mt-1`}
                           />
                         </label>
-                        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                        <label className={labelClass}>
                           About
                           <textarea
                             value={draft.about}
                             onChange={(e) => setDraft({ ...draft, about: e.target.value })}
                             maxLength={700}
                             rows={4}
-                            className={`${inputClass} mt-1 normal-case font-normal tracking-normal resize-y`}
+                            className={`${inputClass} mt-1 resize-y`}
                           />
                         </label>
 
                         <div>
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                            <span className={labelClass}>
                               Services ({draft.services.length})
                             </span>
                             <div className="flex gap-1">
@@ -431,7 +436,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                                 aria-label="Remove last service"
                                 disabled={draft.services.length <= MIN_SERVICES}
                                 onClick={() => setDraft({ ...draft, services: draft.services.slice(0, -1) })}
-                                className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                                className="grid size-6 place-content-center rounded-sm text-fg-muted hover:text-fg hover:bg-raised disabled:opacity-30"
                               >
                                 <Minus size={14} />
                               </button>
@@ -442,7 +447,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                                 onClick={() =>
                                   setDraft({ ...draft, services: [...draft.services, { name: '', description: '' }] })
                                 }
-                                className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                                className="grid size-6 place-content-center rounded-sm text-fg-muted hover:text-fg hover:bg-raised disabled:opacity-30"
                               >
                                 <Plus size={14} />
                               </button>
@@ -450,7 +455,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                           </div>
                           <div className="space-y-2">
                             {draft.services.map((s, i) => (
-                              <div key={i} className="space-y-1 p-2 rounded-lg bg-slate-50">
+                              <div key={i} className="space-y-1 p-2 rounded border border-line">
                                 <input
                                   value={s.name}
                                   onChange={(e) => updateService(i, 'name', e.target.value)}
@@ -472,20 +477,20 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                           </div>
                         </div>
 
-                        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                        <label className={labelClass}>
                           Prices note
                           <input
                             value={draft.price_note}
                             onChange={(e) => setDraft({ ...draft, price_note: e.target.value })}
                             maxLength={120}
-                            className={`${inputClass} mt-1 normal-case font-normal tracking-normal`}
+                            className={`${inputClass} mt-1`}
                           />
                         </label>
 
                         <button
                           onClick={() => patch({ content: draft }, 'Texts saved')}
                           disabled={busy !== null}
-                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-60"
+                          className="w-full inline-flex items-center justify-center gap-2 h-control px-4 text-sm font-medium text-fg bg-raised border border-line-strong hover:border-fg-subtle rounded transition-colors disabled:opacity-60"
                         >
                           {busy === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                           Save texts
@@ -493,16 +498,16 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                       </div>
                     )}
 
-                    <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div className="pt-3 border-t border-line space-y-2">
                       {demo.status === 'published' && demo.public_url ? (
                         <>
-                          <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200">
-                            <Globe size={14} className="text-emerald-700 shrink-0" />
+                          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded border border-success/30 bg-success/10">
+                            <Globe size={13} className="text-success shrink-0" />
                             <a
                               href={demo.public_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-emerald-800 font-medium truncate hover:underline"
+                              className="rounded-sm text-xs text-fg font-medium truncate underline decoration-fg-subtle/40 underline-offset-2 hover:decoration-fg"
                             >
                               {demo.public_url}
                             </a>
@@ -510,20 +515,20 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                               type="button"
                               onClick={copyPublicUrl}
                               aria-label="Copy public link"
-                              className="ml-auto p-1 rounded text-emerald-700 hover:bg-emerald-100"
+                              className="ml-auto grid size-6 shrink-0 place-content-center rounded-sm text-fg-muted hover:text-fg hover:bg-raised"
                             >
                               <Copy size={13} />
                             </button>
                           </div>
                           {demo.expires_at && (
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-2xs text-fg-subtle">
                               Online until {new Date(demo.expires_at).toLocaleDateString('fi-FI')} (extended automatically if the lead is Hired)
                             </p>
                           )}
                           <button
                             onClick={() => setPublished(false)}
                             disabled={busy !== null}
-                            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-60"
+                            className={`${secondaryButton} w-full`}
                           >
                             {busy === 'publish' ? <Loader2 size={13} className="animate-spin" /> : <EyeOff size={13} />}
                             Unpublish
@@ -534,14 +539,14 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                           onClick={() => setPublished(true)}
                           disabled={busy !== null || !demo.publishing_enabled}
                           title={demo.publishing_enabled ? undefined : 'Set R2_* and DEMO_PUBLIC_BASE_URL in backend .env'}
-                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
+                          className="w-full inline-flex items-center justify-center gap-2 h-control px-4 text-sm font-medium text-fg bg-raised border border-line-strong hover:border-fg-subtle rounded transition-colors disabled:opacity-50"
                         >
                           {busy === 'publish' ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
                           {demo.status === 'expired' ? 'Publish again (30 days)' : 'Publish (30 days)'}
                         </button>
                       )}
                       {!demo.publishing_enabled && (
-                        <p className="text-[11px] text-slate-500">Publishing is not configured yet. Preview works locally.</p>
+                        <p className="text-2xs text-fg-subtle">Publishing is not configured yet. Preview works locally.</p>
                       )}
                     </div>
 
@@ -550,7 +555,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                         href={demo.preview_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg transition-colors"
+                        className={secondaryButton}
                       >
                         <ExternalLink size={13} />
                         Open in new tab
@@ -558,7 +563,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                       <button
                         onClick={generate}
                         disabled={busy !== null}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-60"
+                        className={secondaryButton}
                       >
                         {busy === 'generate' ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                         Regenerate
@@ -566,7 +571,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                       <button
                         onClick={remove}
                         disabled={busy !== null}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors disabled:opacity-60"
+                        className="inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-danger border border-danger/30 hover:bg-danger/10 rounded transition-colors disabled:opacity-60"
                       >
                         <Trash2 size={13} />
                         Delete

@@ -91,38 +91,45 @@ const SearchHistoryView: React.FC<SearchHistoryViewProps> = ({ onReSearch }) => 
   );
 
   return (
-    <section className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Search History</h2>
-          <p className="text-sm text-slate-600">
-            Your past searches — click to re-run any search instantly
+    <section className="space-y-5">
+      <div className="flex items-center justify-between gap-4">
+        <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h1 className="text-xl font-semibold tracking-tight text-fg">Search history</h1>
+          <p className="text-sm text-fg-subtle">
+            Your past searches. Re-run any search with one click.
           </p>
-        </div>
+        </header>
         <button
           onClick={fetchHistory}
-          className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg hover:border-indigo-200 transition-colors"
+          className="flex shrink-0 items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg-muted border border-line-strong rounded hover:text-fg hover:bg-subtle transition-colors"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={13} />
           Refresh
         </button>
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 flex items-center justify-center">
-          <Loader2 size={24} className="animate-spin text-slate-400" />
+        <div role="status" className="bg-surface rounded border border-line p-12 flex items-center justify-center">
+          <Loader2 size={20} className="animate-spin text-fg-subtle" />
         </div>
       ) : uniqueEntries.length === 0 ? (
-        <div className="p-12 text-center bg-white border-2 border-dashed border-slate-300 rounded-2xl">
-          <History size={32} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 font-medium mb-2">No searches yet</p>
-          <p className="text-sm text-slate-400">
+        <div className="p-12 text-center border border-dashed border-line-strong rounded">
+          <History size={24} className="mx-auto text-fg-subtle mb-3" />
+          <p className="text-fg font-medium mb-1">No searches yet</p>
+          <p className="text-sm text-fg-subtle">
             Your search history will appear here after running searches
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="divide-y divide-slate-100">
+        <div className="bg-surface rounded border border-line overflow-hidden">
+          <div className="grid grid-cols-[minmax(0,1fr)_140px_140px_72px_176px] items-center gap-4 px-card py-2 border-b border-line bg-canvas text-2xs font-medium text-fg-subtle">
+            <span>Industry</span>
+            <span>City</span>
+            <span>Last searched</span>
+            <span className="text-right">Results</span>
+            <span className="sr-only">Actions</span>
+          </div>
+          <div className="divide-y divide-line">
             <AnimatePresence>
               {uniqueEntries.map((entry) => (
                 <motion.div
@@ -130,46 +137,34 @@ const SearchHistoryView: React.FC<SearchHistoryViewProps> = ({ onReSearch }) => 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group"
+                  className="grid grid-cols-[minmax(0,1fr)_140px_140px_72px_176px] items-center gap-4 px-card py-2.5 hover:bg-subtle transition-colors group"
                 >
-                  <div className="p-2.5 bg-indigo-50 rounded-lg shrink-0">
-                    <Search size={16} className="text-indigo-600" />
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-800">
-                      {entry.business_type}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="flex items-center gap-1 text-xs text-slate-500">
-                        <MapPin size={11} />
-                        {entry.city}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs text-slate-500">
-                        <Clock size={11} />
-                        {formatDate(entry.searched_at)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-slate-700">
-                        {entry.result_count}
-                      </p>
-                      <p className="text-[10px] text-slate-400">results</p>
-                    </div>
-
+                  <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-fg">
+                    <span className="truncate">{entry.business_type}</span>
                     {entry.searchCount > 1 && (
-                      <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full">
-                        {entry.searchCount}x
+                      <span className="shrink-0 px-1 rounded-sm bg-raised text-2xs font-normal tabular-nums text-fg-subtle">
+                        {entry.searchCount}×
                       </span>
                     )}
+                  </p>
+                  <span className="flex items-center gap-1.5 text-sm text-fg-muted truncate">
+                    <MapPin size={12} className="shrink-0 text-fg-subtle" />
+                    {entry.city}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs tabular-nums text-fg-subtle whitespace-nowrap">
+                    <Clock size={12} className="shrink-0" />
+                    {formatDate(entry.searched_at)}
+                  </span>
+                  <span className="text-right text-sm font-medium tabular-nums text-fg">
+                    {entry.result_count}
+                  </span>
 
+                  {/* Näkyy myös näppäimistöllä (focus-within), ei vain hiirellä */}
+                  <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                     {onReSearch && (
                       <button
                         onClick={() => onReSearch(entry.business_type, entry.city)}
-                        className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        className="flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-accent-fg bg-accent hover:bg-accent-hover rounded transition-colors"
                       >
                         <Search size={12} />
                         Re-search
@@ -178,7 +173,7 @@ const SearchHistoryView: React.FC<SearchHistoryViewProps> = ({ onReSearch }) => 
 
                     <button
                       onClick={() => handleDelete(entry.id)}
-                      className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                      className="grid size-control-sm place-content-center rounded text-fg-subtle hover:text-danger hover:bg-danger/10 transition-colors"
                       aria-label="Delete entry"
                     >
                       <Trash2 size={14} />

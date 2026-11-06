@@ -1,24 +1,38 @@
 import React from 'react';
 import { Star } from 'lucide-react';
 
+interface ScoreTone {
+  text: string;
+  bar: string;
+}
+
 // Asteikko vastaa backendin app/scoring.py:n jakaumaa: 75+ = kuuma liidi
-const scoreStyles = (score: number): string => {
-  if (score >= 75) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-  if (score >= 50) return 'bg-lime-100 text-lime-800 border-lime-200';
-  if (score >= 25) return 'bg-amber-100 text-amber-800 border-amber-200';
-  return 'bg-slate-100 text-slate-600 border-slate-200';
+const scoreTone = (score: number): ScoreTone => {
+  if (score >= 75) return { text: 'text-score-hot', bar: 'bg-score-hot' };
+  if (score >= 50) return { text: 'text-score-good', bar: 'bg-score-good' };
+  if (score >= 25) return { text: 'text-score-fair', bar: 'bg-score-fair' };
+  return { text: 'text-score-low', bar: 'bg-score-low' };
 };
 
-export const ScoreBadge: React.FC<{ score: number | null | undefined }> = ({ score }) => {
+export const ScoreBadge: React.FC<{ score: number | null | undefined; meter?: boolean }> = ({
+  score,
+  meter = true,
+}) => {
   if (score === null || score === undefined) {
-    return <span className="text-xs text-slate-400">-</span>;
+    return <span className="text-xs text-fg-subtle">-</span>;
   }
+  const tone = scoreTone(score);
   return (
-    <span
-      title="Lead score (0-100)"
-      className={`inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-lg text-xs font-bold border tabular-nums ${scoreStyles(score)}`}
-    >
-      {score}
+    <span title="Lead score (0-100)" className="inline-flex items-center gap-2">
+      <span className={`w-5 text-sm font-semibold tabular-nums ${tone.text}`}>{score}</span>
+      {meter && (
+        <span aria-hidden="true" className="h-[3px] w-7 bg-line-strong">
+          <span
+            className={`block h-full ${tone.bar}`}
+            style={{ width: `${Math.max(0, Math.min(100, score))}%` }}
+          />
+        </span>
+      )}
     </span>
   );
 };
@@ -28,13 +42,32 @@ export const RatingDisplay: React.FC<{
   reviewCount: number | null | undefined;
 }> = ({ rating, reviewCount }) => {
   if (!reviewCount) {
-    return <span className="text-xs text-slate-400 italic">No reviews</span>;
+    return <span className="text-xs text-fg-subtle italic">No reviews</span>;
   }
   return (
-    <span className="inline-flex items-center gap-1 text-sm text-slate-700 tabular-nums">
-      <Star size={13} className="text-amber-400 fill-amber-400 shrink-0" />
+    <span className="inline-flex items-center gap-1 text-sm text-fg tabular-nums whitespace-nowrap">
+      <Star size={12} className="text-warning fill-warning shrink-0" />
       {rating !== null && rating !== undefined ? rating.toFixed(1) : '-'}
-      <span className="text-xs text-slate-400">({reviewCount})</span>
+      <span className="text-fg-subtle">({reviewCount})</span>
+    </span>
+  );
+};
+
+const STATUS_STYLE: Record<string, { dot: string; label: string }> = {
+  'NO WEBSITE': { dot: 'bg-status-none', label: 'No website' },
+  'BROKEN WEBSITE': { dot: 'bg-status-broken', label: 'Broken website' },
+  INSECURE: { dot: 'bg-status-insecure', label: 'Insecure' },
+  'NOT MOBILE': { dot: 'bg-status-mobile', label: 'Not mobile' },
+  UNKNOWN: { dot: 'bg-status-unknown', label: 'Unknown' },
+  'WEBSITE OK': { dot: 'bg-status-ok', label: 'Website OK' },
+};
+
+export const StatusBadge: React.FC<{ status: string; title?: string }> = ({ status, title }) => {
+  const style = STATUS_STYLE[status] ?? { dot: 'bg-status-unknown', label: status };
+  return (
+    <span title={title} className="inline-flex items-center gap-1.5 text-sm font-medium text-fg whitespace-nowrap">
+      <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${style.dot}`} />
+      {style.label}
     </span>
   );
 };

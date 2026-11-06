@@ -36,53 +36,64 @@ const Login: React.FC = () => {
     }
   };
 
+  const inputClass =
+    'w-full h-control text-sm bg-canvas border border-line-strong rounded px-3 text-fg transition-colors';
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-indigo-50 to-purple-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 p-8"
+        className="w-full max-w-sm"
       >
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-slate-900">Agency Hunter</h1>
-          <p className="text-sm text-slate-500 mt-1">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="mb-4 grid size-9 place-content-center rounded bg-accent">
+            <svg width="20" viewBox="0 0 50 39" fill="none" xmlns="http://www.w3.org/2000/svg" className="fill-accent-fg" aria-hidden="true">
+              <path d="M16.4992 2H37.5808L22.0816 24.9729H1L16.4992 2Z" />
+              <path d="M17.4224 27.102L11.4192 36H33.5008L49 13.0271H32.7024L23.2064 27.102H17.4224Z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight text-fg">Agency Hunter</h1>
+          <p className="text-sm text-fg-subtle mt-1">
             {mode === 'signin' ? 'Sign in to continue' : 'Create an account'}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3.5 bg-surface border border-line rounded-lg p-5">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
+            <label htmlFor="login-email" className="block text-2xs font-medium text-fg-muted mb-1.5">
               Email
             </label>
             <input
+              id="login-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
-              className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors"
+              className={inputClass}
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
+            <label htmlFor="login-password" className="block text-2xs font-medium text-fg-muted mb-1.5">
               Password
             </label>
             <input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-              className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors"
+              className={inputClass}
               placeholder="••••••••"
             />
           </div>
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100 flex items-start gap-2">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5 text-red-500" />
+            <div role="alert" className="px-3 py-2 bg-danger/10 text-fg text-sm rounded border border-danger/30 flex items-start gap-2">
+              <AlertTriangle size={14} className="shrink-0 mt-[3px] text-danger" />
               <span>{error}</span>
             </div>
           )}
@@ -90,27 +101,27 @@ const Login: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg shadow-sm shadow-indigo-200 transition-colors"
+            className="w-full inline-flex items-center justify-center gap-2 h-control px-4 text-sm font-medium text-accent-fg bg-accent hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed rounded transition-colors"
           >
             {loading ? (
-              <Loader2 size={16} className="animate-spin" />
+              <Loader2 size={14} className="animate-spin" />
             ) : mode === 'signin' ? (
-              <LogIn size={16} />
+              <LogIn size={14} />
             ) : (
-              <UserPlus size={16} />
+              <UserPlus size={14} />
             )}
             {mode === 'signin' ? 'Sign in' : 'Create account'}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-4 text-center">
           <button
             type="button"
             onClick={() => {
               setMode(mode === 'signin' ? 'signup' : 'signin');
               setError('');
             }}
-            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors"
+            className="rounded-sm text-xs text-fg-muted hover:text-fg underline decoration-fg-subtle/40 underline-offset-2 hover:decoration-fg transition-colors"
           >
             {mode === 'signin'
               ? "Don't have an account? Sign up"

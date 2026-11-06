@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, RefreshCw, PhoneCall } from 'lucide-react';
+import { X, Copy, RefreshCw, PhoneCall, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
@@ -72,25 +72,26 @@ const CallScriptModal: React.FC<CallScriptModalProps> = ({ isOpen, onClose, agen
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-backdrop/70"
             onClick={onClose}
           />
 
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="call-script-title"
+            initial={{ opacity: 0, scale: 0.98, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            exit={{ opacity: 0, scale: 0.98, y: 8 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            className="relative w-full max-w-xl bg-surface rounded-lg border border-line-strong shadow-overlay overflow-hidden"
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-emerald-50 to-teal-50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-100 rounded-lg">
-                  <PhoneCall size={18} className="text-emerald-700" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Call Script (~30 s)</h3>
-                  <p className="text-xs text-slate-500">
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-line">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <PhoneCall size={16} className="shrink-0 text-fg-muted" />
+                <div className="min-w-0">
+                  <h3 id="call-script-title" className="text-base font-semibold text-fg">Call script (~30 s)</h3>
+                  <p className="text-xs text-fg-subtle truncate">
                     {agency.name}
                     {agency.phone ? ` · ${agency.phone}` : ''}
                   </p>
@@ -98,24 +99,25 @@ const CallScriptModal: React.FC<CallScriptModalProps> = ({ isOpen, onClose, agen
               </div>
               <button
                 onClick={onClose}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                aria-label="Close"
+                className="grid size-control-sm shrink-0 place-content-center rounded text-fg-subtle hover:text-fg hover:bg-raised transition-colors"
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
 
-            <div className="px-6 py-5 max-h-[60vh] overflow-y-auto">
+            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
               {loading ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
-                  <PhoneCall size={32} className="text-emerald-500 animate-pulse" />
-                  <p className="text-sm font-medium text-emerald-700 animate-pulse">AI is writing...</p>
+                <div role="status" className="flex flex-col items-center justify-center py-16 gap-3">
+                  <Loader2 size={20} className="text-fg-subtle animate-spin" />
+                  <p className="text-sm text-fg-muted">AI is writing...</p>
                 </div>
               ) : error ? (
                 <div className="py-8 text-center">
-                  <p className="text-sm text-red-600 mb-3">{error}</p>
+                  <p role="alert" className="text-sm text-danger mb-3">{error}</p>
                   <button
                     onClick={() => fetchScript()}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                    className="inline-flex items-center gap-2 h-control px-3 text-sm font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors"
                   >
                     <RefreshCw size={14} />
                     Try again
@@ -123,26 +125,26 @@ const CallScriptModal: React.FC<CallScriptModalProps> = ({ isOpen, onClose, agen
                 </div>
               ) : result ? (
                 <>
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700 bg-slate-50 border-2 border-slate-200 rounded-lg px-4 py-3">
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-fg bg-canvas border border-line rounded px-3.5 py-3">
                     {result.script}
                   </pre>
-                  <p className="text-xs text-slate-400 text-right mt-2">Model: {result.model}</p>
+                  <p className="text-2xs text-fg-subtle text-right mt-2">Model: {result.model}</p>
                 </>
               ) : null}
             </div>
 
             {!loading && result && (
-              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex gap-2">
+              <div className="px-5 py-3 border-t border-line flex justify-end gap-2">
                 <button
                   onClick={() => fetchScript()}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors"
+                  className="inline-flex items-center gap-2 h-control px-3 text-sm font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors"
                 >
                   <RefreshCw size={14} />
                   Regenerate
                 </button>
                 <button
                   onClick={handleCopy}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-sm shadow-emerald-200"
+                  className="inline-flex items-center justify-center gap-2 h-control px-4 text-sm font-medium text-accent-fg bg-accent hover:bg-accent-hover rounded transition-colors"
                 >
                   <Copy size={14} />
                   Copy

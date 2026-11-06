@@ -1,19 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ExternalLink,
   PlusCircle,
-  MapPin,
-  Phone,
   Search,
-  CheckCircle2,
+  Check,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Map as MapIcon,
   PauseCircle,
 } from 'lucide-react';
 import type { Agency, WebsiteStatus } from '../types/agency';
-import { ScoreBadge, RatingDisplay } from './ScoreBadge';
+import { ScoreBadge, RatingDisplay, StatusBadge } from './ScoreBadge';
 
 interface LeadTableProps {
   leads: Agency[];
@@ -62,7 +58,10 @@ const compareLeads = (a: Agency, b: Agency, key: SortKey, dir: SortDir): number 
   return primary !== 0 ? primary : (b.lead_score ?? -1) - (a.lead_score ?? -1);
 };
 
-const headerCell = 'px-4 py-4 font-semibold text-xs text-slate-500 uppercase tracking-wider';
+const headerCell = 'px-cell-x py-2 text-2xs font-medium text-fg-subtle whitespace-nowrap';
+const bodyCell = 'px-cell-x py-cell-y align-middle';
+const linkClass =
+  'rounded-sm underline decoration-fg-subtle/40 underline-offset-2 hover:decoration-fg transition-colors';
 
 const SortableHeader: React.FC<{
   label: string;
@@ -79,12 +78,12 @@ const SortableHeader: React.FC<{
       <button
         type="button"
         onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-800 transition-colors ${
-          isActive ? 'text-indigo-700' : ''
+        className={`inline-flex items-center gap-1 rounded-sm hover:text-fg transition-colors ${
+          isActive ? 'text-fg' : ''
         }`}
       >
         {label}
-        <Icon size={12} className={isActive ? '' : 'opacity-40'} />
+        <Icon size={11} className={isActive ? '' : 'opacity-60'} />
       </button>
     </th>
   );
@@ -92,27 +91,27 @@ const SortableHeader: React.FC<{
 
 const SkeletonRow: React.FC = () => (
   <tr className="animate-pulse">
-    <td className="px-4 py-4">
-      <div className="h-6 w-10 bg-slate-200 rounded-lg" />
+    <td className={bodyCell}>
+      <div className="h-4 w-12 bg-raised rounded-sm" />
     </td>
-    <td className="px-4 py-4">
-      <div className="h-4 w-40 bg-slate-200 rounded mb-2" />
-      <div className="h-3 w-28 bg-slate-100 rounded" />
+    <td className={bodyCell}>
+      <div className="h-4 w-40 bg-raised rounded-sm mb-1.5" />
+      <div className="h-3 w-28 bg-subtle rounded-sm" />
     </td>
-    <td className="px-4 py-4">
-      <div className="h-4 w-16 bg-slate-200 rounded" />
+    <td className={bodyCell}>
+      <div className="h-4 w-16 bg-raised rounded-sm" />
     </td>
-    <td className="px-4 py-4">
-      <div className="h-4 w-28 bg-slate-200 rounded" />
+    <td className={bodyCell}>
+      <div className="h-4 w-24 bg-raised rounded-sm" />
     </td>
-    <td className="px-4 py-4">
-      <div className="h-4 w-32 bg-slate-200 rounded" />
+    <td className={bodyCell}>
+      <div className="h-4 w-32 bg-raised rounded-sm" />
     </td>
-    <td className="px-4 py-4">
-      <div className="h-6 w-24 bg-slate-200 rounded-full" />
+    <td className={bodyCell}>
+      <div className="h-4 w-24 bg-raised rounded-sm" />
     </td>
-    <td className="px-4 py-4 text-right">
-      <div className="h-7 w-28 bg-slate-200 rounded-lg ml-auto" />
+    <td className={`${bodyCell} text-right`}>
+      <div className="h-control-sm w-16 bg-raised rounded ml-auto" />
     </td>
   </tr>
 );
@@ -138,31 +137,33 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
 
   if (!leads || !Array.isArray(leads)) {
     return (
-      <div className="p-12 text-center text-slate-400">
+      <div className="p-12 text-center text-fg-subtle">
         <p>No results or search error.</p>
       </div>
     );
   }
 
   const headers = (
-    <tr className="bg-slate-50 border-b border-slate-200">
+    <tr className="bg-canvas border-b border-line">
       <SortableHeader label="Score" sortKey="score" active={sortKey} dir={sortDir} onSort={handleSort} />
       <SortableHeader label="Business" sortKey="name" active={sortKey} dir={sortDir} onSort={handleSort} />
       <SortableHeader label="Rating" sortKey="rating" active={sortKey} dir={sortDir} onSort={handleSort} />
-      <th className={headerCell}>Contact</th>
+      <th className={headerCell}>Phone</th>
       <th className={headerCell}>Website</th>
       <SortableHeader label="Status" sortKey="website" active={sortKey} dir={sortDir} onSort={handleSort} />
-      <th className={`${headerCell} text-right`}>Action</th>
+      <th className={`${headerCell} text-right`}>
+        <span className="sr-only">Action</span>
+      </th>
     </tr>
   );
 
   if (loading) {
     return (
-      <div className="w-full overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200">
+      <div className="w-full overflow-hidden bg-surface rounded border border-line">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>{headers}</thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-line">
               {Array.from({ length: 5 }).map((_, i) => (
                 <SkeletonRow key={i} />
               ))}
@@ -175,115 +176,110 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
 
   if (leads.length === 0) {
     return (
-      <div className="p-12 text-center bg-white rounded-xl border-2 border-dashed border-slate-200">
-        <Search size={32} className="mx-auto text-slate-300 mb-3" />
-        <p className="text-slate-500 font-medium">No results</p>
-        <p className="text-sm text-slate-400 mt-1">Search to discover businesses</p>
+      <div className="p-12 text-center rounded border border-dashed border-line-strong">
+        <Search size={24} className="mx-auto text-fg-subtle mb-3" />
+        <p className="text-fg font-medium">No results</p>
+        <p className="text-sm text-fg-subtle mt-1">Search to discover businesses</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full overflow-hidden bg-white rounded-xl shadow-sm border border-slate-200">
+    <div className="w-full overflow-hidden bg-surface rounded border border-line">
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>{headers}</thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-line">
             {sortedLeads.map((lead) => (
-              <tr
-                key={lead.id}
-                className={`hover:bg-slate-50/80 transition-colors group ${lead.already_saved ? 'bg-slate-50/60' : ''}`}
-              >
-                <td className="px-4 py-4">
+              <tr key={lead.id} className="hover:bg-subtle transition-colors">
+                <td className={bodyCell}>
                   <ScoreBadge score={lead.lead_score} />
                 </td>
 
-                <td className="px-4 py-4">
+                <td className={bodyCell}>
                   <div className="flex flex-col">
                     <span className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{lead.name}</span>
+                      <span className="text-sm font-medium text-fg [overflow-wrap:anywhere]">{lead.name}</span>
                       {lead.business_status === 'CLOSED_TEMPORARILY' && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-slate-200 text-slate-700">
+                        <span className="inline-flex items-center gap-1 px-1.5 rounded-sm border border-line-strong text-2xs font-medium text-fg-muted whitespace-nowrap">
                           <PauseCircle size={10} />
                           Temporarily closed
                         </span>
                       )}
                     </span>
-                    <span className="flex items-center gap-1 text-xs text-slate-500 mt-0.5 [overflow-wrap:anywhere]">
-                      <MapPin size={10} className="shrink-0" /> {lead.address}
+                    <span className="text-xs text-fg-subtle mt-0.5 [overflow-wrap:anywhere]">
+                      {lead.address}
+                      {lead.maps_url && (
+                        <>
+                          {' · '}
+                          <a
+                            href={lead.maps_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`text-fg-muted hover:text-fg ${linkClass}`}
+                          >
+                            Maps
+                          </a>
+                        </>
+                      )}
                     </span>
-                    {lead.maps_url && (
-                      <a
-                        href={lead.maps_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 hover:underline mt-1 w-fit"
-                      >
-                        <MapIcon size={11} />
-                        Google Maps
-                      </a>
-                    )}
                   </div>
                 </td>
 
-                <td className="px-4 py-4 whitespace-nowrap">
+                <td className={`${bodyCell} whitespace-nowrap`}>
                   <RatingDisplay rating={lead.rating} reviewCount={lead.review_count} />
                 </td>
 
-                <td className="px-4 py-4">
+                <td className={`${bodyCell} whitespace-nowrap`}>
                   {lead.phone ? (
-                     <span className="flex items-center gap-1.5 text-sm text-slate-600 whitespace-nowrap">
-                        <Phone size={12} className="text-slate-400"/> {lead.phone}
-                     </span>
+                    <span className="text-sm text-fg tabular-nums">{lead.phone}</span>
                   ) : (
-                    <span className="text-xs text-slate-400 italic">No phone</span>
+                    <span className="text-xs text-fg-subtle italic">No phone</span>
                   )}
                 </td>
 
-                <td className="px-4 py-4 text-sm text-slate-500">
+                <td className={bodyCell}>
                   {lead.website ? (
                     <a
                       href={lead.website.startsWith('http') ? lead.website : `http://${lead.website}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       title={lead.website}
-                      className="flex items-center gap-1 hover:text-indigo-600 hover:underline"
+                      // Pitkä hostname ei saa levittää taulukkoa vaakavieritykseen
+                      className={`block truncate max-w-[10rem] font-mono text-xs text-fg-muted hover:text-fg ${linkClass}`}
                     >
-                      {/* Pitkä hostname ei saa levittää taulukkoa vaakavieritykseen */}
-                      <span className="truncate max-w-[8rem]">
-                        {new URL(lead.website.startsWith('http') ? lead.website : `http://${lead.website}`).hostname.replace('www.', '')}
-                      </span>
-                      <ExternalLink size={12} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      {new URL(lead.website.startsWith('http') ? lead.website : `http://${lead.website}`).hostname.replace('www.', '')}
                     </a>
                   ) : (
-                    <span className="text-slate-400">-</span>
+                    <span className="text-fg-subtle">—</span>
                   )}
                 </td>
 
-                <td className="px-4 py-4">
+                <td className={bodyCell}>
                   <StatusBadge status={lead.website_status} />
                   {lead.website_issue && (
-                    <span className="block text-[11px] text-slate-500 mt-1 max-w-[9rem]">
+                    <span className="block text-xs text-fg-subtle mt-0.5 max-w-[10rem]">
                       {lead.website_issue}
                     </span>
                   )}
                 </td>
 
-                <td className="px-4 py-4 text-right">
+                <td className={`${bodyCell} text-right`}>
                   {lead.already_saved ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg whitespace-nowrap">
-                      <CheckCircle2 size={14} />
+                    <span className="inline-flex items-center gap-1.5 text-xs text-fg-subtle whitespace-nowrap">
+                      <Check size={13} />
                       In pipeline
                     </span>
                   ) : (
                     <button
                       type="button"
                       onClick={() => onSaveLead && onSaveLead(lead)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors disabled:opacity-60 whitespace-nowrap"
+                      aria-label={`Save ${lead.name} to pipeline`}
+                      className="inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-raised transition-colors disabled:opacity-60 whitespace-nowrap"
                       disabled={!onSaveLead}
                     >
-                      <PlusCircle size={14} />
-                      Save to Pipeline
+                      <PlusCircle size={13} />
+                      Save
                     </button>
                   )}
                 </td>
@@ -293,23 +289,6 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
         </table>
       </div>
     </div>
-  );
-};
-
-// Apukomponentti tilan väreille
-const StatusBadge = ({ status }: { status: string }) => {
-  let styles = "bg-slate-100 text-slate-600 border-slate-200";
-
-  if (status === "NO WEBSITE") styles = "bg-rose-50 text-rose-700 border-rose-100";
-  else if (status === "BROKEN WEBSITE") styles = "bg-orange-50 text-orange-700 border-orange-100";
-  else if (status === "INSECURE") styles = "bg-amber-50 text-amber-700 border-amber-100";
-  else if (status === "NOT MOBILE") styles = "bg-yellow-50 text-yellow-700 border-yellow-100";
-  else if (status === "WEBSITE OK") styles = "bg-emerald-50 text-emerald-700 border-emerald-100";
-
-  return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap ${styles}`}>
-      {status}
-    </span>
   );
 };
 

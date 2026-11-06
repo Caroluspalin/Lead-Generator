@@ -11,7 +11,7 @@ createRoot(document.getElementById('root')!).render(
     <AuthProvider>
       <PipelineProvider>
         <App />
-        <Toaster position="bottom-right" richColors closeButton duration={3000} />
+        <Toaster position="bottom-right" theme="dark" richColors closeButton duration={3000} />
       </PipelineProvider>
     </AuthProvider>
   </StrictMode>,

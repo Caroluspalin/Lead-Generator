@@ -181,91 +181,80 @@ const PipelineBoard: React.FC = () => {
     (agency) => agency.pipeline_status === activeTab,
   );
 
+  const toolbarButton =
+    'flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-subtle transition-colors disabled:opacity-50';
+
   return (
     <section>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">
-          My Pipeline
-        </h2>
-        <p className="text-sm text-slate-600">
-          Track your prospects from first contact to final decision
-        </p>
-      </div>
+      <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-xl font-semibold tracking-tight text-fg">Pipeline</h1>
+        <p className="text-sm text-fg-subtle">Track prospects from first contact to decision</p>
+      </header>
 
       {loading ? (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50">
-            <div className="flex gap-1 p-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-10 flex-1 bg-slate-200 rounded-md animate-pulse" />
-              ))}
-            </div>
+        <div>
+          <div className="flex gap-5 border-b border-line pb-2.5 mb-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-4 w-20 bg-raised rounded-sm animate-pulse" />
+            ))}
           </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="animate-pulse border border-slate-200 rounded-xl p-5 space-y-3">
-                <div className="h-5 w-3/4 bg-slate-200 rounded" />
-                <div className="h-4 w-1/2 bg-slate-100 rounded" />
-                <div className="h-4 w-2/3 bg-slate-100 rounded" />
-                <div className="h-8 w-full bg-slate-100 rounded-lg mt-2" />
+              <div key={i} className="animate-pulse bg-surface border border-line rounded p-card space-y-3">
+                <div className="h-4 w-3/4 bg-raised rounded-sm" />
+                <div className="h-3 w-1/2 bg-subtle rounded-sm" />
+                <div className="h-3 w-2/3 bg-subtle rounded-sm" />
+                <div className="h-control-sm w-full bg-subtle rounded mt-2" />
               </div>
             ))}
           </div>
         </div>
       ) : error ? (
-        <div className="p-8 text-center bg-white border border-red-100 rounded-2xl">
-          <AlertTriangle size={32} className="mx-auto text-red-400 mb-3" />
-          <p className="text-red-700 font-medium mb-1">Failed to load</p>
-          <p className="text-sm text-red-500 mb-4">{error}</p>
+        <div role="alert" className="p-8 text-center bg-surface border border-danger/30 rounded">
+          <AlertTriangle size={24} className="mx-auto text-danger mb-3" />
+          <p className="text-fg font-medium mb-1">Failed to load</p>
+          <p className="text-sm text-fg-muted mb-4">{error}</p>
           <button
             onClick={refresh}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+            className="inline-flex items-center gap-2 h-control px-3 text-sm font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors"
           >
             <RefreshCw size={14} />
             Retry
           </button>
         </div>
       ) : savedAgencies.length === 0 ? (
-        <div className="p-12 text-center bg-white border-2 border-dashed border-slate-300 rounded-2xl">
-          <p className="text-slate-500 mb-2 font-medium">
+        <div className="p-12 text-center border border-dashed border-line-strong rounded">
+          <p className="text-fg mb-1 font-medium">
             Your pipeline is empty
           </p>
-          <p className="text-sm text-slate-400">
-            Use <span className="font-semibold text-indigo-600">Search Businesses</span> or{' '}
-            <span className="font-semibold text-indigo-600">Add Manually</span> to get started
+          <p className="text-sm text-fg-subtle">
+            Use <span className="font-medium text-fg-muted">Search</span> or{' '}
+            <span className="font-medium text-fg-muted">Add manually</span> to get started
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div>
           {/* Tabs */}
-          <div className="border-b border-slate-200 bg-slate-50">
-            <div className="flex overflow-x-auto">
+          <div className="border-b border-line">
+            <div className="flex gap-6 overflow-x-auto" role="tablist" aria-label="Pipeline stages">
               {PIPELINE_STATUSES.map((status) => {
                 const count = getTabCount(status);
                 const isActive = activeTab === status;
                 return (
                   <button
                     key={status}
+                    role="tab"
+                    aria-selected={isActive}
                     onClick={() => setActiveTab(status)}
-                    className={`relative px-6 py-4 text-sm font-medium transition-all whitespace-nowrap ${
+                    className={`relative -mb-px flex items-center gap-2 pt-1 pb-2.5 text-sm font-medium whitespace-nowrap border-b transition-colors ${
                       isActive
-                        ? 'text-indigo-700 bg-white border-b-2 border-indigo-600'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                        ? 'text-fg border-fg'
+                        : 'text-fg-muted border-transparent hover:text-fg'
                     }`}
                   >
-                    <span className="flex items-center gap-2">
-                      {status}
-                      {count > 0 && (
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                            isActive
-                              ? 'bg-indigo-100 text-indigo-700'
-                              : 'bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {count}
-                        </span>
-                      )}
+                    {status}
+                    <span className="min-w-[18px] px-1 rounded-sm bg-raised text-2xs tabular-nums text-fg-subtle">
+                      {count}
                     </span>
                   </button>
                 );
@@ -274,34 +263,34 @@ const PipelineBoard: React.FC = () => {
           </div>
 
           {/* Content */}
-          <div className="p-6">
+          <div className="pt-4">
             {/* Tab Description + Select All */}
-            <div className="mb-6 pb-4 border-b border-slate-100 flex items-center justify-between">
-              <p className="text-sm text-slate-600">
+            <div className="mb-3.5 flex items-center justify-between gap-3">
+              <p className="text-sm text-fg-muted">
                 {statusDescriptions[activeTab]}
               </p>
               {activeAgencies.length > 0 && (
                 <button
                   onClick={selectAllInTab}
-                  className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors"
+                  className="flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg-muted border border-line-strong rounded hover:text-fg hover:bg-subtle transition-colors"
                 >
-                  <CheckSquare size={14} />
+                  <CheckSquare size={13} />
                   {activeAgencies.every((a) => selectedIds.has(a.id))
-                    ? 'Deselect All'
-                    : 'Select All'}
+                    ? 'Deselect all'
+                    : 'Select all'}
                 </button>
               )}
             </div>
 
             {/* Cards Grid */}
             {activeAgencies.length === 0 ? (
-              <div className="py-12 text-center">
-                <p className="text-slate-400 text-sm">
-                  No businesses in <span className="font-medium text-slate-600">{activeTab}</span> yet
+              <div className="py-12 text-center border border-dashed border-line rounded">
+                <p className="text-fg-subtle text-sm">
+                  No businesses in <span className="font-medium text-fg-muted">{activeTab}</span> yet
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
                 {activeAgencies.map((agency) => (
                   <PipelineCard
                     key={agency.id}
@@ -329,30 +318,31 @@ const PipelineBoard: React.FC = () => {
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
           >
-            <div className="flex items-center gap-3 px-5 py-3 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700">
-              <span className="text-sm font-semibold whitespace-nowrap">
+            <div className="flex items-center gap-2 pl-4 pr-2 py-2 bg-raised text-fg rounded-lg border border-line-strong shadow-popover">
+              <span className="text-sm font-medium tabular-nums whitespace-nowrap">
                 {selectedIds.size} selected
               </span>
 
-              <div className="w-px h-6 bg-slate-700" />
+              <div className="w-px h-5 bg-line-strong mx-1" />
 
               {/* Move Stage */}
               <div className="relative">
                 <button
                   onClick={() => setStageMenuOpen(!stageMenuOpen)}
                   disabled={bulkLoading}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50"
+                  aria-expanded={stageMenuOpen}
+                  className={toolbarButton}
                 >
-                  <ArrowRightLeft size={14} />
+                  <ArrowRightLeft size={13} />
                   Move
                 </button>
                 {stageMenuOpen && (
-                  <div className="absolute bottom-full mb-2 left-0 bg-white border border-slate-200 rounded-xl shadow-xl py-1 min-w-[180px]">
+                  <div className="absolute bottom-full mb-2 left-0 bg-raised border border-line-strong rounded-lg py-1 min-w-[180px] shadow-popover">
                     {PIPELINE_STATUSES.map((status) => (
                       <button
                         key={status}
                         onClick={() => handleBulkStatusChange(status)}
-                        className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                        className="w-full text-left px-3 py-1.5 text-sm text-fg-muted hover:bg-subtle hover:text-fg transition-colors"
                       >
                         {status}
                       </button>
@@ -365,19 +355,19 @@ const PipelineBoard: React.FC = () => {
               <button
                 onClick={handleBulkGenerateEmails}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-50"
+                className={toolbarButton}
               >
-                {bulkLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                AI Drafts
+                {bulkLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                AI drafts
               </button>
 
               {/* Export CSV */}
               <button
                 onClick={handleExportCsv}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors disabled:opacity-50"
+                className={toolbarButton}
               >
-                <Download size={14} />
+                <Download size={13} />
                 CSV
               </button>
 
@@ -385,21 +375,21 @@ const PipelineBoard: React.FC = () => {
               <button
                 onClick={handleBulkDelete}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-danger border border-danger/30 rounded hover:bg-danger/10 transition-colors disabled:opacity-50"
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} />
                 Delete
               </button>
 
-              <div className="w-px h-6 bg-slate-700" />
+              <div className="w-px h-5 bg-line-strong mx-1" />
 
               {/* Clear */}
               <button
                 onClick={clearSelection}
-                className="p-2 text-slate-400 hover:text-white transition-colors"
+                className="grid size-control-sm place-content-center rounded text-fg-subtle hover:text-fg hover:bg-subtle transition-colors"
                 aria-label="Clear selection"
               >
-                <X size={16} />
+                <X size={14} />
               </button>
             </div>
           </motion.div>

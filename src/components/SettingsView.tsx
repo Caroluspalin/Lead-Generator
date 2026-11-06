@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Save, UserCircle2 } from 'lucide-react';
+import { AlertTriangle, Loader2, Save, UserCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SenderProfile, SenderProfileInput } from '../types/agency';
 import { apiFetch } from '../lib/api';
@@ -13,7 +13,8 @@ const EMPTY: SenderProfileInput = {
 };
 
 const inputClass =
-  'w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors';
+  'w-full h-control text-sm bg-canvas border border-line-strong rounded px-3 text-fg transition-colors';
+const labelClass = 'block text-2xs font-medium text-fg-muted mb-1.5';
 
 const SettingsView: React.FC = () => {
   const [form, setForm] = useState<SenderProfileInput>(EMPTY);
@@ -74,81 +75,85 @@ const SettingsView: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="animate-spin text-slate-400" />
+      <div role="status" className="flex items-center justify-center py-24">
+        <Loader2 size={20} className="animate-spin text-fg-subtle" />
       </div>
     );
   }
 
   return (
     <div className="max-w-2xl">
-      <div className="mb-6 flex items-center gap-3">
-        <div className="p-2 bg-indigo-100 rounded-lg">
-          <UserCircle2 size={20} className="text-indigo-600" />
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">Sender profile</h2>
-          <p className="text-sm text-slate-500">
-            Used in AI emails and call scripts. The email signature is built from these fields.
-          </p>
-        </div>
-      </div>
+      <header className="mb-5">
+        <h1 className="text-xl font-semibold tracking-tight text-fg">Settings</h1>
+        <p className="text-sm text-fg-subtle mt-0.5">
+          Your sender profile is used in AI emails and call scripts. The email signature is built from these fields.
+        </p>
+      </header>
 
       {!exists && (
-        <div className="mb-4 p-4 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-800">
+        <div role="status" className="mb-4 px-3 py-2 rounded border border-warning/30 bg-warning/10 text-sm text-fg flex items-center gap-2">
+          <AlertTriangle size={14} className="shrink-0 text-warning" />
           Fill in your sender profile before generating email drafts or call scripts.
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
-            Name *
-          </label>
-          <input value={form.name} onChange={update('name')} maxLength={100} className={inputClass} placeholder="Matti Meikäläinen" />
+      <form onSubmit={handleSubmit} className="bg-surface rounded border border-line">
+        <div className="flex items-center gap-2 px-card py-3 border-b border-line">
+          <UserCircle2 size={15} className="text-fg-muted" />
+          <h2 className="text-sm font-semibold text-fg">Sender profile</h2>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
-            Short intro *
-          </label>
-          <input
-            value={form.short_intro}
-            onChange={update('short_intro')}
-            maxLength={200}
-            className={inputClass}
-            placeholder="teen nettisivuja paikallisille yrityksille Espoossa"
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            One sentence in Finnish, used as "who I am" in the first line of emails and calls.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="p-card space-y-3.5">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
-              Company
+            <label htmlFor="sender-name" className={labelClass}>
+              Name *
             </label>
-            <input value={form.company_name ?? ''} onChange={update('company_name')} maxLength={100} className={inputClass} />
+            <input id="sender-name" value={form.name} onChange={update('name')} maxLength={100} className={inputClass} placeholder="Matti Meikäläinen" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
-              Phone
+            <label htmlFor="sender-intro" className={labelClass}>
+              Short intro *
             </label>
-            <input value={form.phone ?? ''} onChange={update('phone')} maxLength={40} className={inputClass} />
+            <input
+              id="sender-intro"
+              value={form.short_intro}
+              onChange={update('short_intro')}
+              maxLength={200}
+              className={inputClass}
+              placeholder="teen nettisivuja paikallisille yrityksille Espoossa"
+              aria-describedby="sender-intro-help"
+            />
+            <p id="sender-intro-help" className="mt-1 text-xs text-fg-subtle">
+              One sentence in Finnish, used as "who I am" in the first line of emails and calls.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label htmlFor="sender-company" className={labelClass}>
+                Company
+              </label>
+              <input id="sender-company" value={form.company_name ?? ''} onChange={update('company_name')} maxLength={100} className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="sender-phone" className={labelClass}>
+                Phone
+              </label>
+              <input id="sender-phone" value={form.phone ?? ''} onChange={update('phone')} maxLength={40} className={inputClass} />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="sender-website" className={labelClass}>
+              Portfolio website
+            </label>
+            <input id="sender-website" value={form.website ?? ''} onChange={update('website')} maxLength={200} className={inputClass} placeholder="https://..." />
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
-            Portfolio website
-          </label>
-          <input value={form.website ?? ''} onChange={update('website')} maxLength={200} className={inputClass} placeholder="https://..." />
-        </div>
-        <div className="flex justify-end">
+        <div className="flex justify-end px-card py-3 border-t border-line">
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-xl shadow-sm shadow-indigo-200 transition-colors disabled:opacity-60"
+            className="inline-flex items-center gap-2 h-control px-4 bg-accent hover:bg-accent-hover text-accent-fg text-sm font-medium rounded transition-colors disabled:opacity-60"
           >
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             Save
           </button>
         </div>

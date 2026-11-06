@@ -69,6 +69,10 @@ const AddBusinessModal: React.FC<AddBusinessModalProps> = ({
     }
   };
 
+  const inputClass =
+    'w-full h-control rounded border border-line-strong bg-canvas px-3 text-sm text-fg transition-colors';
+  const labelClass = 'mb-1.5 block text-2xs font-medium text-fg-muted';
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -78,133 +82,145 @@ const AddBusinessModal: React.FC<AddBusinessModalProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-50 bg-backdrop/70"
           />
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-business-title"
+            initial={{ opacity: 0, scale: 0.98, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed inset-4 z-50 m-auto w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+            exit={{ opacity: 0, scale: 0.98, y: 8 }}
+            className="fixed inset-4 z-50 m-auto w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-line-strong bg-surface shadow-overlay"
             style={{ height: 'fit-content' }}
           >
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-900">
-                Add Business Manually
+            <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
+              <h2 id="add-business-title" className="text-base font-semibold text-fg">
+                Add business manually
               </h2>
               <button
                 onClick={onClose}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close"
+                className="grid size-control-sm place-content-center rounded text-fg-subtle hover:bg-raised hover:text-fg transition-colors"
               >
-                <X size={20} />
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3.5 p-5">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Business Name *
+                <label htmlFor="add-name" className={labelClass}>
+                  Business name *
                 </label>
                 <input
+                  id="add-name"
                   type="text"
                   value={formData.name}
                   onChange={(e) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                  className={inputClass}
                   required
                 />
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="add-city" className={labelClass}>
                   City *
                 </label>
                 <input
+                  id="add-city"
                   type="text"
                   value={formData.city}
                   onChange={(e) =>
                     setFormData({ ...formData, city: e.target.value })
                   }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                  className={inputClass}
                   required
                 />
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="add-address" className={labelClass}>
                   Address
                 </label>
                 <input
+                  id="add-address"
                   type="text"
                   value={formData.address}
                   onChange={(e) =>
                     setFormData({ ...formData, address: e.target.value })
                   }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                  className={inputClass}
                 />
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Phone
-                </label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) =>
-                    setFormData({ ...formData, phone: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="add-phone" className={labelClass}>
+                    Phone
+                  </label>
+                  <input
+                    id="add-phone"
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) =>
+                      setFormData({ ...formData, phone: e.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="add-status" className={labelClass}>
+                    Website status
+                  </label>
+                  <select
+                    id="add-status"
+                    value={formData.website_status}
+                    onChange={(e) =>
+                      setFormData({ ...formData, website_status: e.target.value })
+                    }
+                    className={inputClass}
+                  >
+                    {statusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="add-website" className={labelClass}>
                   Website
                 </label>
                 <input
+                  id="add-website"
                   type="url"
                   value={formData.website}
                   onChange={(e) =>
                     setFormData({ ...formData, website: e.target.value })
                   }
                   placeholder="www.example.com"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                  className={inputClass}
                 />
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Website Status
-                </label>
-                <select
-                  value={formData.website_status}
-                  onChange={(e) =>
-                    setFormData({ ...formData, website_status: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                >
-                  {statusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex gap-3 pt-2">
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  className="h-control rounded border border-line-strong px-3.5 text-sm font-medium text-fg transition-colors hover:bg-raised"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+                  className="h-control rounded bg-accent px-3.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover"
                 >
-                  Add to Pipeline
+                  Add to pipeline
                 </button>
               </div>
             </form>

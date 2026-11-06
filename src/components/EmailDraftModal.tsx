@@ -182,6 +182,12 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
     }
   };
 
+  const fieldClass =
+    'w-full text-sm bg-canvas border border-line-strong rounded px-3 text-fg transition-colors';
+  const labelClass = 'block text-2xs font-medium text-fg-muted mb-1.5';
+  const secondaryButton =
+    'inline-flex items-center justify-center gap-2 h-control px-3 text-sm font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors whitespace-nowrap disabled:opacity-60';
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -191,50 +197,47 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-backdrop/70"
             onClick={onClose}
           />
 
           {/* Modal */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="email-draft-title"
+            initial={{ opacity: 0, scale: 0.98, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            exit={{ opacity: 0, scale: 0.98, y: 8 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-2xl max-h-[94vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            className="relative w-full max-w-2xl max-h-[94vh] flex flex-col bg-surface rounded-lg border border-line-strong shadow-overlay overflow-hidden"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-purple-50 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-100 rounded-lg">
-                  <Sparkles size={18} className="text-indigo-600" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    AI Email Draft
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-line shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Sparkles size={16} className="shrink-0 text-fg-muted" />
+                <div className="min-w-0">
+                  <h3 id="email-draft-title" className="text-base font-semibold text-fg">
+                    AI email draft
                   </h3>
-                  <p className="text-xs text-slate-500">{agency.name}</p>
+                  <p className="text-xs text-fg-subtle truncate">{agency.name}</p>
                 </div>
               </div>
               <button
                 onClick={onClose}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                aria-label="Close"
+                className="grid size-control-sm shrink-0 place-content-center rounded text-fg-subtle hover:text-fg hover:bg-raised transition-colors"
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
 
             {/* Body */}
-            <div className="px-6 py-5 space-y-4 flex-1 min-h-0 overflow-y-auto">
+            <div className="px-5 py-4 space-y-3.5 flex-1 min-h-0 overflow-y-auto">
               {loading ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
-                  <div className="relative">
-                    <Sparkles
-                      size={32}
-                      className="text-indigo-500 animate-pulse"
-                    />
-                  </div>
-                  <p className="text-sm font-medium text-indigo-600 animate-pulse">
+                <div role="status" className="flex flex-col items-center justify-center py-16 gap-3">
+                  <Loader2 size={20} className="text-fg-subtle animate-spin" />
+                  <p className="text-sm text-fg-muted">
                     {loadingPhase === 'scan'
                       ? 'Analyzing website for personalization...'
                       : 'AI is writing...'}
@@ -242,10 +245,10 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                 </div>
               ) : error ? (
                 <div className="py-8 text-center">
-                  <p className="text-sm text-red-600 mb-3">{error}</p>
+                  <p role="alert" className="text-sm text-danger mb-3">{error}</p>
                   <button
                     onClick={() => fetchDraft()}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                    className={secondaryButton}
                   >
                     <RefreshCw size={14} />
                     Try again
@@ -255,36 +258,38 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                 <>
                   {/* Subject */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
+                    <label htmlFor="email-subject" className={labelClass}>
                       Subject
                     </label>
                     <input
+                      id="email-subject"
                       type="text"
                       value={draft.subject}
                       onChange={(e) =>
                         setDraft({ ...draft, subject: e.target.value })
                       }
-                      className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors"
+                      className={`${fieldClass} h-control font-medium`}
                     />
                   </div>
 
                   {/* Body */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">
-                      Email Body
+                    <label htmlFor="email-body" className={labelClass}>
+                      Body
                     </label>
                     <textarea
+                      id="email-body"
                       ref={textareaRef}
                       value={draft.body}
                       onChange={(e) =>
                         setDraft({ ...draft, body: e.target.value })
                       }
                       rows={10}
-                      className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-3 text-slate-700 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors leading-relaxed"
+                      className={`${fieldClass} py-2.5 resize-y leading-relaxed`}
                     />
                   </div>
 
-                  <p className="text-xs text-slate-400 text-right">
+                  <p className="text-2xs text-fg-subtle text-right">
                     Model: {draft.model}
                   </p>
                 </>
@@ -293,7 +298,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
 
             {/* Footer — Iterate & Actions */}
             {!loading && draft && (
-              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 space-y-3 shrink-0">
+              <div className="px-5 py-3.5 border-t border-line bg-canvas space-y-2.5 shrink-0">
                 {/* Instruction + Regenerate */}
                 <div className="flex gap-2">
                   <input
@@ -303,34 +308,16 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleRegenerate();
                     }}
+                    aria-label="Instruction for regenerating"
                     placeholder="E.g. make it shorter or more casual..."
-                    className="flex-1 text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-colors"
+                    className={`${fieldClass} h-control flex-1 bg-surface`}
                   />
                   <button
                     onClick={handleRegenerate}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-indigo-700 bg-indigo-100 hover:bg-indigo-200 rounded-lg transition-colors whitespace-nowrap"
+                    className={secondaryButton}
                   >
                     <RefreshCw size={14} />
                     Regenerate
-                  </button>
-                </div>
-
-                {/* Copy & Send */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleCopy}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm shadow-indigo-200"
-                  >
-                    <Copy size={14} />
-                    Copy
-                  </button>
-                  <button
-                    onClick={handleSend}
-                    disabled={sending || !recipientEmail}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm shadow-emerald-200"
-                  >
-                    {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                    Send
                   </button>
                 </div>
 
@@ -338,7 +325,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                   <button
                     onClick={addDemoLink}
                     disabled={addingLink}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors disabled:opacity-60"
+                    className={`${secondaryButton} w-full`}
                   >
                     {addingLink ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
                     Add demo link to this draft
@@ -347,15 +334,15 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
 
                 {/* Piilotetaan kun vastaanottaja on kirjoitettu käsin */}
                 {!agency.email && !recipientEmail.trim() && (
-                  <div role="status" className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
-                    <AlertTriangle size={16} className="shrink-0" />
+                  <div role="status" className="flex flex-wrap items-center gap-2 px-3 py-2 rounded border border-warning/30 bg-warning/10 text-sm text-fg">
+                    <AlertTriangle size={14} className="shrink-0 text-warning" />
                     <span className="flex-1 min-w-[12rem]">
                       No email address found for this lead. Enter it below, use Find email on the card, or call instead.
                     </span>
                     {onOpenCallScript && (
                       <button
                         onClick={onOpenCallScript}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors"
+                        className="inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong hover:bg-raised rounded transition-colors"
                       >
                         <PhoneCall size={13} />
                         Call script
@@ -364,14 +351,32 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                   </div>
                 )}
 
-                {/* Recipient */}
-                <input
-                  type="email"
-                  value={recipientEmail}
-                  onChange={(e) => setRecipientEmail(e.target.value)}
-                  placeholder="Recipient email (e.g. info@yritys.fi)"
-                  className="w-full text-sm border-2 border-slate-200 rounded-lg px-4 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-500 transition-colors"
-                />
+                {/* Recipient + Copy & Send */}
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={recipientEmail}
+                    onChange={(e) => setRecipientEmail(e.target.value)}
+                    aria-label="Recipient email"
+                    placeholder="Recipient email (e.g. info@yritys.fi)"
+                    className={`${fieldClass} h-control flex-1 bg-surface`}
+                  />
+                  <button
+                    onClick={handleCopy}
+                    className={secondaryButton}
+                  >
+                    <Copy size={14} />
+                    Copy
+                  </button>
+                  <button
+                    onClick={handleSend}
+                    disabled={sending || !recipientEmail}
+                    className="inline-flex items-center justify-center gap-2 h-control px-4 text-sm font-medium text-accent-fg bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors"
+                  >
+                    {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Send
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>

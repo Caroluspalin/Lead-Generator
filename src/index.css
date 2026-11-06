@@ -1,3 +1,89 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Design tokens. Values are RGB channels so Tailwind opacity modifiers work (bg-danger/10).
+ * Mapped to semantic names in tailwind.config.js; components use only those names.
+ * Contrast (WCAG AA): fg-muted and fg-subtle are >= 4.5:1 on canvas, surface and raised.
+ */
+:root {
+  color-scheme: dark;
+
+  --color-canvas: 10 10 10;
+  --color-surface: 15 15 15;
+  --color-subtle: 20 20 20;
+  --color-raised: 24 24 24;
+  --color-line: 35 35 35;
+  --color-line-strong: 48 48 48;
+
+  --color-fg: 237 237 237;
+  --color-fg-muted: 161 161 161;
+  --color-fg-subtle: 138 138 138;
+
+  --color-accent: 237 237 237;
+  --color-accent-hover: 255 255 255;
+  --color-accent-fg: 10 10 10;
+  --color-focus: 237 237 237;
+
+  /* Merkitykselliset värit: liidin score ja verkkosivun tila */
+  --color-success: 76 195 138;
+  --color-danger: 240 113 113;
+  --color-warning: 217 165 63;
+
+  --color-score-hot: 76 195 138;
+  --color-score-good: 165 200 90;
+  --color-score-fair: 217 165 63;
+  --color-score-low: 139 141 147;
+
+  --color-status-none: 240 113 113;
+  --color-status-broken: 238 140 77;
+  --color-status-insecure: 217 165 63;
+  --color-status-mobile: 205 183 84;
+  --color-status-unknown: 139 141 147;
+  --color-status-ok: 76 195 138;
+
+  --shadow-overlay: 0 16px 48px rgb(0 0 0 / 0.6);
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.5);
+  --color-backdrop: 0 0 0;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+
+  --size-control: 32px;
+  --size-control-sm: 28px;
+  --space-page-x: 28px;
+  --space-page-y: 22px;
+  --space-card: 14px;
+  --space-cell-x: 12px;
+  --space-cell-y: 9px;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas text-fg text-sm antialiased;
+  }
+
+  ::placeholder {
+    color: rgb(var(--color-fg-subtle));
+    opacity: 1;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-focus));
+    outline-offset: 2px;
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 1px solid rgb(var(--color-fg-muted));
+    outline-offset: 0;
+    border-color: rgb(var(--color-fg-muted));
+  }
+
+  input[type='checkbox'] {
+    accent-color: rgb(var(--color-accent));
+  }
+}
