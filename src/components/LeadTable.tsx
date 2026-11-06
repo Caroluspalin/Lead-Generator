@@ -62,7 +62,7 @@ const compareLeads = (a: Agency, b: Agency, key: SortKey, dir: SortDir): number 
   return primary !== 0 ? primary : (b.lead_score ?? -1) - (a.lead_score ?? -1);
 };
 
-const headerCell = 'px-6 py-4 font-semibold text-xs text-slate-500 uppercase tracking-wider';
+const headerCell = 'px-4 py-4 font-semibold text-xs text-slate-500 uppercase tracking-wider';
 
 const SortableHeader: React.FC<{
   label: string;
@@ -92,26 +92,26 @@ const SortableHeader: React.FC<{
 
 const SkeletonRow: React.FC = () => (
   <tr className="animate-pulse">
-    <td className="px-6 py-4">
+    <td className="px-4 py-4">
       <div className="h-6 w-10 bg-slate-200 rounded-lg" />
     </td>
-    <td className="px-6 py-4">
+    <td className="px-4 py-4">
       <div className="h-4 w-40 bg-slate-200 rounded mb-2" />
       <div className="h-3 w-28 bg-slate-100 rounded" />
     </td>
-    <td className="px-6 py-4">
+    <td className="px-4 py-4">
       <div className="h-4 w-16 bg-slate-200 rounded" />
     </td>
-    <td className="px-6 py-4">
+    <td className="px-4 py-4">
       <div className="h-4 w-28 bg-slate-200 rounded" />
     </td>
-    <td className="px-6 py-4">
+    <td className="px-4 py-4">
       <div className="h-4 w-32 bg-slate-200 rounded" />
     </td>
-    <td className="px-6 py-4">
+    <td className="px-4 py-4">
       <div className="h-6 w-24 bg-slate-200 rounded-full" />
     </td>
-    <td className="px-6 py-4 text-right">
+    <td className="px-4 py-4 text-right">
       <div className="h-7 w-28 bg-slate-200 rounded-lg ml-auto" />
     </td>
   </tr>
@@ -194,14 +194,14 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
                 key={lead.id}
                 className={`hover:bg-slate-50/80 transition-colors group ${lead.already_saved ? 'bg-slate-50/60' : ''}`}
               >
-                <td className="px-6 py-4">
+                <td className="px-4 py-4">
                   <ScoreBadge score={lead.lead_score} />
                 </td>
 
-                <td className="px-6 py-4">
+                <td className="px-4 py-4">
                   <div className="flex flex-col">
                     <span className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-slate-900">{lead.name}</span>
+                      <span className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{lead.name}</span>
                       {lead.business_status === 'CLOSED_TEMPORARILY' && (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-slate-200 text-slate-700">
                           <PauseCircle size={10} />
@@ -209,8 +209,8 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
                         </span>
                       )}
                     </span>
-                    <span className="flex items-center gap-1 text-xs text-slate-500 mt-0.5">
-                      <MapPin size={10} /> {lead.address}
+                    <span className="flex items-center gap-1 text-xs text-slate-500 mt-0.5 [overflow-wrap:anywhere]">
+                      <MapPin size={10} className="shrink-0" /> {lead.address}
                     </span>
                     {lead.maps_url && (
                       <a
@@ -226,11 +226,11 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
                   </div>
                 </td>
 
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="px-4 py-4 whitespace-nowrap">
                   <RatingDisplay rating={lead.rating} reviewCount={lead.review_count} />
                 </td>
 
-                <td className="px-6 py-4">
+                <td className="px-4 py-4">
                   {lead.phone ? (
                      <span className="flex items-center gap-1.5 text-sm text-slate-600 whitespace-nowrap">
                         <Phone size={12} className="text-slate-400"/> {lead.phone}
@@ -240,32 +240,36 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
                   )}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-slate-500">
+                <td className="px-4 py-4 text-sm text-slate-500">
                   {lead.website ? (
                     <a
                       href={lead.website.startsWith('http') ? lead.website : `http://${lead.website}`}
                       target="_blank"
                       rel="noopener noreferrer"
+                      title={lead.website}
                       className="flex items-center gap-1 hover:text-indigo-600 hover:underline"
                     >
-                      {new URL(lead.website.startsWith('http') ? lead.website : `http://${lead.website}`).hostname.replace('www.', '')}
-                      <ExternalLink size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                      {/* Pitkä hostname ei saa levittää taulukkoa vaakavieritykseen */}
+                      <span className="truncate max-w-[8rem]">
+                        {new URL(lead.website.startsWith('http') ? lead.website : `http://${lead.website}`).hostname.replace('www.', '')}
+                      </span>
+                      <ExternalLink size={12} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </a>
                   ) : (
                     <span className="text-slate-400">-</span>
                   )}
                 </td>
 
-                <td className="px-6 py-4">
+                <td className="px-4 py-4">
                   <StatusBadge status={lead.website_status} />
                   {lead.website_issue && (
-                    <span className="block text-[11px] text-slate-500 mt-1 whitespace-nowrap">
+                    <span className="block text-[11px] text-slate-500 mt-1 max-w-[9rem]">
                       {lead.website_issue}
                     </span>
                   )}
                 </td>
 
-                <td className="px-6 py-4 text-right">
+                <td className="px-4 py-4 text-right">
                   {lead.already_saved ? (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg whitespace-nowrap">
                       <CheckCircle2 size={14} />
