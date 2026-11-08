@@ -66,7 +66,8 @@ def test_generate_email_caches_deep_scan_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.main.scrape_website_text", lambda _url: "Tarjoamme parturipalveluita.")
-    lead = make_lead(website="www.example.fi", website_status="NOT MOBILE")
+    # WEBSITE OK: vanha etusivun Deep Scan (osittain toimivat sivut: tests/test_site_content.py)
+    lead = make_lead(website="www.example.fi", website_status="WEBSITE OK")
 
     assert client_a.post(f"/leads/{lead['id']}/generate-email", json={}).status_code == 200
 

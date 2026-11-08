@@ -242,6 +242,11 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
       d ? { ...d, services: d.services.map((s, i) => (i === index ? { ...s, [key]: value } : s)) } : d,
     );
 
+  const removePrice = (index: number) =>
+    setDraft((d) =>
+      d ? { ...d, services: d.services.map((s, i) => (i === index ? { ...s, price: null } : s)) } : d,
+    );
+
   const currentTemplate = templates.find((t) => t.id === demo?.template);
 
   const labelClass = 'block text-2xs font-medium text-fg-muted';
@@ -559,6 +564,22 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                                   aria-label={`Service ${i + 1} description`}
                                   className={inputClass}
                                 />
+                                {/* Hinta tulee vain yrityksen nykyiseltä sivulta: sen voi poistaa, ei kirjoittaa */}
+                                {s.price && (
+                                  <div className="flex items-center justify-between gap-2 text-xs text-fg-muted">
+                                    <span>
+                                      Price from their site: <span className="text-fg tabular-nums">{s.price}</span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => removePrice(i)}
+                                      aria-label={`Remove price from service ${i + 1}`}
+                                      className="h-control-sm px-2 rounded hover:bg-raised hover:text-fg transition-colors"
+                                    >
+                                      Remove price
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

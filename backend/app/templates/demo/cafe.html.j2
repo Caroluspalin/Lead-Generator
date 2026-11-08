@@ -72,10 +72,10 @@
         <h2 id="valikoima-otsikko">{{ tpl.services_title }}</h2>
         <ul class="palvelut">
           {% for service in content.services %}
-          <li><h3>{{ service.name }}</h3><p>{{ service.description }}</p></li>
+          <li><h3>{{ service.name }}{% if service.price %} <span class="hinta">{{ service.price }}</span>{% endif %}</h3><p>{{ service.description }}</p></li>
           {% endfor %}
         </ul>
-        <p class="huom">{{ tpl.services_lead }} {{ content.price_note }}</p>
+        <p class="huom">{{ tpl.services_lead }} {{ content.price_note }}{% if site_prices_note %} <span class="hinnat-lahde">{{ site_prices_note }}</span>{% endif %}</p>
       </div>
     </div>
   </section>

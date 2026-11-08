@@ -18,5 +18,8 @@
   .demo-bar .short { display: none; }
 }
 
+/* "Hinnat nykyiseltä sivultanne": pieni merkintä palvelujen alla, kun hinnat ovat yrityksen omalta sivulta */
+.hinnat-lahde { font-size: 0.875em; font-style: italic; }
+
 .ohitus { position: absolute; left: 1rem; top: -4rem; z-index: 10; padding: 0.6rem 1rem; background: #111; color: #fff; }
 .ohitus:focus { top: 1rem; }

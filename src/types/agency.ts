@@ -19,6 +19,7 @@ export type NavTab = 'search' | 'pipeline' | 'dashboard' | 'history' | 'settings
 export interface DemoService {
   name: string;
   description: string;
+  price?: string | null; // vain yrityksen nykyiseltä sivulta (backend tarkistaa)
 }
 
 export interface DemoContent {
@@ -58,6 +59,7 @@ export interface DemoStoredContent extends DemoContent {
   opening_hours: string[];
   opening_periods: DemoOpeningPeriod[];
   images: DemoImages;
+  site_based: boolean; // tekstit nykyisen sivun tiedoista (sähköpostin maininta)
 }
 
 export type DemoStatus = 'draft' | 'published' | 'expired';

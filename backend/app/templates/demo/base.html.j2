@@ -86,6 +86,8 @@ section.gallery-section{padding-top:0}
 .card p{margin:0;color:var(--muted);font-size:16px}
 .icon{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary);flex:none}
 .price-note{margin:26px 0 0;font-weight:600}
+.price-note .site-prices{font-weight:400;color:var(--muted)}
+.card h3 .price{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9em}
 
 /* Tunnelmakuvat */
 .gallery{display:grid;grid-auto-flow:column;grid-auto-columns:82%;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px;-webkit-overflow-scrolling:touch}
@@ -207,13 +209,13 @@ body.has-call{padding-bottom:84px}
         <article class="card">
           <div class="icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24">{{ svg }}</svg></div>
           <div>
-            <h3>{{ service.name }}</h3>
+            <h3>{{ service.name }}{% if service.price %} <span class="price">{{ service.price }}</span>{% endif %}</h3>
             <p>{{ service.description }}</p>
           </div>
         </article>
         {% endfor %}
       </div>
-      <p class="price-note">{{ content.price_note }}</p>
+      <p class="price-note">{{ content.price_note }}{% if site_prices_note %} <span class="site-prices">{{ site_prices_note }}</span>{% endif %}</p>
     </div>
   </section>
 

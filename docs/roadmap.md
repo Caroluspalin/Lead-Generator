@@ -122,6 +122,10 @@
   - Kulmakyltin jakosääntö ja varaversio, AI-otsikoiden koko rajataan pisimmän sanan mukaan (ei vaakavieritystä pitkillä yhdyssanoilla)
   - Esikatselumodaaliin automaattinen 390 px kuvakaappaus (Playwright, valinnainen), iframe `sandbox="allow-scripts"`
   - Laatuportti `backend/scripts/demo_check.py`: 6 mock-demoa, Chromium + WebKit 320–1440 px, ilman JS:ää, kuva-arkki; Lighthouse mobiili 98–100 (SEO 58 = noindex)
+- **Phase 17**: Uudet liidit -haku ja nykyisen sivun sisältö demoon:
+  - Hakulomake: liidimäärä (oletus 20), sivun tila -suodattimet, minimipisteet, ei suljettuja, vain uudet (oletus), naapurialueet. Haku jatkaa ruudukkoa sivu kerrallaan kunnes määrä täyttyy tai MAX_SEARCH_CALLS (ennallaan 15) tulee vastaan; yhteenveto löydetyt / pyydetyt, syy ja hinta
+  - `PlaceStatus` (seen / in_pipeline / dismissed, vain place_id + tila, migraatio `cd994575ba52`); Hylkää hakutuloksissa ja pipelinessa, Asetuksissa hylättyjen lista ja palautus. Pipelinessa olevat eivät enää näy hakutuloksissa
+  - Laajennettu Deep Scan osittain toimiville sivuille (robots.txt, viive, etusivu + max 3 alasivua): palvelut, hinnat ja esittely tarkistettuina `Lead.website_facts`iin (migraatio `abdec4f1ad33`). Demo käyttää niitä ensisijaisesti; hinnat vain omalta sivulta merkinnällä "Hinnat nykyiseltä sivultanne"; kuvat edelleen Unsplashista. Sähköpostiin "Tein luonnoksen nykyisten tietojenne pohjalta"
 
 ## Seuraavaksi
 

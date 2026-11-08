@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .demo_icons import icon_svg, service_icon_names
 from .text_quality import find_forbidden_words, repeated_phrases
+from .utils.site_content import SiteFacts
 from .utils.unsplash import DemoPhoto, photo_url, unsplash_home_url, with_utm
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,9 @@ PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
 PLACE_DETAILS_FIELD_MASK = "regularOpeningHours"
 
 DEFAULT_PRICE_NOTE = "Hinnat ja ajanvaraus puhelimitse."
+# Kun hinnat ovat yrityksen omalta sivulta, huomautus ei puhu hinnoista (ne näkyvät palveluissa)
+DEFAULT_PRICE_NOTE_SITE = "Ajanvaraus puhelimitse."
+SITE_PRICES_NOTE = "Hinnat nykyiseltä sivultanne."
 TOKEN_BYTES = 32  # secrets.token_urlsafe(32) -> 43 merkkiä, 256 bittiä satunnaisuutta
 
 
@@ -73,6 +77,8 @@ class DemoTemplate:
     version: int = 1
     price_note: str = DEFAULT_PRICE_NOTE
     about_title: str = "Tietoa meistä"  # jos AI ei anna about_titlea
+    # price_note kun hinnat näkyvät; ei saa toistaa services_leadia (sama rivi v2-pohjissa)
+    price_note_site: str = DEFAULT_PRICE_NOTE_SITE
 
 
 # Värit valittu niin, että tekstin kontrasti taustaa vasten on vähintään WCAG AA (4.5:1)
@@ -82,6 +88,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
         services_title="Valikoima",
         services_lead="Päivän valikoiman näette tiskiltä.",
         price_note="Hinnat tiskillä ja puhelimitse.",
+        price_note_site="Kysykää myös muista tuotteista.",
         about_title="Meistä",
         version=2,
         # Kontrastit: tests/test_demo_v2.py laskee jokaisen paletin teksti/pinta-parit tyylit.css:stä
@@ -95,6 +102,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
         label="Hair & beauty salon",
         services_title="Palvelut",
         services_lead="Varatkaa aika puhelimitse.",
+        price_note_site="Kysykää myös muista palveluista.",
         about_title="Meistä",
         version=2,
         schemes={
@@ -106,6 +114,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
         label="Barber",
         services_title="Palvelut",
         services_lead="Varatkaa aika puhelimitse.",
+        price_note_site="Kysykää myös muista palveluista.",
         about_title="Meistä",
         version=2,
         schemes={
@@ -117,6 +126,7 @@ TEMPLATES: dict[str, DemoTemplate] = {
         label="Classic hair & beauty",
         services_title="Palvelut",
         services_lead="Varatkaa aika puhelimitse.",
+        price_note_site="Kysykää myös muista palveluista.",
         schemes={
             "rose": ColorScheme("Rose", "#fdf7f7", "#ffffff", "#2b1d21", "#5f4b52", "#9d2f55", "#ffffff", "#5b1a33", "#9d2f55", "#ffffff"),
             "sage": ColorScheme("Sage", "#f6f8f5", "#ffffff", "#1f2a22", "#4d5a50", "#3f6b4f", "#ffffff", "#24412f", "#4f7d60", "#ffffff"),
@@ -194,16 +204,27 @@ def templates_catalog() -> list[dict[str, object]]:
     ]
 
 
-def price_note_for(template: str) -> str:
-    return TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE]).price_note
+def price_note_for(template: str, has_prices: bool = False) -> str:
+    tpl = TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
+    return tpl.price_note_site if has_prices else tpl.price_note
+
+
+def is_default_price_note(template: str, note: str) -> bool:
+    return note in (price_note_for(template), price_note_for(template, has_prices=True))
 
 
 # --- Sisältöskeema ---
 
-class DemoService(BaseModel):
+class DemoAIService(BaseModel):
+    """Mallin palauttama palvelu: ei hintaa (extra=forbid hylkää sen)."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=2, max_length=60)
     description: str = Field(min_length=10, max_length=140)  # yksi lyhyt lause
+
+
+class DemoService(DemoAIService):
+    # Vain yrityksen omalta sivulta (attach_site_prices), ei koskaan mallilta
+    price: Optional[str] = Field(default=None, max_length=24)
 
 
 class DemoAIContent(BaseModel):
@@ -214,11 +235,12 @@ class DemoAIContent(BaseModel):
     # Esittelyosion otsikko (versio 2 -pohjat). Valinnainen: vanhoissa demoissa ei ole
     about_title: Optional[str] = Field(default=None, min_length=2, max_length=50)
     about: str = Field(min_length=40, max_length=700)
-    services: list[DemoService] = Field(min_length=3, max_length=6)
+    services: list[DemoAIService] = Field(min_length=3, max_length=6)
 
 
 class DemoContent(DemoAIContent):
     """Tallennettu ja käyttäjän muokattavissa oleva sisältö."""
+    services: list[DemoService] = Field(min_length=3, max_length=6)  # type: ignore[assignment]
     price_note: str = Field(default=DEFAULT_PRICE_NOTE, min_length=5, max_length=120)
 
 
@@ -242,6 +264,8 @@ class DemoStoredContent(DemoContent):
     # Samasta vastauksesta (sama field mask): koneluettavat ajat aukiolo.js:lle. Tyhjä vanhoissa demoissa
     opening_periods: list[OpeningPeriod] = Field(default_factory=list, max_length=28)
     images: DemoImages = Field(default_factory=DemoImages)
+    # Sisältö kirjoitettu yrityksen nykyisen sivun tietojen pohjalta (sähköpostin maininta)
+    site_based: bool = False
 
 
 # Keksityt faktat: arvostelut, palkinnot, historia, sitaatit (label, regex)
@@ -435,16 +459,59 @@ SÄÄNNÖT:
 - Selkeä, rauhallinen ja asiallinen sävy. Lyhyet lauseet."""
 
 
-def build_demo_prompt(*, name: str, city: str, primary_type: Optional[str], website_context: Optional[str]) -> str:
+def build_demo_prompt(
+    *,
+    name: str,
+    city: str,
+    primary_type: Optional[str],
+    website_context: Optional[str],
+    site_facts: Optional[SiteFacts] = None,
+) -> str:
     parts = [
         f"Yritys: {name}",
         f"Kaupunki: {city}",
         f"Toimiala (Googlen luokka englanniksi): {primary_type or 'ei tiedossa'}",
     ]
+    if site_facts and site_facts.services:
+        # Hintoja ei anneta mallille: ne liitetään koodissa, jotta malli ei voi muuttaa niitä
+        names = "\n".join(f"- {s.name}" for s in site_facts.services[:12])
+        parts.append(
+            "\nPALVELUT YRITYKSEN OMALTA SIVULTA (ensisijainen lähde): valitse näistä 3-6 tärkeintä ja käytä "
+            f"palvelun nimeä TÄSMÄLLEEN kuten alla. Kirjoita kuvaus itse.\n{names}"
+        )
+    if site_facts and site_facts.about:
+        parts.append(f"\nESITTELY YRITYKSEN OMALTA SIVULTA (ensisijainen lähde aboutille, tiivistä omin sanoin):\n{site_facts.about}")
     if website_context:
         parts.append(f"\nVERKKOSIVUN SISÄLTÖ (yrityksen nykyiseltä sivulta):\n{website_context}")
     parts.append("\nKirjoita sivun sisältö JSON-muodossa.")
     return "\n".join(parts)
+
+
+def _service_key(name: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", name).casefold().split())
+
+
+def attach_site_prices(services: list[DemoAIService], facts: Optional[SiteFacts]) -> list[DemoService]:
+    """Hinta palvelulle vain jos sama palvelu (nimi) löytyi hinnan kanssa yrityksen omalta sivulta."""
+    if facts is None or not facts.has_prices:
+        return [DemoService(**s.model_dump(exclude={"price"})) for s in services]
+    priced = [(_service_key(f.name), f.price) for f in facts.services if f.price]
+    out: list[DemoService] = []
+    for service in services:
+        key = _service_key(service.name)
+        price = next((p for k, p in priced if k == key), None)
+        if price is None:
+            # "Hiustenleikkaus" ~ "Hiustenleikkaus (lyhyet hiukset)": toinen sisältää toisen, ja yksiselitteisesti
+            partial = [p for k, p in priced if min(len(k), len(key)) >= 5 and (k in key or key in k)]
+            price = partial[0] if len(partial) == 1 else None
+        out.append(DemoService(**service.model_dump(exclude={"price"}), price=price))
+    return out
+
+
+def site_prices_allowed(services: list[DemoService], facts: Optional[SiteFacts]) -> bool:
+    """Käyttäjän muokkaus saa poistaa hinnan, mutta ei kirjoittaa sellaista, jota sivulla ei ollut."""
+    allowed = {f.price for f in facts.services if f.price} if facts else set()
+    return all(s.price is None or s.price in allowed for s in services)
 
 
 def retry_prompt(original: str, problems: list[str]) -> str:
@@ -918,6 +985,10 @@ def longest_segment(name: str) -> int:
     return max(2, min(30, max((len(seg) for seg in parts), default=2)))
 
 
+def site_prices_note(content: DemoContent) -> Optional[str]:
+    return SITE_PRICES_NOTE if any(s.price for s in content.services) else None
+
+
 def banner_text(business: DemoBusiness, sender: DemoSender) -> str:
     return f"Tämä on luonnos, jonka {sender.name} teki yritykselle {business.name}. Ei yrityksen virallinen sivu."
 
@@ -946,6 +1017,7 @@ def render_demo_html(
         font_face_css=font_face_css(template),
         content=content,
         services=[(s, icon_svg(name)) for s, name in zip(content.services, icons)],
+        site_prices_note=site_prices_note(content),
         icon=icon_svg,
         hero_image=_image_view(images.hero, (640, 1080, 1600, 2200), utm_app) if images.hero else None,
         mood_images=[_image_view(p, (480, 800, 1200), utm_app) for p in images.mood],
@@ -998,6 +1070,7 @@ def _render_v2(
         theme_color=scheme.theme,
         tpl=tpl,
         content=content,
+        site_prices_note=site_prices_note(content),
         about_title=content.about_title or tpl.about_title,
         asset=asset,
         hero_image=_image_view(images.hero, hero_widths, utm_app, hero_ratio) if images.hero else None,

@@ -36,6 +36,8 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | website_issue | str? | Lyhyt syy, esim. "SSL certificate expired", "HTTP 500", "parked domain", "DNS not resolving" |
 | website_context | str? | Deep Scan: skraapattu verkkosivun leipäteksti (max 2000 merkkiä) |
 | scraped_at | datetime? | Deep Scan: milloin verkkosivun teksti haettiin |
+| website_facts | str? (JSON) | Laajennettu Deep Scan (`SiteFacts`): palvelut, hinnat ja esittely yrityksen omalta sivulta, tarkistettu sivujen tekstiä vasten. Tyhjä JSON = skannattu ilman käyttökelpoista sisältöä (ei skannata uudelleen) |
+| website_facts_at | datetime? | Milloin laajennettu Deep Scan tehtiin |
 | email | str? | Vain yrityksen sivustolta oikeasti löytynyt osoite (ei arvailua) tai käsin PATCHilla asetettu |
 | email_source | str? | Mistä löytyi, esim. "mailto on /yhteystiedot", "obfuscated on /" |
 | do_not_contact | bool | Oletus false (server_default). true estää draftin, puhelinskriptin ja lähetyksen (409) |
@@ -50,6 +52,20 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | notes | str? | |
 | created_at | datetime | |
 | updated_at | datetime | |
+
+### PlaceStatus
+
+Käyttäjän tila Google-paikalle. Vain `place_id` ja tila: Googlen ehdot sallivat place_id:n pysyvän tallennuksen, muuta Places-sisältöä ei tallenneta tähän tauluun (nimiä ei ole, Asetusten hylättyjen listassa on Google Maps -linkki).
+
+| Kentta | Tyyppi | Huom |
+|---|---|---|
+| id | int, PK, auto | |
+| user_id | str, index | Omistaja; uniikki (user_id, place_id) |
+| place_id | str | Googlen place id (dev-mockissa `dev-…`; käsin lisätyillä `manual-…` ei tilaa) |
+| status | str | `seen` (näytetty hakutuloksissa) / `in_pipeline` (`POST /leads`) / `dismissed` (Hylkää, pysyvä) |
+| updated_at | datetime | |
+
+Siirtymät: hakutulokset → `seen` (ei koskaan alenna in_pipeline/dismissed), `POST /leads` → `in_pipeline`, liidin poisto → `seen`, Hylkää → `dismissed` (pipelinessa myös liidi ja demo poistetaan), palautus → rivi poistetaan (paikka on taas uusi). Migraatio `cd994575ba52` merkitsee olemassa olevat Places-liidit `in_pipeline`.
 
 ### SearchHistoryEntry
 
@@ -112,7 +128,10 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 
 | Metodi | Polku | Tarkoitus |
 |---|---|---|
-| GET | `/search?business_type=X&city=Y` | Mukautuva grid-haku Places API (New):lla (mock dev-modessa). Palauttaa `{results, usage}`: `results` `lead_score`-järjestyksessä (paras ensin), jokaisella `already_saved: bool` ja `website_issue`; `usage` = `api_calls`, `geocode_calls`, `text_search_calls`, `estimated_cost_usd` (listahinta) |
+| GET | `/search?business_type=X&city=Y&count=20&status=…&min_score=0&exclude_closed=false&only_new=true&expand_neighbors=false` | "Uudet liidit": mukautuva grid-haku Places API (New):lla sivu kerrallaan, kunnes `count` (1–100) suodattimet täyttävää uutta liidiä löytyy tai MAX_SEARCH_CALLS täyttyy (mock dev-modessa). `status` toistettava: `no_website`, `broken`, `insecure`, `not_mobile` (myös INSECURE ilman viewportia), `social_only`; tyhjä = kaikki. Pipelinessa ja hylätyt suodatetaan aina pois, nähdyt jos `only_new`. `expand_neighbors`: kaupungin ruudukon jälkeen 8 samankokoista ruutua ympäriltä samaan kutsurajaan. Palauttaa `{results, usage, summary}`: `results` `lead_score`-järjestyksessä, `city` osoitteen kunnasta; `summary` = requested, found, `stop_reason` (target_reached / call_limit / area_exhausted), ohitetut (in_pipeline, dismissed, seen), filtered_out, searched_neighbors. Palautetut merkitään `seen` |
+| POST | `/places/{place_id}/dismiss` | Hylkää pysyvästi (`dismissed`). Jos paikka on pipelinessa, liidi ja demo poistetaan (julkaistu demo otetaan ensin pois). 422 käsin lisätyille (`manual-`) |
+| DELETE | `/places/{place_id}/dismiss` | Palauta hylätty (rivi poistetaan → näkyy taas uutena). 404 jos ei hylätty (myös toisen käyttäjän) |
+| GET | `/places/dismissed` | Hylätyt: `place_id`, `maps_url` (Google Maps place_id-linkki), `dismissed_at` |
 | POST | `/leads` | Tallenna liidi kantaan (Places-kentät mukaan, `lead_score` lasketaan serverissä). Jos sivu toimii (WEBSITE OK / NOT MOBILE / INSECURE), sähköpostihaku käynnistyy taustalla vastauksen jälkeen |
 | POST | `/leads/{lead_id}/find-email` | Hae sähköposti heti liidin sivustolta (422 jos sivu ei toimi). Palauttaa päivitetyn liidin; `email` null = ei löytynyt |
 | GET | `/leads` | Hae kaikki tallennetut liidit |
@@ -144,6 +163,7 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 - **Hinta-arvio** (Googlen hinnasto 11/2026, 0–100k-taso): Text Search Enterprise $35 / 1000 (1000 ilmaista/kk), Geocoding $5 / 1000 (10 000 ilmaista/kk). Pahin tapaus per haku = 1 Geocoding + 14 Text Search = ~$0.50. Kauniainen (parturi): vanha 3x3-grid 10 kutsua ≈ $0.32 → mukautuva 3 kutsua ≈ $0.075. Dokumentaatio ei kerro erikseen sivutuksen laskutusta — arvio olettaa jokaisen sivun omaksi pyynnökseen. Hinnat: `PRICE_PER_CALL_USD` main.py:ssä; UI näyttää listahinnan ennen ilmaiskiintiötä
 - **Ei Places-sisällön välimuistia**: Googlen ehdot rajoittavat sisällön tallentamista; place id saa tallentaa pysyvästi. Places-kentät tallentuvat Lead-tauluun vain kun käyttäjä itse lisää liidin pipelineen
 - **Turvakytkin**: MAX_SEARCH_CALLS=15 — ehdoton raja Geocoding + Text Search -kutsuille per haku. Laskuri on säieturvallinen (`threading.Lock`, varaus ennen kutsua)
+- **Uudet liidit -haku**: `GooglePlacesService.iter_places()` on generaattori (sivu = yksi Text Search -kutsu), `collect_new_leads()` kuluttaa sivuja ja lopettaa heti kun määrä täyttyy, jolloin seuraavia kutsuja ei tehdä. Pois suljettuja (pipeline, hylätyt, nähdyt) ja suodattimiin mahtumattomia (`could_match`: esim. "ei sivua" -suodatin ja oikea sivu, tai paras mahdollinen pistemäärä alle minimin) ei analysoida. Sivuanalyysi 8 rinnakkaista per hakusivu. Frontendin aikaraja 180 s
 - **Blokkauksen esto**: `asyncio.to_thread()` kaikille blokkaaville kutsuille (Google API, OpenAI, SMTP)
 - **Rinnakkaisuus**: `ThreadPoolExecutor(max_workers=5)` website-analyysille; Google-alueet haetaan peräkkäin (ennustettava budjetin käyttö)
 - **Sivuanalyysi** (`app/utils/website_check.py`, `analyze_website(url) -> WebsiteCheck(status, issue)`): tavallinen selaimen User-Agent + `Accept-Language: fi`, uudelleenohjaukset seurataan, timeout 8 s + 1 uudelleenyritys. HTTPS kokeillaan ensin (moni Googlen websiteUri on http://). Tilat:
@@ -190,7 +210,9 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 - **SMTP-diagnostiikka**: `cd backend && python scripts/smtp_check.py [--quiet] [--send-test]` — yhdistää ja kirjautuu vaiheittain (debug-tuloste, AUTH-vaihe piilotettu, osoitteet maskattu), kertoo missä vaiheessa katkeaa. Ei lähetä mitään ilman `--send-test`-lippua, silloinkin vain osoitteeseen SMTP_FROM
 - **Pipeline-navigointi**: Chevron-napit (< >) dropdownin sijaan, yhden klikkauksen stage-siirto
 - **Bulk Actions**: Leijuva toolbar — Move Stage, AI Drafts, CSV Export, Delete valituille liideille (erissä, 5 kerrallaan)
-- **Deep Scan**: Verkkosivun leipätekstin scraping (requests + BeautifulSoup, 5s timeout) → teksti cachetetaan Lead.website_context -kenttään → OpenAI käyttää sitä personoitujen jäänmurtajien generointiin sähköposteihin. Vikasietoinen: jos scraping epäonnistuu, meili generoidaan ilman personointia
+- **Deep Scan**: Verkkosivun leipätekstin scraping (requests + BeautifulSoup, 5s timeout) → teksti cachetetaan Lead.website_context -kenttään → OpenAI käyttää sitä personoitujen jäänmurtajien generointiin sähköposteihin. Vikasietoinen: jos scraping epäonnistuu, meili generoidaan ilman personointia. Osittain toimiville sivuille (alla) käytetään laajennettua skannausta, joka täyttää myös website_contextin
+- **Laajennettu Deep Scan** (`app/utils/site_content.py`, BROKEN WEBSITE joka vastaa silti HTML:llä, INSECURE, NOT MOBILE; ei parkkisivuja eikä DNS-virheitä): etusivu + enintään 3 alasivua samalta sivustolta, yksi per luokka (hinnasto, palvelut, meistä; avainsanat polusta tai linkkitekstistä). **robots.txt** (`AgencyHunter`): estetty sivu jätetään hakematta, estetty etusivu = ei skannausta; robots.txt 401/403/5xx/ei vastausta = ei hakuja, 404 = kaikki sallittu. **Viive** 1 s pyyntöjen välillä (tai Crawl-delay, max 5 s). Kuvia ei poimita (img/picture/source/figure poistetaan ennen tekstiä). Yksi AI-kutsu (`SITE_FACTS_SYSTEM_PROMPT`, EMAIL_MODEL) → `{services: [{name, price}], about}`, jonka `verify_site_facts` tarkistaa: palvelun nimi löytyy sivujen tekstistä, hinnan luvut ja valuutta samalla sivulla enintään 160 merkin päässä nimestä, esittelyn sanoista ≥ 75 % sivuilta. Tallennus `Lead.website_facts` kerran per liidi (demo ja sähköposti käyttävät samaa)
+- **Hinnat demossa**: malli ei koskaan kirjoita hintoja (`DemoAIService` ilman hintakenttää, `extra=forbid`, € ja numerot hylätään). Promptissa palvelut nimillä ilman hintoja, ja `attach_site_prices` liittää hinnan koodissa vain samalle nimelle (tai yksiselitteinen osittainen osuma). Kun hinta näkyy: merkintä "Hinnat nykyiseltä sivultanne." huomautusrivillä, price_note pohjan `price_note_site` ("Ajanvaraus puhelimitse." / "Kysykää myös muista palveluista." / kahvila "…tuotteista."). Modaalissa hinnan voi poistaa, ei kirjoittaa: PATCH hyväksyy vain `website_facts`issa olevat hinnat (422). `DemoStoredContent.site_based` → demosähköpostin linkkikappale "Tein luonnoksen nykyisten tietojenne pohjalta, …" (`DEMO_LINK_PARAGRAPH_SITE`)
 - **Auth**: Supabase Auth + JWT. Frontend käyttää `@supabase/supabase-js`, session tallentuu selaimeen, access_token lisätään automaattisesti `apiFetch`-helperillä Authorization-headeriin. Backend verifioi JWT:n (`backend/app/auth.py`, `verify_token`-dependency) tukien sekä uusia ES256/RS256-tokeneita JWKS-endpointista (`PyJWKClient`, `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, avainten cache, macOS-venvissä certifi-SSL-context) että legacy-HS256-tokeneita `SUPABASE_JWT_SECRET`-salaisuudella. Algoritmi tunnistetaan tokenin headerista. `AUTH_DISABLED=true` ohittaa verifioinnin dev-kehityksessä. SidebarNav näyttää kirjautuneen käyttäjän emailin ja sign-out-napin
 - **Multi-tenancy**: Lead, EmailDraft ja SearchHistoryEntry sisältävät `user_id`-kentän (Supabase UUID, indexed). Kaikki endpointit suodattavat `user_id == current_user.id`: GET-listat `.where(user_id)`, PATCH/DELETE/single-GET palauttavat 404:n (ei 403:a) jos toisen käyttäjän resurssia yritetään käyttää — ei paljasta resurssien olemassaoloa. POST-operaatiot asettavat `user_id` serverissä `AuthUser.id`:stä (ei clientin syötteestä). `Lead.google_place_id` ei ole enää globaalisti unique — `UniqueConstraint("google_place_id", "user_id")` sallii saman yrityksen useammalle käyttäjälle.
 - **Aikaleimat**: Kaikki datetime-kentät luodaan aikavyöhykkeellisinä (`models.utc_now()` = `datetime.now(timezone.utc)`). Uudet SQLModel-versiot hylkäävät naive-datetimet. Älä käytä `datetime.utcnow()`:ia
@@ -317,6 +339,7 @@ backend/alembic.ini, backend/migrations/ — Alembic-migraatiot (versions/)
 backend/app/database.py        — DB-yhteys (SQLite dev, Postgres tuotannossa)
 backend/app/auth.py            — Supabase JWT -verifiointi (ES256/RS256 JWKS + HS256 legacy, verify_token FastAPI-dependency)
 backend/app/utils/scraper.py   — Deep Scan: verkkosivun leipätekstin scraping (5s timeout, max 2000 merkkiä)
+backend/app/utils/site_content.py — Laajennettu Deep Scan: robots.txt, viive, max 3 alasivua, SiteFacts + tarkistus
 backend/app/utils/website_check.py — Sivuanalyysi: analyze_website() -> WebsiteCheck(status, issue); fetch_page() yhteinen sivunhaku
 backend/app/utils/contact_finder.py — Yhteystietohaku: find_contact_email() -> ContactEmail(email, source)
 backend/tests/conftest.py      — Testifixturet: in-memory SQLite, auth-override (client_a/client_b), verkkoesto

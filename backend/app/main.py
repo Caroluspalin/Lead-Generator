@@ -48,6 +48,7 @@ from .demo_site import (
     DemoSender,
     DemoStoredContent,
     DEMO_SYSTEM_PROMPT,
+    extract_json_object,
     PLACE_DETAILS_FIELD_MASK,
     find_repeated_phrases,
     TEMPLATES,
@@ -57,7 +58,10 @@ from .demo_site import (
     screenshot_demo,
     fetch_opening_hours,
     is_v2_template,
+    attach_site_prices,
+    is_default_price_note,
     price_note_for,
+    site_prices_allowed,
     template_assets,
     new_public_slug,
     new_public_token,
@@ -69,6 +73,14 @@ from .demo_site import (
     validate_template_choice,
 )
 from .utils.scraper import scrape_website_text
+from .utils.site_content import (
+    SITE_FACTS_SYSTEM_PROMPT,
+    SiteFacts,
+    facts_prompt,
+    scan_site,
+    should_scan,
+    verify_site_facts,
+)
 from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_social_media_url
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
@@ -1437,6 +1449,11 @@ DEMO_EMAIL_MAX_WORDS = 110  # koko viesti ennen allekirjoitusta
 DEMO_MODEL_MAX_WORDS = 55  # mallin kappaleet 1–2; koodin osuus on n. 50 sanaa
 
 DEMO_LINK_PARAGRAPH = "Tein teille luonnoksen siitä, miltä sivunne voisivat näyttää:\n{url}\nVoitte katsoa sen suoraan puhelimella."
+# Demo kirjoitettiin yrityksen nykyisen sivun palveluista/hinnoista/esittelystä
+DEMO_LINK_PARAGRAPH_SITE = (
+    "Tein luonnoksen nykyisten tietojenne pohjalta, jotta näette miltä sivunne voisivat näyttää:\n{url}\n"
+    "Voitte katsoa sen suoraan puhelimella."
+)
 DEMO_RISK_PARAGRAPH = (
     "Luonnos on ilmainen eikä sido teitä mihinkään. Jos se näyttää hyvältä, "
     "viimeistelen sen teidän omilla tiedoillanne ja kuvillanne."
@@ -1518,9 +1535,10 @@ def demo_next_step(profile: SenderProfile) -> str:
     return DEMO_NEXT_STEP_WITH_PHONE.format(phone=profile.phone) if profile.phone else DEMO_NEXT_STEP
 
 
-def build_demo_email_body(text: str, profile: SenderProfile, demo_url: str) -> str:
+def build_demo_email_body(text: str, profile: SenderProfile, demo_url: str, *, site_based: bool = False) -> str:
     """Hei + mallin kappaleet 1–2 + linkki omalla rivillään + riskittömyys + seuraava askel + allekirjoitus."""
-    parts = ["Hei,", *clean_demo_paragraphs(text), DEMO_LINK_PARAGRAPH.format(url=demo_url), DEMO_RISK_PARAGRAPH, demo_next_step(profile)]
+    link = (DEMO_LINK_PARAGRAPH_SITE if site_based else DEMO_LINK_PARAGRAPH).format(url=demo_url)
+    parts = ["Hei,", *clean_demo_paragraphs(text), link, DEMO_RISK_PARAGRAPH, demo_next_step(profile)]
     head = "\n\n".join(parts)
     return f"{head}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
 
@@ -1913,8 +1931,11 @@ async def generate_email(
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
 
-    # Deep Scan: skraapataan verkkosivun teksti jos ei vielä cachessa
-    if not db_lead.website_context and db_lead.website and db_lead.website_status != "NO WEBSITE":
+    # Deep Scan: osittain toimiva sivu -> laajennettu skannaus (robots.txt, viive), joka täyttää myös
+    # website_contextin. Muut: vanha etusivun teksti jos ei vielä cachessa.
+    if should_scan(db_lead.website, db_lead.website_status, db_lead.website_issue):
+        await ensure_site_facts(session, db_lead)
+    elif not db_lead.website_context and db_lead.website and db_lead.website_status != "NO WEBSITE":
         try:
             context = await asyncio.to_thread(scrape_website_text, db_lead.website)
             if context:
@@ -1934,7 +1955,8 @@ async def generate_email(
             DEMO_EMAIL_SYSTEM_PROMPT, build_demo_email_user_prompt(db_lead, profile, req.instruction), max_tokens=300
         )
         model = result.model
-        body = build_demo_email_body(result.text, profile, demo_url)
+        site_based = DemoStoredContent.model_validate_json(demo.content_json).site_based if demo else False
+        body = build_demo_email_body(result.text, profile, demo_url, site_based=site_based)
         check_generated_text(email_head(body), kind="sähköposti", lead_id=lead_id, model=model, max_words=DEMO_EMAIL_MAX_WORDS - 20)
         subject = demo_email_subject(db_lead)
     else:
@@ -2096,16 +2118,74 @@ def _can_fetch_place_details(lead: Lead) -> bool:
     )
 
 
-async def generate_demo_content(lead: Lead, template: str) -> tuple[DemoContent, list[ChatResult]]:
+def lead_site_facts(lead: Lead) -> Optional[SiteFacts]:
+    if not lead.website_facts:
+        return None
+    try:
+        return SiteFacts.model_validate_json(lead.website_facts)
+    except ValueError:
+        logger.warning(f"Liidin {lead.id} website_facts ei ole kelvollinen, ohitetaan")
+        return None
+
+
+async def ensure_site_facts(session: Session, lead: Lead) -> tuple[Optional[SiteFacts], list[ChatResult]]:
+    """Laajennettu Deep Scan kerran per liidi: etusivu + max 3 alasivua -> palvelut, hinnat, esittely.
+
+    Tallentaa tuloksen myös kun sisältöä ei löytynyt (ei skannata joka demolla uudelleen). Jos sivu ei
+    vastaa lainkaan, ei tallenneta mitään, jolloin seuraava demo yrittää uudelleen.
+    """
+    if not should_scan(lead.website, lead.website_status, lead.website_issue) or not lead.website:
+        return None, []
+    cached = lead_site_facts(lead)
+    if cached is not None:
+        return cached, []
+    try:
+        scan = await asyncio.to_thread(scan_site, lead.website)
+    except Exception as e:  # skannaus ei saa kaataa demoa tai sähköpostia
+        logger.warning(f"Sivuston skannaus epäonnistui (liidi {lead.id}): {e}")
+        return None, []
+    if scan is None:
+        return None, []
+
+    facts = SiteFacts(pages=[p.url for p in scan.pages])
+    results: list[ChatResult] = []
+    if scan.pages:
+        result = await _chat_completion(SITE_FACTS_SYSTEM_PROMPT, facts_prompt(scan), max_tokens=900)
+        results.append(result)
+        try:
+            facts = verify_site_facts(SiteFacts.model_validate(extract_json_object(result.text)), scan)
+        except ValueError as e:
+            logger.warning(f"Sivuston sisällön rakenteistus hylättiin (liidi {lead.id}): {e}")
+
+    now = utc_now()
+    lead.website_facts, lead.website_facts_at = facts.model_dump_json(), now
+    if not lead.website_context and scan.homepage_text:
+        lead.website_context, lead.scraped_at = scan.homepage_text, now
+    session.add(lead)
+    session.commit()
+    session.refresh(lead)
+    logger.info(
+        f"Sivuston sisältö (liidi {lead.id}): {len(scan.pages)} sivua, {len(scan.blocked)} robots.txt-estettyä, "
+        f"{len(facts.services)} palvelua ({sum(1 for s in facts.services if s.price)} hinnalla), "
+        f"esittely {'kyllä' if facts.about else 'ei'}"
+    )
+    return facts, results
+
+
+async def generate_demo_content(
+    lead: Lead, template: str, site_facts: Optional[SiteFacts] = None
+) -> tuple[DemoContent, list[ChatResult]]:
     """AI-sisältö, validointi ja yksi uudelleenyritys. Heittää DemoGenerationError jos ei kelpaa.
 
     Kovat virheet (skeema, keksityt faktat, kielletyt sanat) -> uudelleenyritys, toisellakin kerralla 502.
     Toistuvat fraasit ovat pehmeä virhe: ensimmäisellä kierroksella uudelleenyritys, toisella hyväksytään
     ja lokitetaan varoitus.
     """
-    allowed_text = " ".join(filter(None, [lead.name, lead.city, lead.address, lead.website_context]))
+    facts_text = " ".join([s.name for s in site_facts.services] + [site_facts.about or ""]) if site_facts else ""
+    allowed_text = " ".join(filter(None, [lead.name, lead.city, lead.address, lead.website_context, facts_text]))
     prompt = build_demo_prompt(
-        name=lead.name, city=lead.city, primary_type=lead.primary_type, website_context=lead.website_context
+        name=lead.name, city=lead.city, primary_type=lead.primary_type, website_context=lead.website_context,
+        site_facts=site_facts,
     )
     results: list[ChatResult] = []
     problems: list[str] = []
@@ -2196,10 +2276,15 @@ async def generate_demo(
     except ValueError as e:
         raise HTTPException(422, str(e))
 
+    site_facts, scan_results = await ensure_site_facts(session, lead)
     try:
-        content, results = await generate_demo_content(lead, template)
+        content, results = await generate_demo_content(lead, template, site_facts)
     except DemoGenerationError as e:
         raise HTTPException(502, f"Demo content failed validation: {e}")
+    results = scan_results + results
+    # Hinnat vain yrityksen omalta sivulta, palvelun nimen mukaan (ks. attach_site_prices)
+    services = attach_site_prices(content.services, site_facts)
+    has_prices = any(s.price for s in services)
 
     # Aukioloajat vasta nyt, yksi Place Details -kutsu (ei tallenneta erikseen, vain osana demoa)
     hours = None
@@ -2209,8 +2294,10 @@ async def generate_demo(
         hours = await asyncio.to_thread(fetch_opening_hours, lead.google_place_id, GOOGLE_API_KEY)
     images, searches = await find_demo_images(lead, template)
     stored = DemoStoredContent(
-        **content.model_dump(exclude={"price_note"}),
-        price_note=price_note_for(template),
+        **content.model_dump(exclude={"price_note", "services"}),
+        services=services,
+        price_note=price_note_for(template, has_prices),
+        site_based=bool(site_facts and site_facts.has_content),
         opening_hours=hours.descriptions if hours else [],
         opening_periods=hours.periods if hours else [],
         images=images,
@@ -2283,13 +2370,17 @@ def update_demo(
 
     stored = DemoStoredContent.model_validate_json(demo.content_json)
     if req.content is not None:
+        if not site_prices_allowed(req.content.services, lead_site_facts(lead)):
+            raise HTTPException(422, "Prices can only come from the business's current website")
         stored = DemoStoredContent(
             **req.content.model_dump(), opening_hours=stored.opening_hours,
-            opening_periods=stored.opening_periods, images=stored.images,
+            opening_periods=stored.opening_periods, images=stored.images, site_based=stored.site_based,
         )
-    if template != demo.template and stored.price_note == price_note_for(demo.template):
-        # Pohjan oletusteksti vaihtuu pohjan mukana (kahvilassa ei "ajanvarausta"); käyttäjän oma teksti säilyy
-        stored = stored.model_copy(update={"price_note": price_note_for(template)})
+    has_prices = any(s.price for s in stored.services)
+    if is_default_price_note(demo.template, stored.price_note):
+        # Pohjan oletusteksti seuraa pohjaa ja hintoja (kahvilassa ei "ajanvarausta",
+        # hintojen kanssa ei "hinnat puhelimitse"); käyttäjän oma teksti säilyy
+        stored = stored.model_copy(update={"price_note": price_note_for(template, has_prices)})
     # Hero-vaihto, tai pohjan vaihto: tunnelmakuvien säännöt ovat pohjakohtaisia (kahvilassa tumma viimeinen)
     if req.hero_image_id is not None or template != demo.template:
         images = stored.images

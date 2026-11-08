@@ -355,7 +355,7 @@ def test_regenerate_keeps_token(client_a: TestClient, lead: dict[str, Any], demo
 def test_patch_rerenders_without_ai_call(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     calls_before = len(demo_ready.calls)
-    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images")}
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based")}
     edited["hero_title"] = "Tainan kampaamo"
     edited["price_note"] = "Hiustenleikkaus alkaen 30 €, varaukset puhelimitse."  # käyttäjä saa kirjoittaa oikean hinnan
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "services", "color_scheme": "forest", "content": edited})
@@ -377,7 +377,7 @@ def test_patch_template_only_resets_incompatible_scheme(
 
 def test_patch_rejects_invalid_content(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-    bad = {**{k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images")}, "services": []}
+    bad = {**{k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based")}, "services": []}
     assert client_a.patch(f"/leads/{lead['id']}/demo", json={"content": bad}).status_code == 422
     assert client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "nope"}).status_code == 422
 
@@ -703,7 +703,7 @@ def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready
 
 def test_text_edit_keeps_images(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images")}
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based")}
     edited["about"] = "Muokattu esittelyteksti, joka on riittävän pitkä hyväksyttäväksi."
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"content": edited}).json()
     assert res["content"]["images"]["hero"]["id"] == "a"

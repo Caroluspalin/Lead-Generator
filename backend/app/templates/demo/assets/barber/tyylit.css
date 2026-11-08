@@ -222,7 +222,8 @@ h2::before { content: ""; display: block; width: 0.32em; height: 0.32em; margin-
 .taulu { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--viiva-musta); }
 /* Palvelutaulu: nimi kyltin korostusvärillä, kuvaus alla (ei hintoja eikä kestoja) */
 .taulu li { padding: 1rem 0; border-bottom: 1px solid var(--viiva-musta); }
-.taulu h3 { color: var(--kyltti-musta); font-size: 1.75rem; line-height: 1; margin-bottom: 0.35rem; }
+.taulu h3 { color: var(--kyltti-musta); font-size: 1.75rem; line-height: 1; margin-bottom: 0.35rem; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.taulu .hinta { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .taulu p { margin: 0; max-width: 46ch; color: var(--harmaa-musta); }
 .huom { margin: 1.75rem 0 0; max-width: 46ch; color: var(--harmaa-musta); font-size: 0.9375rem; }
 

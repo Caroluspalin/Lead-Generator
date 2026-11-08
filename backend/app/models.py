@@ -118,6 +118,10 @@ class Lead(SQLModel, table=True):
     # Deep Scan: skraapattu verkkosivun konteksti personointia varten
     website_context: Optional[str] = None
     scraped_at: Optional[datetime] = None
+    # Laajennettu skannaus (app/utils/site_content.py): palvelut, hinnat ja esittely JSONina (SiteFacts).
+    # Tyhjä JSON = skannattu ilman käyttökelpoista sisältöä (ei skannata uudelleen joka demolla)
+    website_facts: Optional[str] = None
+    website_facts_at: Optional[datetime] = None
 
     # Yhteystiedot: vain sivustolta oikeasti löytynyt osoite (app/utils/contact_finder.py)
     email: Optional[str] = None

@@ -103,8 +103,8 @@ SAMPLES: list[Sample] = [
             "about": "Leivomme aamuisin ja myymme päivän tuotteet tiskiltä. Kahvilan puolella voi istua alas, ja juhlakakun voi tilata etukäteen.",
             "services": [
                 {"name": "Leivät", "description": "Ruisleipää, limppua ja vaaleita leipiä tiskiltä."},
-                {"name": "Pullat ja piirakat", "description": "Voisilmäpullat, korvapuustit ja marjapiirakat."},
-                {"name": "Täytekakut", "description": "Kakut juhliin tilauksesta, kysykää vaihtoehtoja."},
+                {"name": "Pullat ja piirakat", "description": "Voisilmäpullat, korvapuustit ja marjapiirakat.", "price": "alk. 3,50 €"},
+                {"name": "Täytekakut", "description": "Kakut juhliin tilauksesta, kysykää vaihtoehtoja.", "price": "alk. 45 €/kg"},
                 {"name": "Kahvila", "description": "Kahvit ja teet leivonnaisten kanssa paikan päällä."},
                 {"name": "Lahjakortit", "description": "Lahjakortin saa kassalta mihin tahansa summaan."},
             ],
@@ -139,10 +139,10 @@ SAMPLES: list[Sample] = [
             "about_title": "Hiuksista kulmiin",
             "about": "Palvelemme ajanvarauksella. Kertokaa toiveistanne, niin valitaan yhdessä teille sopiva palvelu.",
             "services": [
-                {"name": "Leikkaus", "description": "Leikkaus ja föönaus toiveidenne mukaan."},
-                {"name": "Värjäys", "description": "Kestovärit, raidat ja sävytykset."},
+                {"name": "Leikkaus", "description": "Leikkaus ja föönaus toiveidenne mukaan.", "price": "alk. 59 €"},
+                {"name": "Värjäys", "description": "Kestovärit, raidat ja sävytykset.", "price": "alk. 120 €"},
                 {"name": "Kampaukset", "description": "Juhla- ja hääkampaukset tilaisuuksiin."},
-                {"name": "Kulmien muotoilu", "description": "Muotoilu ja värjäys kulmille sekä ripsille."},
+                {"name": "Kulmien muotoilu", "description": "Muotoilu ja värjäys kulmille sekä ripsille.", "price": "28 €"},
                 {"name": "Hiushoidot", "description": "Tehohoidot kuiville hiuksille."},
             ],
         },
@@ -175,10 +175,10 @@ SAMPLES: list[Sample] = [
             "about_title": "Parturi Oulussa",
             "about": "Hiukset leikataan toiveiden mukaan, ja partaan saa muotoilun tai ajon. Kysykää vapaita aikoja puhelimitse.",
             "services": [
-                {"name": "Hiustenleikkaus", "description": "Saksi- ja koneleikkaukset."},
-                {"name": "Parranajo", "description": "Parranajo kuumapyyhkeellä."},
+                {"name": "Hiustenleikkaus", "description": "Saksi- ja koneleikkaukset.", "price": "32 €"},
+                {"name": "Parranajo", "description": "Parranajo kuumapyyhkeellä.", "price": "alk. 25 €"},
                 {"name": "Parran muotoilu", "description": "Ääriviivat ja tasaus koneella."},
-                {"name": "Kulmat ja korvat", "description": "Siistiminen leikkauksen yhteydessä."},
+                {"name": "Kulmat ja korvat", "description": "Siistiminen leikkauksen yhteydessä.", "price": "8 €"},
             ],
         },
         periods=[],
@@ -188,7 +188,8 @@ SAMPLES: list[Sample] = [
 
 
 def check_texts(sample: Sample) -> list[str]:
-    content = DemoContent(**sample.content, price_note=price_note_for(sample.template))
+    has_prices = any(s.get("price") for s in sample.content["services"])
+    content = DemoContent(**sample.content, price_note=price_note_for(sample.template, has_prices))
     allowed = " ".join(filter(None, [sample.name, sample.city, sample.address]))
     problems = content_violations(content, allowed_text=allowed)
     repeats = find_repeated_phrases(content, business_name=sample.name, template=sample.template)
@@ -217,8 +218,10 @@ def images_for(sample: Sample, photos: list[unsplash.DemoPhoto]) -> DemoImages:
 
 
 def render(sample: Sample, images: DemoImages) -> str:
+    # Hinnat näytteissä = hinnat "yrityksen omalta sivulta" (yksi näyte per pohja)
+    has_prices = any(s.get("price") for s in sample.content["services"])
     stored = DemoStoredContent(
-        **sample.content, price_note=price_note_for(sample.template),
+        **sample.content, price_note=price_note_for(sample.template, has_prices),
         opening_periods=sample.periods, images=images,
     )
     return render_demo_html(
