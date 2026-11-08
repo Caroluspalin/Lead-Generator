@@ -14,6 +14,8 @@ from app.demo_site import (
     DemoBusiness,
     DemoSender,
     DemoStoredContent,
+    OpeningHours,
+    OpeningPeriod,
     content_violations,
     extract_json_object,
     fetch_opening_hours,
@@ -71,7 +73,7 @@ def test_schema_rejects_extra_service_fields() -> None:
 
 
 def test_ai_schema_has_no_price_or_contact_fields() -> None:
-    assert set(DemoAIContent.model_fields) == {"hero_title", "hero_subtitle", "about", "services"}
+    assert set(DemoAIContent.model_fields) == {"hero_title", "hero_subtitle", "about_title", "about", "services"}
 
 
 # --- Kielletyt sisällöt ---
@@ -120,7 +122,8 @@ def test_extract_json_object() -> None:
     ("primary_type", "template"),
     [
         ("hair_salon", "beauty"), ("barber_shop", "beauty"), ("beauty_salon", "beauty"), ("nail_salon", "beauty"),
-        ("restaurant", "restaurant"), ("cafe", "restaurant"), ("coffee_shop", "restaurant"), ("pizza_restaurant", "restaurant"),
+        ("restaurant", "restaurant"), ("cafe", "cafe"), ("coffee_shop", "cafe"), ("bakery", "cafe"), ("tea_house", "cafe"),
+        ("steak_house", "restaurant"), ("pizza_restaurant", "restaurant"),
         ("plumber", "services"), ("car_repair", "services"), (None, "services"),
     ],
 )
@@ -129,7 +132,7 @@ def test_template_for_primary_type(primary_type: str | None, template: str) -> N
 
 
 def test_each_template_has_two_to_three_schemes() -> None:
-    assert set(TEMPLATES) == {"beauty", "restaurant", "services"}
+    assert set(TEMPLATES) == {"cafe", "beauty", "restaurant", "services"}
     for t in TEMPLATES.values():
         assert 2 <= len(t.schemes) <= 3
 
@@ -218,14 +221,19 @@ def test_fetch_opening_hours_field_mask(monkeypatch: pytest.MonkeyPatch) -> None
 
         @staticmethod
         def json() -> dict[str, Any]:
-            return {"regularOpeningHours": {"weekdayDescriptions": ["maanantai: 9.00–17.00"]}}
+            return {"regularOpeningHours": {
+                "weekdayDescriptions": ["maanantai: 9.00–17.00"],
+                "periods": [{"open": {"day": 1, "hour": 9, "minute": 0}, "close": {"day": 1, "hour": 17, "minute": 0}}],
+            }}
 
     def _get(url: str, **kwargs: Any) -> _R:
         calls.append({"url": url, **kwargs})
         return _R()
 
     monkeypatch.setattr("requests.get", _get)
-    assert fetch_opening_hours("ChIJabc", "AIza-x") == ["maanantai: 9.00–17.00"]
+    assert fetch_opening_hours("ChIJabc", "AIza-x") == OpeningHours(
+        descriptions=["maanantai: 9.00–17.00"], periods=[OpeningPeriod(day=1, open="09:00", close="17:00")]
+    )
     assert calls[0]["url"] == "https://places.googleapis.com/v1/places/ChIJabc"
     assert calls[0]["headers"] == {"X-Goog-Api-Key": "AIza-x", "X-Goog-FieldMask": "regularOpeningHours"}
     assert PLACE_DETAILS_FIELD_MASK == "regularOpeningHours"
@@ -295,10 +303,14 @@ def test_demo_fetches_hours_in_live_mode(
     monkeypatch.setattr("app.main.USE_LIVE_GOOGLE", True)
     monkeypatch.setattr("app.main.GOOGLE_API_KEY", "AIza-test")
     seen: list[str] = []
-    monkeypatch.setattr("app.main.fetch_opening_hours", lambda pid, key: seen.append(pid) or ["maanantai: 9.00–17.00"])
+    hours = OpeningHours(
+        descriptions=["maanantai: 9.00–17.00"], periods=[OpeningPeriod(day=1, open="09:00", close="17:00")]
+    )
+    monkeypatch.setattr("app.main.fetch_opening_hours", lambda pid, key: seen.append(pid) or hours)
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     assert seen == ["ChIJtaina"]
     assert demo["content"]["opening_hours"] == ["maanantai: 9.00–17.00"]
+    assert demo["content"]["opening_periods"] == [{"day": 1, "open": "09:00", "close": "17:00"}]
 
 
 def test_invalid_ai_content_retried_once(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
@@ -343,7 +355,7 @@ def test_regenerate_keeps_token(client_a: TestClient, lead: dict[str, Any], demo
 def test_patch_rerenders_without_ai_call(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     calls_before = len(demo_ready.calls)
-    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "images")}
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images")}
     edited["hero_title"] = "Tainan kampaamo"
     edited["price_note"] = "Hiustenleikkaus alkaen 30 €, varaukset puhelimitse."  # käyttäjä saa kirjoittaa oikean hinnan
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "services", "color_scheme": "forest", "content": edited})
@@ -365,7 +377,7 @@ def test_patch_template_only_resets_incompatible_scheme(
 
 def test_patch_rejects_invalid_content(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-    bad = {**{k: v for k, v in demo["content"].items() if k not in ("opening_hours", "images")}, "services": []}
+    bad = {**{k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images")}, "services": []}
     assert client_a.patch(f"/leads/{lead['id']}/demo", json={"content": bad}).status_code == 422
     assert client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "nope"}).status_code == 422
 
@@ -402,8 +414,10 @@ def test_unknown_token_is_404(client_a: TestClient) -> None:
 
 def test_templates_catalog_endpoint(client_a: TestClient) -> None:
     catalog = client_a.get("/demo-templates").json()
-    assert [t["id"] for t in catalog] == ["beauty", "restaurant", "services"]
-    assert {s["id"] for s in catalog[0]["color_schemes"]} == {"rose", "sage", "noir"}
+    # Uudet (versio 2) pohjat ensin
+    assert [t["id"] for t in catalog] == ["cafe", "beauty", "restaurant", "services"]
+    assert {s["id"] for s in catalog[0]["color_schemes"]} == {"paahto", "kaura", "ruis"}
+    assert {s["id"] for s in catalog[1]["color_schemes"]} == {"rose", "sage", "noir"}
 
 
 # --- Tenant-isolaatio ---
@@ -689,7 +703,7 @@ def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready
 
 def test_text_edit_keeps_images(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
-    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "images")}
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images")}
     edited["about"] = "Muokattu esittelyteksti, joka on riittävän pitkä hyväksyttäväksi."
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"content": edited}).json()
     assert res["content"]["images"]["hero"]["id"] == "a"

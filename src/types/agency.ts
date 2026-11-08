@@ -24,6 +24,7 @@ export interface DemoService {
 export interface DemoContent {
   hero_title: string;
   hero_subtitle: string;
+  about_title: string | null; // esittelyn otsikko (uudet pohjat); null = pohjan oletus
   about: string;
   services: DemoService[];
   price_note: string;
@@ -46,8 +47,16 @@ export interface DemoImages {
   options: DemoPhoto[];
 }
 
+// Aukiolojakso (Googlen day: 0 = sunnuntai), close "24:00" = keskiyö
+export interface DemoOpeningPeriod {
+  day: number;
+  open: string;
+  close: string;
+}
+
 export interface DemoStoredContent extends DemoContent {
   opening_hours: string[];
+  opening_periods: DemoOpeningPeriod[];
   images: DemoImages;
 }
 
@@ -73,6 +82,7 @@ export interface Demo {
 export interface DemoTemplateOption {
   id: string;
   label: string;
+  version: number; // 2 = uudet pohjat (cafe ...), 1 = Classic
   color_schemes: { id: string; label: string }[];
 }
 

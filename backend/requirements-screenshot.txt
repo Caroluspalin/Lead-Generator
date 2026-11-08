@@ -1,0 +1,4 @@
+# Valinnainen: demon 390 px -kuvakaappaus esikatselumodaaliin ja laatuportti (scripts/demo_check.py).
+# Asennus: pip install -r requirements-screenshot.txt && python -m playwright install chromium webkit
+# Ilman tätä kuvakaappaus-endpoint palauttaa 501 ja modaali näyttää 390 px levyisen esikatselun.
+playwright==1.64.1

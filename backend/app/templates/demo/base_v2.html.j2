@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fi" data-paletti="{{ palette }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="{{ theme_color }}">
+<title>{{ business.name }}</title>
+<meta name="description" content="{{ content.hero_subtitle }}">
+<link rel="icon" href="data:,">
+{% block preload %}{% endblock %}
+<link rel="stylesheet" href="{{ asset('yhteinen', 'demo.css').url }}">
+<link rel="stylesheet" href="{{ asset(template, 'tyylit.css').url }}">
+{% if aukiolo %}<script defer src="{{ asset('yhteinen', 'aukiolo.js').url }}"></script>{% endif %}
+</head>
+<body>
+<p class="demo-bar" role="note"><span class="long">{{ banner }}</span><span class="short">Luonnos – ei virallinen sivu · {{ sender.name }}</span>{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %}<span class="long"> · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a></span>{% endif %}</p>
+<a class="ohitus" href="#sisalto">Siirry sisältöön</a>
+{% if aukiolo %}
+{# Koneluettavat ajat aukiolo.js:lle (data-ma … data-su), puuttuva päivä = suljettu #}
+<div hidden id="aukiolo"{% for key, value in aukiolo.items() %} data-{{ key }}="{{ value }}"{% endfor %}></div>
+{% endif %}
+{% block body %}{% endblock %}
+</body>
+</html>

@@ -30,6 +30,7 @@ const inputClass =
 const toEditable = (demo: Demo): DemoContent => ({
   hero_title: demo.content.hero_title,
   hero_subtitle: demo.content.hero_subtitle,
+  about_title: demo.content.about_title,
   about: demo.content.about,
   services: demo.content.services.map((s) => ({ ...s })),
   price_note: demo.content.price_note,
@@ -414,6 +415,17 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                             className={`${inputClass} mt-1`}
                           />
                         </label>
+                        {templates.find((t) => t.id === demo.template)?.version === 2 && (
+                          <label className={labelClass}>
+                            About heading
+                            <input
+                              value={draft.about_title ?? ''}
+                              onChange={(e) => setDraft({ ...draft, about_title: e.target.value.trim() ? e.target.value : null })}
+                              maxLength={50}
+                              className={`${inputClass} mt-1`}
+                            />
+                          </label>
+                        )}
                         <label className={labelClass}>
                           About
                           <textarea

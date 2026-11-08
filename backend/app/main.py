@@ -15,7 +15,7 @@ from urllib.parse import quote_plus, urlparse
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from sqlalchemy import Engine, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -50,7 +50,11 @@ from .demo_site import (
     find_repeated_phrases,
     TEMPLATES,
     build_demo_prompt,
+    demo_asset,
     fetch_opening_hours,
+    is_v2_template,
+    price_note_for,
+    template_assets,
     new_public_slug,
     new_public_token,
     parse_ai_content,
@@ -1205,7 +1209,7 @@ def _republish_if_published(demo: Demo) -> None:
     if store is None:
         raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
     try:
-        publish_html(store, demo_path(demo), demo.html, demo.expires_at)
+        publish_html(store, demo_path(demo), demo.html, demo.expires_at, template_assets(demo.template))
     except PublishError as e:
         raise HTTPException(502, str(e))
 
@@ -1227,7 +1231,7 @@ def run_demo_expiry(now: Optional[datetime] = None, bind: Optional[Engine] = Non
             if lead is not None and lead.pipeline_status == "Hired":
                 demo.expires_at = now + timedelta(days=DEMO_TTL_DAYS)
                 try:
-                    publish_html(store, demo_path(demo), demo.html, demo.expires_at)
+                    publish_html(store, demo_path(demo), demo.html, demo.expires_at, template_assets(demo.template))
                     counts["extended"] += 1
                 except PublishError as e:
                     logger.error(f"Demon jatko epäonnistui (liidi {demo.lead_id}): {e}")
@@ -1747,7 +1751,10 @@ async def find_demo_images(lead: Lead, template: str) -> tuple[DemoImages, int]:
     queries = unsplash.image_queries(lead.primary_type, template)
     candidates = await asyncio.to_thread(unsplash.find_candidates, lead.primary_type, template, UNSPLASH_ACCESS_KEY)
     hero, mood, options = unsplash.choose_images(candidates)
-    searches = 1 if len(candidates) >= unsplash.MIN_CANDIDATES or len(queries) == 1 else 2
+    if unsplash.uses_both_queries(template):
+        searches = len(queries[:2])
+    else:
+        searches = 1 if len(candidates) >= unsplash.MIN_CANDIDATES or len(queries) == 1 else 2
     return DemoImages(hero=hero, mood=mood, options=options), searches
 
 
@@ -1807,13 +1814,19 @@ async def generate_demo(
         raise HTTPException(502, f"Demo content failed validation: {e}")
 
     # Aukioloajat vasta nyt, yksi Place Details -kutsu (ei tallenneta erikseen, vain osana demoa)
-    hours: Optional[list[str]] = None
+    hours = None
     place_calls = 0
     if _can_fetch_place_details(lead) and lead.google_place_id:
         place_calls = 1
         hours = await asyncio.to_thread(fetch_opening_hours, lead.google_place_id, GOOGLE_API_KEY)
     images, searches = await find_demo_images(lead, template)
-    stored = DemoStoredContent(**content.model_dump(), opening_hours=hours or [], images=images)
+    stored = DemoStoredContent(
+        **content.model_dump(exclude={"price_note"}),
+        price_note=price_note_for(template),
+        opening_hours=hours.descriptions if hours else [],
+        opening_periods=hours.periods if hours else [],
+        images=images,
+    )
     used = _used_photos(images)
     if used:
         background_tasks.add_task(_track_downloads, used)
@@ -1883,8 +1896,12 @@ def update_demo(
     stored = DemoStoredContent.model_validate_json(demo.content_json)
     if req.content is not None:
         stored = DemoStoredContent(
-            **req.content.model_dump(), opening_hours=stored.opening_hours, images=stored.images
+            **req.content.model_dump(), opening_hours=stored.opening_hours,
+            opening_periods=stored.opening_periods, images=stored.images,
         )
+    if template != demo.template and stored.price_note == price_note_for(demo.template):
+        # Pohjan oletusteksti vaihtuu pohjan mukana (kahvilassa ei "ajanvarausta"); käyttäjän oma teksti säilyy
+        stored = stored.model_copy(update={"price_note": price_note_for(template)})
     if req.hero_image_id is not None:
         images = stored.images
         if req.hero_image_id == "none":
@@ -1932,7 +1949,7 @@ def publish_demo(
     now = utc_now()
     expires_at = now + timedelta(days=DEMO_TTL_DAYS)
     try:
-        publish_html(store, demo_path(demo), demo.html, expires_at)
+        publish_html(store, demo_path(demo), demo.html, expires_at, template_assets(demo.template))
     except PublishError as e:
         raise HTTPException(502, str(e))
     demo.status, demo.published_at, demo.expires_at = "published", now, expires_at
@@ -1979,7 +1996,7 @@ def delete_demo(
 
 DEMO_RESPONSE_HEADERS = {
     "X-Robots-Tag": "noindex, nofollow",
-    # Demo on staattinen: ei skriptejä, ei ulkoisia resursseja, inline-CSS sallittu
+    # Versio 1: staattinen, ei skriptejä, ei ulkoisia resursseja, inline-CSS sallittu
     # Kuvat hotlinkataan Unsplashista (API-ehto), fontit ovat inline data-URI:na
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://images.unsplash.com; "
@@ -1988,6 +2005,14 @@ DEMO_RESPONSE_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store",
+}
+# Versio 2: omat CSS/JS/fontit samasta osoitteesta, ei inline-tyylejä eikä -skriptejä (sama kuin Workerissa)
+DEMO_V2_RESPONSE_HEADERS = {
+    **DEMO_RESPONSE_HEADERS,
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; "
+        "img-src data: https://images.unsplash.com; base-uri 'none'; form-action 'none'"
+    ),
 }
 
 
@@ -2004,7 +2029,29 @@ def view_demo(public_path: str, session: Session = Depends(get_session)) -> HTML
         return HTMLResponse("Not found", status_code=404, headers=DEMO_RESPONSE_HEADERS)
     if demo.status == "expired" or (demo.expires_at and _as_utc(demo.expires_at) <= utc_now()):
         return HTMLResponse("Tämä luonnos ei ole enää saatavilla.", status_code=410, headers=DEMO_RESPONSE_HEADERS)
-    return HTMLResponse(demo.html, headers=DEMO_RESPONSE_HEADERS)
+    headers = DEMO_V2_RESPONSE_HEADERS if is_v2_template(demo.template) else DEMO_RESPONSE_HEADERS
+    return HTMLResponse(demo.html, headers=headers)
+
+
+@app.get("/demo/a/{group}/{name}", include_in_schema=False)
+def view_demo_asset(group: str, name: str) -> Response:
+    """Version 2 demon CSS/JS/fontit esikatselua varten (Workerissa /a/...). Vain paketin tiedostot.
+
+    CORS: esikatselu-iframe on sandboxattu (opaque origin), ja fontit ladataan aina CORS-tilassa.
+    """
+    asset = demo_asset(group, name)
+    if asset is None:
+        return Response("Not found", status_code=404, media_type="text/plain")
+    return Response(
+        asset.body,
+        media_type=asset.content_type,
+        headers={
+            "Cache-Control": "no-cache",
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )
 
 # 7. LÄHETÄ SÄHKÖPOSTI (SMTP)
 

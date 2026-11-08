@@ -5,20 +5,35 @@ Polku = demon slug (esim. taina-lantiainen-k7x2m) tai ennen slugeja luoduilla de
 Oman domainin käyttöönotto = DEMO_PUBLIC_BASE_URL-muutos + domain Workeriin Cloudflaressa.
 
 Avaimet vain backend/.env:ssä. R2 API -token: Object Read & Write, vain tähän bucketiin.
+
+Version 2 demoilla on myös erilliset CSS/JS/fonttitiedostot. Ne ladataan avaimella
+assets/{ryhmä}/{tiiviste}/{tiedosto} ennen HTML:ää, eikä niitä koskaan poisteta: jo lähetetty
+demo viittaa aina omaan versioonsa, vaikka pohjaa muokattaisiin myöhemmin. Worker palvelee
+ne osoitteessa /a/{ryhmä}/{tiedosto}?v={tiiviste} ja valitsee demon CSP:n metadatan format-arvosta.
 """
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Protocol
 
+from .demo_site import DemoAsset
+
 logger = logging.getLogger(__name__)
 
 OBJECT_PREFIX = "demos/"
+ASSET_PREFIX = "assets/"
+HTML_CONTENT_TYPE = "text/html; charset=utf-8"
+ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 def object_key(public_path: str) -> str:
     return f"{OBJECT_PREFIX}{public_path}.html"
+
+
+def asset_key(asset: DemoAsset) -> str:
+    return f"{ASSET_PREFIX}{asset.group}/{asset.digest}/{asset.name}"
 
 
 @dataclass(frozen=True)
@@ -55,7 +70,17 @@ def load_r2_config() -> Optional[R2Config]:
 
 
 class ObjectStore(Protocol):
-    def put(self, key: str, body: bytes, *, expires_at: Optional[datetime]) -> None: ...
+    def put(
+        self,
+        key: str,
+        body: bytes,
+        *,
+        expires_at: Optional[datetime],
+        content_type: str = HTML_CONTENT_TYPE,
+        cache_control: str = "no-store",
+        metadata: Optional[dict[str, str]] = None,
+    ) -> None: ...
+    def exists(self, key: str) -> bool: ...
     def delete(self, key: str) -> None: ...
 
 
@@ -84,16 +109,38 @@ class R2ObjectStore:
             ),
         )
 
-    def put(self, key: str, body: bytes, *, expires_at: Optional[datetime]) -> None:
-        metadata = {"expires-at": expires_at.isoformat()} if expires_at else {}
+    def put(
+        self,
+        key: str,
+        body: bytes,
+        *,
+        expires_at: Optional[datetime],
+        content_type: str = HTML_CONTENT_TYPE,
+        cache_control: str = "no-store",
+        metadata: Optional[dict[str, str]] = None,
+    ) -> None:
+        meta = dict(metadata or {})
+        if expires_at:
+            meta["expires-at"] = expires_at.isoformat()
         self._client.put_object(
             Bucket=self._bucket,
             Key=key,
             Body=body,
-            ContentType="text/html; charset=utf-8",
-            CacheControl="no-store",
-            Metadata=metadata,
+            ContentType=content_type,
+            CacheControl=cache_control,
+            Metadata=meta,
         )
+
+    def exists(self, key: str) -> bool:
+        from botocore.exceptions import ClientError
+
+        try:
+            self._client.head_object(Bucket=self._bucket, Key=key)
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return False
+            raise
 
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
@@ -103,9 +150,35 @@ class PublishError(Exception):
     pass
 
 
-def publish_html(store: ObjectStore, public_path: str, html: str, expires_at: Optional[datetime]) -> None:
+# Tämän prosessin jo lataamat tiedostot: sama avain = sama sisältö, joten tarkistus riittää kerran
+_uploaded_assets: set[str] = set()
+
+
+def upload_assets(store: ObjectStore, assets: Sequence[DemoAsset]) -> None:
+    for asset in assets:
+        key = asset_key(asset)
+        if key in _uploaded_assets:
+            continue
+        if not store.exists(key):
+            store.put(key, asset.body, expires_at=None, content_type=asset.content_type,
+                      cache_control=ASSET_CACHE_CONTROL)
+        _uploaded_assets.add(key)
+
+
+def publish_html(
+    store: ObjectStore,
+    public_path: str,
+    html: str,
+    expires_at: Optional[datetime],
+    assets: Sequence[DemoAsset] = (),
+) -> None:
+    """Tiedostot ensin, sitten HTML: demo ei koskaan viittaa tiedostoon, jota ei vielä ole."""
     try:
-        store.put(object_key(public_path), html.encode("utf-8"), expires_at=expires_at)
+        upload_assets(store, assets)
+        store.put(
+            object_key(public_path), html.encode("utf-8"), expires_at=expires_at,
+            metadata={"format": "2"} if assets else None,
+        )
     except Exception as e:  # botocore-virheet, verkko
         raise PublishError(f"R2 upload failed: {e}") from e
 

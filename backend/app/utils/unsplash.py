@@ -83,8 +83,21 @@ class DemoPhoto(BaseModel):
     has_products: bool = False
 
 
+# Versio 2 -pohjien omat haut: kuvan muoto ratkaisee (kahvilan pyöreä hero tarvitsee yläkulmasta
+# kuvatun aiheen). Ensimmäinen osuva avain voittaa, None = mikä tahansa primary_type.
+_TEMPLATE_QUERIES: dict[str, list[tuple[Optional[tuple[str, ...]], list[str]]]] = {
+    "cafe": [
+        (("bakery", "cake", "pastry"), ["pastries from above", "bakery counter"]),
+        (None, ["coffee cup from above", "cafe pastries"]),
+    ],
+}
+
+
 def image_queries(primary_type: Optional[str], template: str) -> list[str]:
     t = (primary_type or "").lower()
+    for template_keys, template_queries in _TEMPLATE_QUERIES.get(template, []):
+        if template_keys is None or any(k in t for k in template_keys):
+            return template_queries
     for keys, queries in _QUERIES:
         if any(k in t for k in keys):
             return queries
@@ -147,11 +160,43 @@ def search_photos(query: str, access_key: str, per_page: int = SEARCH_PER_PAGE) 
         return []
 
 
+# Pohjat, joissa hero ja osioiden kuvat tarvitsevat eri aiheen (kahvila: yläkulmasta kuvattu kuppi
+# pyöreään heroon, leivonnaiset ja kahvila osioihin). Molemmat haut aina, tulokset vuorotellen.
+MIXED_QUERY_TEMPLATES = {"cafe"}
+
+
+def uses_both_queries(template: str) -> bool:
+    return template in MIXED_QUERY_TEMPLATES
+
+
+def mix_results(first: list[DemoPhoto], second: list[DemoPhoto]) -> list[DemoPhoto]:
+    """Hero ensimmäisestä hausta, seuraavat MOOD_COUNT (tunnelmakuvat) toisesta, loput vuorotellen.
+    choose_images säilyttää järjestyksen saman luokituksen sisällä."""
+    hero_pool = [p for p in first if not p.has_people and not p.has_products] or first
+    head = hero_pool[:1]
+    rest_first = [p for p in first if p not in head]
+    ordered = head + second[:MOOD_COUNT]
+    for i in range(max(len(rest_first), len(second))):
+        if i < len(rest_first):
+            ordered.append(rest_first[i])
+        if MOOD_COUNT + i < len(second):
+            ordered.append(second[MOOD_COUNT + i])
+    unique: dict[str, DemoPhoto] = {}
+    for photo in ordered:
+        unique.setdefault(photo.id, photo)
+    return list(unique.values())
+
+
 def find_candidates(primary_type: Optional[str], template: str, access_key: str) -> list[DemoPhoto]:
-    """Enintään 2 hakua: toinen hakusana vain jos ensimmäinen tuotti liian vähän kuvia."""
+    """Enintään 2 hakua: toinen hakusana vain jos ensimmäinen tuotti liian vähän kuvia
+    (paitsi MIXED_QUERY_TEMPLATES: molemmat aina, tulokset vuorotellen)."""
+    queries = image_queries(primary_type, template)
+    if uses_both_queries(template) and len(queries) > 1:
+        first, second = search_photos(queries[0], access_key), search_photos(queries[1], access_key)
+        return mix_results(first, second)
     seen: set[str] = set()
     candidates: list[DemoPhoto] = []
-    for query in image_queries(primary_type, template):
+    for query in queries:
         for photo in search_photos(query, access_key):
             if photo.id not in seen:
                 seen.add(photo.id)
@@ -198,9 +243,12 @@ def mood_for(hero: Optional[DemoPhoto], pool: list[DemoPhoto]) -> list[DemoPhoto
     return [p for p in pool if hero is None or p.id != hero.id][:MOOD_COUNT]
 
 
-def photo_url(photo: DemoPhoto, width: int, *, quality: int = 70) -> str:
+def photo_url(photo: DemoPhoto, width: int, *, quality: int = 70, height: Optional[int] = None) -> str:
     sep = "&" if "?" in photo.raw_url else "?"
-    return f"{photo.raw_url}{sep}{urlencode({'w': width, 'q': quality, 'auto': 'format', 'fit': 'crop'})}"
+    params: dict[str, object] = {"w": width, "q": quality, "auto": "format", "fit": "crop"}
+    if height:
+        params["h"] = height
+    return f"{photo.raw_url}{sep}{urlencode(params)}"
 
 
 def with_utm(url: str, app_name: str) -> str:

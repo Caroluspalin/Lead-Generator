@@ -1,0 +1,257 @@
+/* Kahvila: "Paahtoaste" (alkuperä: portfolion Pikkupaahtimo)
+   Sivu tummuu osio osiolta (sävyt 1–4) kuin papu paahdossa. Heron iso pyöreä kuva
+   kääntyy kerran sivun avautuessa. Fontit: Young Serif (otsikot), Familjen Grotesk (teksti).
+   Paletit: data-paletti="paahto" (oletus) | "kaura" | "ruis". Kontrastit tarkistaa
+   tests/test_demo_v2.py: jokaisen sävyn teksti ja toissijainen teksti ≥ 4,5:1, napin teksti ≥ 4,5:1. */
+
+@font-face {
+  font-family: "Young Serif";
+  src: url("young-serif.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Familjen Grotesk";
+  src: url("familjen-grotesk.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  /* Paahto: raakapapu → kraft → kaneli → tumma paahto, korostus kahvikirsikka */
+  --savy-1: #E3E4CF;
+  --savy-1-teksti: #2A1A12;
+  --savy-1-toinen: #5E4A3A;
+  --savy-1-viiva: #C4C3AA;
+  --savy-2: #D2B98E;
+  --savy-2-teksti: #2A1A12;
+  --savy-2-toinen: #553A27;
+  --savy-2-viiva: #B49B70;
+  --savy-3: #7A4627;
+  --savy-3-teksti: #FFF6E8;
+  --savy-3-toinen: #F2DCC0;
+  --savy-3-viiva: #94603F;
+  --savy-4: #2A1A12;
+  --savy-4-teksti: #E3E4CF;
+  --savy-4-toinen: #BFA98E;
+  --savy-4-viiva: #4A3426;
+  --korostus: #B3202C;
+  --korostus-tumma: #8E1A24;
+  --auki: #4E6B2E;
+
+  --otsikko: "Young Serif", Georgia, serif;
+  --teksti: "Familjen Grotesk", system-ui, sans-serif;
+  --ulko: max(1.25rem, calc((100% - 76rem) / 2));
+}
+
+/* Kaura: viileä kaurasta mustaan, korostus syvä vihreä */
+[data-paletti="kaura"] {
+  --savy-1: #E4E4DE;
+  --savy-1-teksti: #1E2320;
+  --savy-1-toinen: #4E544E;
+  --savy-1-viiva: #C6C7BD;
+  --savy-2: #CFC8B4;
+  --savy-2-teksti: #1E2320;
+  --savy-2-toinen: #4A4537;
+  --savy-2-viiva: #B0A891;
+  --savy-3: #4E5B47;
+  --savy-3-teksti: #F4F3EC;
+  --savy-3-toinen: #DCE0D2;
+  --savy-3-viiva: #67755F;
+  --savy-4: #1C211D;
+  --savy-4-teksti: #E4E4DE;
+  --savy-4-toinen: #A9B0A2;
+  --savy-4-viiva: #364036;
+  --korostus: #2F5D46;
+  --korostus-tumma: #234836;
+  --auki: #2F6B3A;
+}
+
+/* Ruis: harmaampi ruisskaala, korostus luumu */
+[data-paletti="ruis"] {
+  --savy-1: #E7E1DB;
+  --savy-1-teksti: #261C1F;
+  --savy-1-toinen: #5A4A4F;
+  --savy-1-viiva: #CBC2BA;
+  --savy-2: #CDB8A8;
+  --savy-2-teksti: #261C1F;
+  --savy-2-toinen: #4F3B36;
+  --savy-2-viiva: #B09A89;
+  --savy-3: #6B4250;
+  --savy-3-teksti: #FBF1EE;
+  --savy-3-toinen: #EBD3D6;
+  --savy-3-viiva: #855B69;
+  --savy-4: #241A1E;
+  --savy-4-teksti: #E7E1DB;
+  --savy-4-toinen: #B9A6AB;
+  --savy-4-viiva: #44353B;
+  --korostus: #7A2E4E;
+  --korostus-tumma: #5E2139;
+  --auki: #4E6B2E;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--savy-1);
+  color: var(--savy-1-teksti);
+  font: 400 1.0625rem/1.55 var(--teksti);
+  font-variant-numeric: lining-nums;
+  overflow-wrap: break-word;
+}
+h1, h2, h3 {
+  margin: 0;
+  font-family: var(--otsikko);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  overflow-wrap: normal;
+  text-wrap: balance;
+}
+p { margin: 0 0 1em; }
+a { color: inherit; text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+img { display: block; max-width: 100%; height: auto; }
+:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+
+.kehys { padding-inline: var(--ulko); }
+
+/* Sävyt */
+.savy-1 { background: var(--savy-1); color: var(--savy-1-teksti); --toinen: var(--savy-1-toinen); --viiva: var(--savy-1-viiva); }
+.savy-2 { background: var(--savy-2); color: var(--savy-2-teksti); --toinen: var(--savy-2-toinen); --viiva: var(--savy-2-viiva); }
+.savy-3 { background: var(--savy-3); color: var(--savy-3-teksti); --toinen: var(--savy-3-toinen); --viiva: var(--savy-3-viiva); }
+.savy-4 { background: var(--savy-4); color: var(--savy-4-teksti); --toinen: var(--savy-4-toinen); --viiva: var(--savy-4-viiva); }
+
+/* Yläpalkki: pitkä nimi rivittyy sanan kohdalta */
+.yla-sisa { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.1rem; }
+.logo { min-width: 0; font-family: var(--otsikko); font-size: 1.375rem; line-height: 1.1; letter-spacing: -0.02em; text-decoration: none; text-wrap: balance; }
+.tila { flex: none; font-size: 0.9375rem; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.tila.on-auki, .tila.on-kiinni { display: inline-flex; align-items: center; gap: 0.5em; }
+.tila.on-auki::before, .tila.on-kiinni::before { content: ""; width: 0.6em; height: 0.6em; border-radius: 50%; }
+.tila.on-auki::before { background: var(--auki); }
+.tila.on-kiinni::before { border: 1.5px solid currentColor; }
+
+/* Napit */
+.napit { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.nappi {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 3rem; padding: 0.75rem 1.5rem;
+  border-radius: 999px; border: 1.5px solid var(--korostus);
+  background: var(--korostus); color: #fff;
+  font-weight: 600; text-decoration: none; text-align: center;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+.nappi:hover { background: var(--korostus-tumma); border-color: var(--korostus-tumma); }
+.nappi-toissijainen { background: transparent; color: inherit; border-color: currentColor; }
+.savy-1 .nappi-toissijainen:hover { background: var(--savy-1-teksti); border-color: var(--savy-1-teksti); color: var(--savy-1); }
+.savy-4 .nappi-toissijainen:hover { background: var(--savy-4-teksti); border-color: var(--savy-4-teksti); color: var(--savy-4); }
+
+/* Hero */
+.hero { overflow: clip; }
+.hero-sisa { display: grid; grid-template-columns: minmax(0, 1fr); padding-top: 1rem; }
+.hero h1 { font-size: clamp(2.375rem, 1.6rem + 4.4vw, 6rem); max-width: 12ch; }
+.hero-lause { max-width: 34ch; margin: 1rem 0 1.5rem; font-size: 1.125rem; color: var(--savy-1-toinen); }
+
+/* Pyöreä kuva, joka jatkuu ruudun reunan yli. Mobiilissa kuva alkaa heti nappien alta,
+   jotta se näkyy ensimmäisellä ruudulla myös pitkällä otsikolla. */
+.allas {
+  width: 112vw; aspect-ratio: 1;
+  margin: 2rem 0 2.5rem 14vw;
+  border-radius: 50%; overflow: hidden;
+  outline: 1px solid var(--savy-1-viiva); outline-offset: 0.6rem;
+  background: var(--savy-4);
+}
+.allas img { width: 100%; height: 100%; object-fit: cover; }
+/* Ilman kuvaa: paahtorummun renkaat */
+.allas-tyhja { background: repeating-radial-gradient(circle, var(--savy-4) 0 1.6rem, var(--savy-3) 1.6rem 1.75rem); }
+
+/* Tänään-rivi */
+.tanaan-rivi { margin: 0; padding-block: 1.5rem 2.5rem; border-top: 1px solid var(--viiva); display: grid; gap: 1rem; }
+.tanaan-rivi div { display: grid; gap: 0.1rem; }
+.tanaan-rivi dt { font-size: 0.875rem; color: var(--toinen); }
+.tanaan-rivi dd { margin: 0; font-size: 1.125rem; font-weight: 500; }
+.tanaan-rivi dd.on-auki::before { content: ""; display: inline-block; width: 0.55em; height: 0.55em; margin-right: 0.45em; border-radius: 50%; background: var(--auki); vertical-align: 0.08em; }
+
+/* Esittely (sävy 2) */
+.esittely { padding-block: 0 4.5rem; }
+.esittely.ilman-kuvaa { padding-top: 4.5rem; }
+.esittely-kuva { width: calc(100% + 2 * var(--ulko)); max-width: none; margin-inline: calc(-1 * var(--ulko)); aspect-ratio: 4 / 5; object-fit: cover; }
+.esittely-teksti { padding-top: 2.5rem; }
+.ilman-kuvaa .esittely-teksti { padding-top: 0; }
+.esittely h2 { font-size: clamp(2.25rem, 1.5rem + 3.5vw, 4rem); max-width: 14ch; margin-bottom: 1.25rem; }
+.esittely p { max-width: 38ch; font-size: 1.1875rem; }
+
+/* Valikoima (sävy 3) */
+.valikoima { padding-block: 4.5rem; }
+.valikoima-sisa { display: grid; gap: 2.5rem; }
+.valikoima-kuva { width: 78%; margin-left: auto; aspect-ratio: 4 / 5; object-fit: cover; }
+.valikoima h2 { font-size: clamp(2.25rem, 1.5rem + 3.5vw, 4rem); margin-bottom: 1.5rem; }
+.palvelut { list-style: none; margin: 0 0 1.5rem; padding: 0; border-top: 1px solid var(--viiva); }
+.palvelut li { padding: 1rem 0 1.05rem; border-bottom: 1px solid var(--viiva); }
+.palvelut h3 { font-size: 1.5rem; line-height: 1.15; margin-bottom: 0.35rem; }
+.palvelut p { margin: 0; color: var(--toinen); max-width: 44ch; }
+.huom { margin: 0; color: var(--toinen); font-size: 0.9375rem; max-width: 44ch; }
+
+/* Yhteystiedot (sävy 4) */
+.yhteys { padding-block: 4.5rem; }
+.yhteys-sisa { display: grid; gap: 3rem; }
+.yhteys h2 { font-size: clamp(2.25rem, 1.5rem + 3.5vw, 4rem); margin-bottom: 1.5rem; }
+.ajat { margin: 0 0 1.75rem; max-width: 24rem; border-top: 1px solid var(--viiva); }
+.ajat div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid var(--viiva); }
+.ajat dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.ajat .kiinni dd { color: var(--toinen); }
+.ajat .on-tanaan dt, .ajat .on-tanaan dd { font-weight: 700; }
+.ajat .on-tanaan dt::after { content: ", tänään"; font-weight: 400; color: var(--toinen); }
+.osoite { margin-bottom: 1rem; }
+.yhteys .nappi { margin-top: 0.5rem; }
+.yhteys-kuva { width: calc(100% + 2 * var(--ulko)); max-width: none; margin-inline: calc(-1 * var(--ulko)); aspect-ratio: 4 / 5; object-fit: cover; }
+
+/* Alatunniste */
+.ala { font-size: 0.875rem; color: var(--savy-4-toinen); }
+.ala-sisa { display: grid; gap: 0.5rem; padding-block: 2rem 2.5rem; border-top: 1px solid var(--savy-4-viiva); }
+.ala p { margin: 0; }
+
+/* Leveät näytöt */
+@media (min-width: 40rem) {
+  .tanaan-rivi { grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 4rem; }
+  /* Tabletilla täysleveät pystykuvat olisivat liian korkeita */
+  .esittely-kuva, .yhteys-kuva { aspect-ratio: 3 / 2; }
+  .valikoima-sisa { grid-template-columns: 5fr 7fr; column-gap: 4rem; align-items: start; }
+  .valikoima-sisa.ilman-kuvaa { grid-template-columns: minmax(0, 46rem); }
+  .valikoima-kuva { width: 100%; border-radius: 0.5rem; }
+}
+@media (min-width: 64rem) {
+  .hero-sisa { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; min-height: min(calc(100svh - 6rem), 56rem); padding-block: 2rem 4rem; }
+  .hero h1 { font-size: clamp(3.5rem, 1rem + 4.6vw, 5.75rem); max-width: 13ch; }
+  .hero-lause { font-size: 1.25rem; margin: 1.25rem 0 1.75rem; }
+  .allas { width: 60vw; max-width: 64rem; margin: 0 0 0 2vw; }
+  .tanaan-rivi { padding-block: 2rem 3.5rem; }
+  .esittely { padding-block: 7rem; }
+  .esittely-sisa { display: grid; grid-template-columns: 5fr 7fr; gap: 5rem; align-items: center; }
+  .esittely-kuva { width: 100%; margin: 0; aspect-ratio: 4 / 5; border-radius: 0.5rem; }
+  .esittely-teksti { padding: 0; }
+  .valikoima { padding-block: 7rem; }
+  .valikoima-sisa { column-gap: 6rem; }
+  .yhteys { padding-block: 7rem; }
+  .yhteys-sisa { grid-template-columns: 6fr 5fr; gap: 6rem; align-items: start; }
+  .yhteys-kuva { width: 100%; margin: 0; aspect-ratio: 4 / 5; border-radius: 0.5rem; }
+}
+
+/* Avausjakso: allas kääntyy kerran, otsikko ja napit nousevat. Vain transform ja opacity. */
+@media (prefers-reduced-motion: no-preference) {
+  .allas { animation: allas 2.6s cubic-bezier(0.16, 0.84, 0.24, 1) 0.1s both; }
+  .hero h1 { animation: nousu 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.15s both; }
+  .hero-lause { animation: nousu 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.3s both; }
+  .hero .napit { animation: nousu 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.45s both; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+@keyframes allas {
+  from { transform: rotate(-140deg) scale(0.94); }
+  to { transform: none; }
+}
+@keyframes nousu {
+  from { opacity: 0; transform: translateY(0.75rem); }
+  to { opacity: 1; transform: none; }
+}

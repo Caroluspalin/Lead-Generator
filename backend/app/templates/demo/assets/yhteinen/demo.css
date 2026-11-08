@@ -1,0 +1,22 @@
+/* Kaikille versio 2 -demoille yhteinen: luonnosbanneri ja ohituslinkki.
+   Banneri on tarkoituksella neutraali (ei pohjan värejä): se kuuluu luonnokseen, ei asiakkaan sivuun. */
+
+.demo-bar {
+  margin: 0;
+  padding: 6px max(1.25rem, calc((100% - 76rem) / 2));
+  background: #111;
+  color: #e8e8e8;
+  font: 400 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.demo-bar a { color: #fff; }
+/* Mobiilissa lyhyt versio (display: none poistaa myös ruudunlukijalta, ei toistoa) */
+.demo-bar .long { display: none; }
+@media (min-width: 40rem) {
+  .demo-bar .long { display: inline; }
+  .demo-bar .short { display: none; }
+}
+
+.ohitus { position: absolute; left: 1rem; top: -4rem; z-index: 10; padding: 0.6rem 1rem; background: #111; color: #fff; }
+.ohitus:focus { top: 1rem; }

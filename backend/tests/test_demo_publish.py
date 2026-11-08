@@ -24,14 +24,29 @@ CONFIG = R2Config(
 class FakeStore:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, Optional[datetime]]] = {}
+        # avain -> (content_type, cache_control, metadata)
+        self.headers: dict[str, tuple[str, str, dict[str, str]]] = {}
         self.deleted: list[str] = []
         self.fail_put = False
         self.fail_delete = False
 
-    def put(self, key: str, body: bytes, *, expires_at: Optional[datetime]) -> None:
+    def put(
+        self,
+        key: str,
+        body: bytes,
+        *,
+        expires_at: Optional[datetime],
+        content_type: str = "text/html; charset=utf-8",
+        cache_control: str = "no-store",
+        metadata: Optional[dict[str, str]] = None,
+    ) -> None:
         if self.fail_put:
             raise RuntimeError("R2 down")
         self.objects[key] = (body, expires_at)
+        self.headers[key] = (content_type, cache_control, dict(metadata or {}))
+
+    def exists(self, key: str) -> bool:
+        return key in self.objects
 
     def delete(self, key: str) -> None:
         if self.fail_delete:
@@ -140,7 +155,7 @@ def test_other_user_cannot_publish(client_b: TestClient, demo: dict[str, Any], s
 
 def test_edit_of_published_demo_updates_same_url(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
     published = _publish(client_a, demo)
-    edited = {k: v for k, v in published["content"].items() if k not in ("opening_hours", "images")}
+    edited = {k: v for k, v in published["content"].items() if k not in ("opening_hours", "opening_periods", "images")}
     edited["hero_subtitle"] = "Uusi alaotsikko joka päivittyy julkaistuun versioon."
     res = client_a.patch(f"/leads/{demo['lead_id']}/demo", json={"content": edited}).json()
     assert res["public_url"] == published["public_url"]
