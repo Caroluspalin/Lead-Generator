@@ -368,3 +368,105 @@ def test_mixed_results_hero_from_first_query_mood_from_second() -> None:
     hero, mood, _ = unsplash.choose_images(mixed)
     assert hero is not None and hero.id == "a1"
     assert [p.id for p in mood] == ["b1", "b2", "b3"]
+
+
+# --- Väitteet, joita lähdetiedoissa ei ole ---
+
+from app.demo_site import DEMO_SYSTEM_PROMPT, DemoAIContent, content_violations  # noqa: E402
+
+_NAME = "Kahvila Kuppi Espoo Esimerkkikatu 12"
+
+
+def _with(**fields: str) -> DemoAIContent:
+    return DemoAIContent(**{**VALID, **fields})
+
+
+@pytest.mark.parametrize("field,text,label", [
+    ("about", "Leivomme pullat itse joka aamu ja keitämme kahvin tilauksesta.", "oma valmistus"),
+    ("about", "Kahvila on vanhan talon kivijalassa, ja kahvit keitetään tilauksesta.", "sijainti"),
+    ("about_title", "Kahvila keskellä korttelia", "sijainti"),
+    ("hero_title", "Kahvia ja pullaa kulman takana", "sijainti"),
+    ("about", "Olemme perheyritys, ja kahvit keitetään tilauksesta joka päivä.", "perhe tai omistajat"),
+    ("about", "Pieni kahvila, jossa kahvit keitetään tilauksesta ja leivonnaiset ovat tiskillä.", "koko"),
+    ("about", "Kotitekoiset leivonnaiset ja kahvit tilauksesta tiskiltä ja mukaan.", "oma valmistus"),
+    ("about_title", "Pitkät perinteet kahvilassa", "historia"),
+    ("hero_subtitle", "Kahvia ja leivonnaisia omassa leipomossa tehtyinä.", "oma valmistus"),
+])
+def test_claims_without_source_are_rejected(field: str, text: str, label: str) -> None:
+    problems = content_violations(_with(**{field: text}), allowed_text=_NAME)
+    assert any(p.startswith(f"{field}: väite") and label in p for p in problems), problems
+
+
+@pytest.mark.parametrize("field,text,source", [
+    ("about", "Leivomme pullat itse joka aamu ja keitämme kahvin tilauksesta.", "Leivomme kaiken itse aamuisin."),
+    ("about", "Kahvila on vanhan talon kivijalassa, ja kahvit keitetään tilauksesta.", "Löydät meidät kivijalasta, vanhasta talosta."),
+    ("about", "Olemme perheyritys, ja kahvit keitetään tilauksesta joka päivä.", "Perheemme kahvila palvelee teitä."),
+    ("about_title", "Leipomo ja kahvila samassa talossa", "Kahvila ja leipomo Vanha Postitalo"),
+])
+def test_claims_supported_by_name_or_deep_scan_are_allowed(field: str, text: str, source: str) -> None:
+    problems = content_violations(_with(**{field: text}), allowed_text=f"{_NAME} {source}")
+    assert not [p for p in problems if "väite" in p], problems
+
+
+def test_service_descriptions_are_not_checked_for_business_claims() -> None:
+    services = [{"name": "Leivonnaiset", "description": "Pullat ja piirakat leivotut samana aamuna."}, *VALID["services"][1:]]
+    problems = content_violations(_with(services=services), allowed_text=_NAME)  # type: ignore[arg-type]
+    assert not [p for p in problems if "väite" in p]
+
+
+def test_prompt_forbids_unsupported_claims() -> None:
+    assert "VAIN sitä, mikä lukee yrityksen nimessä, osoitteessa tai VERKKOSIVUN SISÄLLÖSSÄ" in DEMO_SYSTEM_PROMPT
+    assert "keskustassa" not in DEMO_SYSTEM_PROMPT.split("about_title")[1].split("\n")[0]
+
+
+def test_unsupported_claim_triggers_retry_then_502(
+    client_a: TestClient, cafe_lead: dict[str, Any], fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
+) -> None:
+    claim = json.dumps({**VALID, "about": "Leivomme kaiken itse ja kahvit keitetään tilauksesta aamuisin."})
+    fake_openai.replies = [claim, claim]
+    res = client_a.post(f"/leads/{cafe_lead['id']}/demo", json={})
+    assert res.status_code == 502
+    assert "oma valmistus" in res.json()["detail"]
+
+
+# --- Kahvilan yhteystieto-osion tumma kuva ---
+
+def _colored(pid: str, color: str) -> unsplash.DemoPhoto:
+    return _photo(pid).model_copy(update={"color": color})
+
+
+def test_cafe_last_mood_image_is_darkest_dark_candidate() -> None:
+    pool = [_colored("h", "#f0f0f0"), _colored("a", "#d9c8b0"), _colored("d1", "#3a2a20"),
+            _colored("b", "#c0a080"), _colored("d2", "#141010")]
+    hero, mood, _ = unsplash.choose_images(pool, "cafe")
+    assert hero is not None and hero.id == "h"
+    assert [p.id for p in mood] == ["a", "d1", "d2"]
+
+
+def test_cafe_without_dark_candidate_has_no_contact_image() -> None:
+    pool = [_colored(c, "#e0e0e0") for c in "habc"]
+    _, mood, _ = unsplash.choose_images(pool, "cafe")
+    assert len(mood) == 2
+    html = render_demo_html(
+        template="cafe", color_scheme="paahto", business=BUSINESS, sender=SENDER,
+        content=DemoStoredContent(**VALID, images=unsplash_images(pool)),
+    )
+    assert 'class="yhteys-kuva"' not in html
+
+
+def unsplash_images(pool: list[unsplash.DemoPhoto]) -> Any:
+    from app.demo_site import DemoImages
+    hero, mood, options = unsplash.choose_images(pool, "cafe")
+    return DemoImages(hero=hero, mood=mood, options=options)
+
+
+def test_dark_candidate_outside_top_options_is_pulled_in() -> None:
+    pool = [_colored(f"l{i}", "#eeeeee") for i in range(10)] + [_colored("dark", "#101010")]
+    _, mood, options = unsplash.choose_images(pool, "cafe")
+    assert options[-1].id == "dark" and mood[-1].id == "dark"
+
+
+def test_other_templates_keep_plain_mood_order() -> None:
+    pool = [_colored("h", "#f0f0f0"), _colored("d", "#101010"), _colored("a", "#eeeeee"), _colored("b", "#dddddd")]
+    _, mood, _ = unsplash.choose_images(pool, "beauty")
+    assert [p.id for p in mood] == ["d", "a", "b"]

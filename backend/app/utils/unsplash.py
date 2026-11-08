@@ -81,6 +81,27 @@ class DemoPhoto(BaseModel):
     download_location: str
     has_people: bool = False
     has_products: bool = False
+    color: str = ""  # Unsplashin keskisävy (#rrggbb); tyhjä vanhoissa demoissa
+
+
+# Pohjat, joiden viimeinen tunnelmakuva on tummalla pohjalla (kahvilan yhteystiedot): kuvan
+# keskisävyn pitää olla tumma, ettei vaalea kuva katkaise tummaa loppua. Ilman tummaa kuvaa
+# viimeinen kuva jää pois.
+DARK_LAST_TEMPLATES = {"cafe"}
+DARK_MAX_LUMINANCE = 0.06  # suhteellinen luminanssi, noin #464646
+
+
+def luminance(color: str) -> Optional[float]:
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        return None
+    channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def is_dark(photo: DemoPhoto) -> bool:
+    value = luminance(photo.color)
+    return value is not None and value <= DARK_MAX_LUMINANCE
 
 
 # Versio 2 -pohjien omat haut: kuvan muoto ratkaisee (kahvilan pyöreä hero tarvitsee yläkulmasta
@@ -128,6 +149,7 @@ def _to_photo(item: dict[str, object]) -> Optional[DemoPhoto]:
             download_location=str(links["download_location"]),
             has_people=bool(_PEOPLE_RE.search(text)),
             has_products=bool(_PRODUCTS_RE.search(f"{text} {tag_text}")),
+            color=str(item.get("color") or ""),
         )
     except (KeyError, TypeError, AssertionError, ValueError):
         return None
@@ -225,7 +247,9 @@ def pick_hero(candidates: list[DemoPhoto]) -> Optional[DemoPhoto]:
     return hero
 
 
-def choose_images(candidates: list[DemoPhoto]) -> tuple[Optional[DemoPhoto], list[DemoPhoto], list[DemoPhoto]]:
+def choose_images(
+    candidates: list[DemoPhoto], template: str = ""
+) -> tuple[Optional[DemoPhoto], list[DemoPhoto], list[DemoPhoto]]:
     """(hero, mood, options). Hero: ei ihmisiä eikä tuotemerkkejä jos mahdollista."""
     if not candidates:
         return None, [], []
@@ -235,12 +259,27 @@ def choose_images(candidates: list[DemoPhoto]) -> tuple[Optional[DemoPhoto], lis
     options = sorted(candidates, key=_hero_rank)[:MAX_OPTIONS]
     if hero not in options:
         options = [hero] + options[: MAX_OPTIONS - 1]
+    if template in DARK_LAST_TEMPLATES and not any(is_dark(p) for p in options if p is not hero):
+        darkest = _darkest([p for p in candidates if p not in options and not p.has_people])
+        if darkest is not None:
+            options = options[: MAX_OPTIONS - 1] + [darkest]
     # Tunnelmakuvat samasta listasta kuin vaihtoehdot: hero-vaihto modaalissa pitää muut kuvat johdonmukaisina
-    return hero, mood_for(hero, options), options
+    return hero, mood_for(hero, options, template), options
 
 
-def mood_for(hero: Optional[DemoPhoto], pool: list[DemoPhoto]) -> list[DemoPhoto]:
-    return [p for p in pool if hero is None or p.id != hero.id][:MOOD_COUNT]
+def _darkest(pool: list[DemoPhoto]) -> Optional[DemoPhoto]:
+    dark = [p for p in pool if is_dark(p)]
+    return min(dark, key=lambda p: luminance(p.color) or 0.0) if dark else None
+
+
+def mood_for(hero: Optional[DemoPhoto], pool: list[DemoPhoto], template: str = "") -> list[DemoPhoto]:
+    rest = [p for p in pool if hero is None or p.id != hero.id]
+    if template not in DARK_LAST_TEMPLATES:
+        return rest[:MOOD_COUNT]
+    # Viimeinen tunnelmakuva tummalle osiolle: tummin ehdokas, muuten ei kuvaa
+    darkest = _darkest(rest)
+    light = [p for p in rest if p is not darkest][: MOOD_COUNT - 1]
+    return light + ([darkest] if darkest else [])
 
 
 def photo_url(photo: DemoPhoto, width: int, *, quality: int = 70, height: Optional[int] = None) -> str:

@@ -232,6 +232,31 @@ _INVENTED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ]
 ]
 _QUOTE_CHARS = "\"“”„«»"
+
+# Väitteet yrityksestä, jotka saa kirjoittaa vain jos lähdeteksti (nimi, osoite, Deep Scan) tukee niitä:
+# (label, väite tekstissä, todiste lähteessä). Koskee heroa ja esittelyä; palvelukuvaukset kertovat
+# alan palveluista eivätkä yrityksestä. Todiste haetaan ilman sanarajaa ("Postitalo" tukee "talossa").
+_UNSUPPORTED_CLAIMS: list[tuple[str, re.Pattern[str], re.Pattern[str]]] = [
+    (label, re.compile(claim, re.IGNORECASE), re.compile(evidence, re.IGNORECASE))
+    for label, claim, evidence in [
+        ("sijainti", r"\bkulma(n|ssa|lla)\b|\bkeskust\w*|\bkeskellä\b|\bkivijal\w*|\bkatutaso\w*|"
+                     r"\btalo(ssa|n)\b|\bkerrok\w*|\bsisäpiha\w*|\branna(ssa|lla)\b|\btori(lla|n)\b|"
+                     r"\bkauppakeskuk?\w*|\baseman?\b|\bnurkan\b",
+         r"kulma|keskust|kivijal|katutaso|talo|kerros|sisäpiha|ranta|tori|kauppakesk|asema|nurk"),
+        ("oma valmistus", r"\bleivo(mme|taan|tut|ttu)\b|\bpaahda(mme|an)\b|\bpaahde(taan|tut)\b|\bitse\s+\w*(leivo|paahd|tee|teh|valmist)\w*|"
+                          r"\bomassa\s+(leipomo|keittiö|paahtimo)\w*|\boma(n|t)?\s+(leipomo|paahtimo)\w*|\bkotitekoi\w*|"
+                          r"\bkäsin\s+(tehty|tehdyt|tehtyjä)\b|\blähiruo\w*|\bluomu\w*",
+         r"leipo|leivo|paahd|paahti|kotitekoi|käsin|lähiruo|luomu|itse tehty|omat tuotteet"),
+        ("perhe tai omistajat", r"\bperhe(yritys|yrity\w*|en)\b|\bperheyri\w*|\bomistaja\w*|\byrittäjä\w*|\bpariskun\w*|"
+                                r"\b(isä|äiti|sisar|veli|veljek)\w*",
+         r"perhe|omistaja|yrittäjä|pariskun|\bisä|\bäiti|\bsisar|\bveli|\bveljek"),
+        ("historia", r"\bperinte\w*|\bperinteik\w*|\bjo\s+pitkään\b|\bvuosi(a|en)\b|\bvanhin\w*|\bensimmäi\w*",
+         r"perinte|vuod|vuosi|perustet|vanhin|ensimmäi"),
+        ("koko", r"\bpien(i|essä|en|eksi)\b|\btilav\w*|\biso(ssa|n)?\s+(sali|tila|liike|myymälä)\w*",
+         r"pieni|pienessä|tilav|iso"),
+    ]
+]
+_CLAIM_FIELDS = ("hero_title", "hero_subtitle", "about_title", "about")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?:])\s+")
 _SENTENCE_END_RE = re.compile(r"[.!?](?=\s+[A-ZÅÄÖ])")
 _WORD_RE = re.compile(r"[A-Za-zÅÄÖåäöÉéÜü][\wÅÄÖåäöÉéÜü'-]*")
@@ -280,6 +305,13 @@ def content_violations(content: DemoAIContent, *, allowed_text: str) -> list[str
     allowed = _allowed_vocabulary(allowed_text)
     problems: list[str] = []
     for field, text in fields:
+        if field in _CLAIM_FIELDS:
+            for label, claim, evidence in _UNSUPPORTED_CLAIMS:
+                found = claim.search(text)
+                if found and not evidence.search(allowed_text):
+                    problems.append(
+                        f"{field}: väite jota lähdetiedoissa ei ole ({label}: '{found.group(0)}'), kirjoita vain yleisesti"
+                    )
         for word in find_forbidden_words(text):
             problems.append(f"{field}: kielletty sana '{word}'")
         if re.search(r"\d", text):
@@ -346,7 +378,7 @@ Palauta VAIN yksi JSON-objekti täsmälleen tällä rakenteella (ei muuta teksti
 {
   "hero_title": "sivun pääotsikko: lyhyt, luonteva lause, 5-60 merkkiä, EI saa toistaa yrityksen nimen sanoja, esim. Hiukset kuntoon Kauniaisissa",
   "hero_subtitle": "yksi lyhyt, luonteva lause siitä mitä yritys tarjoaa, 10-120 merkkiä",
-  "about_title": "esittelyosion otsikko, 2-6 sanaa, ei yrityksen nimeä, esim. Rauhallinen paikka keskustassa",
+  "about_title": "esittelyosion otsikko, 2-6 sanaa, ei yrityksen nimeä, esim. Kahvit ja leivonnaiset Espoossa",
   "about": "2-4 lyhyttä lausetta yrityksestä, 40-700 merkkiä",
   "services": [{"name": "palvelun nimi, 2-60 merkkiä", "description": "yksi lause, 10-220 merkkiä"}]
 }
@@ -367,6 +399,10 @@ SÄÄNNÖT:
 - Palvelut: alan tyypilliset palvelut. Jos VERKKOSIVUN SISÄLTÖ on annettu, käytä ensisijaisesti sieltä löytyviä palveluita.
 - ÄLÄ keksi faktoja. Ehdottomasti kielletty: hinnat, numerot, vuosiluvut, kokemusvuodet, arvostelut, tähdet,
   asiakkaiden kehut, sitaatit tai lainausmerkit, palkinnot, sertifikaatit, henkilöiden nimet, yrityksen historia.
+- Kirjoita yrityksestä VAIN sitä, mikä lukee yrityksen nimessä, osoitteessa tai VERKKOSIVUN SISÄLLÖSSÄ. Jos sitä
+  ei sanota siellä, älä väitä: sijaintia (kulmassa, keskustassa, talossa, kerroksessa, rannalla), omaa valmistusta
+  (leivomme itse, paahdamme, kotitekoinen, omassa leipomossa), perhe- tai omistajatietoja, perinteitä tai kokoa
+  (pieni, tilava). Kirjoita silloin alan yleisistä asioista: mitä palveluita on ja miten asioidaan.
 - Kirjoita yleisesti paikkansapitävää: mitä palvelu on ja miksi se on asiakkaalle hyödyllinen.
 - Ei yhteystietoja, aukioloaikoja eikä hintoja (ne lisätään sivulle muualta).
 - Kielletyt sanat: ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen, digitaalinen läsnäolo,

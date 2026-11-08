@@ -63,10 +63,10 @@
     </div>
   </section>
 
-  <section id="valikoima" class="valikoima savy-3" aria-labelledby="valikoima-otsikko">
+  <section id="valikoima" class="valikoima savy-3{% if not valikoima_kuva %} ilman-kuvaa{% endif %}" aria-labelledby="valikoima-otsikko">
     <div class="kehys valikoima-sisa{% if not valikoima_kuva %} ilman-kuvaa{% endif %}">
       {% if valikoima_kuva %}
-      <img class="valikoima-kuva" src="{{ valikoima_kuva.src }}" srcset="{{ valikoima_kuva.srcset }}" sizes="(min-width: 64rem) 30rem, (min-width: 40rem) 40vw, 78vw" width="1280" height="1600" alt="" loading="lazy" decoding="async">
+      <img class="valikoima-kuva" src="{{ valikoima_kuva.src }}" srcset="{{ valikoima_kuva.srcset }}" sizes="(min-width: 64rem) 30rem, (min-width: 40rem) 40vw, 100vw" width="1280" height="1600" alt="" loading="lazy" decoding="async">
       {% endif %}
       <div class="valikoima-lista">
         <h2 id="valikoima-otsikko">{{ tpl.services_title }}</h2>

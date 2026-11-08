@@ -1750,7 +1750,7 @@ async def find_demo_images(lead: Lead, template: str) -> tuple[DemoImages, int]:
         return DemoImages(), 0
     queries = unsplash.image_queries(lead.primary_type, template)
     candidates = await asyncio.to_thread(unsplash.find_candidates, lead.primary_type, template, UNSPLASH_ACCESS_KEY)
-    hero, mood, options = unsplash.choose_images(candidates)
+    hero, mood, options = unsplash.choose_images(candidates, template)
     if unsplash.uses_both_queries(template):
         searches = len(queries[:2])
     else:
@@ -1902,16 +1902,19 @@ def update_demo(
     if template != demo.template and stored.price_note == price_note_for(demo.template):
         # Pohjan oletusteksti vaihtuu pohjan mukana (kahvilassa ei "ajanvarausta"); käyttäjän oma teksti säilyy
         stored = stored.model_copy(update={"price_note": price_note_for(template)})
-    if req.hero_image_id is not None:
+    # Hero-vaihto, tai pohjan vaihto: tunnelmakuvien säännöt ovat pohjakohtaisia (kahvilassa tumma viimeinen)
+    if req.hero_image_id is not None or template != demo.template:
         images = stored.images
-        if req.hero_image_id == "none":
+        if req.hero_image_id is None:
+            new_hero = images.hero
+        elif req.hero_image_id == "none":
             new_hero = None
         else:
             new_hero = next((p for p in images.options if p.id == req.hero_image_id), None)
             if new_hero is None:
                 raise HTTPException(422, "Unknown hero_image_id (must be one of content.images.options)")
         before = {p.id for p in _used_photos(images)}
-        updated = DemoImages(hero=new_hero, mood=unsplash.mood_for(new_hero, images.options), options=images.options)
+        updated = DemoImages(hero=new_hero, mood=unsplash.mood_for(new_hero, images.options, template), options=images.options)
         stored = stored.model_copy(update={"images": updated})
         newly_used = [p for p in _used_photos(updated) if p.id not in before]
         if newly_used and UNSPLASH_ACCESS_KEY:

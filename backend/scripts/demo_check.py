@@ -80,13 +80,13 @@ SAMPLES: list[Sample] = [
         slug="kuppi-a2b3c", template="cafe", palette="paahto", name="Kuppi", city="Espoo",
         address="Esimerkkikatu 12, 02100 Espoo, Suomi", phone="040 000 0000", primary_type="cafe",
         content={
-            "hero_title": "Kahvia ja pullaa kulman takana",
-            "hero_subtitle": "Suodatinkahvia, espressojuomia ja aamulla leivotut pullat.",
-            "about_title": "Pieni kahvila keskellä korttelia",
-            "about": "Keitämme kahvin tilauksesta ja leivomme pullat aamulla. Istumaan mahtuu hyvin, ja kaiken saa myös mukaan.",
+            "hero_title": "Kahvia ja pullaa joka arkiaamu",
+            "hero_subtitle": "Suodatinkahvia, espressojuomia ja tuoreita leivonnaisia.",
+            "about_title": "Kahvila Espoossa",
+            "about": "Kahvi keitetään tilauksesta, ja leivonnaiset ovat esillä tiskillä. Pöytään voi istahtaa, ja kaiken saa myös mukaan.",
             "services": [
                 {"name": "Kahvit", "description": "Suodatinkahvi, espresso ja maitokahvit, myös kaurajuomalla."},
-                {"name": "Leivonnaiset", "description": "Korvapuustit, piirakat ja kakkupalat samana aamuna leivottuina."},
+                {"name": "Leivonnaiset", "description": "Korvapuustit, piirakat ja kakkupalat tiskiltä."},
                 {"name": "Suolaiset", "description": "Täytetyt sämpylät ja piiraat lounasaikaan."},
                 {"name": "Teet", "description": "Mustat, vihreät ja yrttiteet irtoteenä."},
             ],
@@ -139,9 +139,9 @@ def load_photos(template: str, primary_type: str, out: Path) -> list[unsplash.De
 def images_for(sample: Sample, photos: list[unsplash.DemoPhoto]) -> DemoImages:
     if not photos:
         return DemoImages()
-    _, _, options = unsplash.choose_images(photos)
+    _, _, options = unsplash.choose_images(photos, sample.template)
     hero = options[sample.hero_index % len(options)] if options else None
-    return DemoImages(hero=hero, mood=unsplash.mood_for(hero, options), options=options)
+    return DemoImages(hero=hero, mood=unsplash.mood_for(hero, options, sample.template), options=options)
 
 
 def render(sample: Sample, images: DemoImages) -> str:

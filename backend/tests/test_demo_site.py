@@ -31,7 +31,7 @@ from tests.conftest import FakeOpenAI
 VALID: dict[str, Any] = {
     "hero_title": "Hiukset kuntoon Kauniaisissa",
     "hero_subtitle": "Leikkaukset, värit ja kampaukset koko perheelle.",
-    "about": "Olemme pieni paikallinen liike. Leikkaamme naisten, miesten ja lasten hiukset.",
+    "about": "Olemme paikallinen liike. Leikkaamme naisten, miesten ja lasten hiukset.",
     "services": [
         {"name": "Hiustenleikkaus", "description": "Leikkaus toiveidenne mukaan, myös lapsille."},
         {"name": "Värjäys", "description": "Kestovärit, raidat ja sävytykset."},
@@ -755,7 +755,7 @@ def test_page_texts_include_template_and_business_name() -> None:
 
 
 def test_repetition_with_fixed_template_text_detected() -> None:
-    content = _content(about="Olemme pieni paikallinen liike Kauniaisissa. Varatkaa aika puhelimitse.")
+    content = _content(about="Olemme paikallinen liike Kauniaisissa. Varatkaa aika puhelimitse.")
     assert "varatkaa aika puhelimitse" in find_repeated_phrases(content, business_name="X", template="beauty")
 
 
@@ -786,7 +786,7 @@ def test_prompt_has_style_rules() -> None:
 def test_repeated_phrases_trigger_one_retry(
     client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
 ) -> None:
-    repetitive = {**VALID, "about": "Olemme pieni paikallinen liike. Leikkaukset, värit ja kampaukset koko perheelle."}
+    repetitive = {**VALID, "about": "Olemme paikallinen liike. Leikkaukset, värit ja kampaukset koko perheelle."}
     demo_ready.replies = [json.dumps(repetitive), json.dumps(VALID)]
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     assert len(demo_ready.calls) == 2
@@ -798,7 +798,7 @@ def test_repeated_phrases_twice_accepted_with_warning(
     client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], caplog: pytest.LogCaptureFixture
 ) -> None:
     import logging
-    repetitive = {**VALID, "about": "Olemme pieni paikallinen liike. Leikkaukset, värit ja kampaukset koko perheelle."}
+    repetitive = {**VALID, "about": "Olemme paikallinen liike. Leikkaukset, värit ja kampaukset koko perheelle."}
     demo_ready.replies = [json.dumps(repetitive), json.dumps(repetitive)]
     with caplog.at_level(logging.WARNING, logger="app.main"):
         res = client_a.post(f"/leads/{lead['id']}/demo", json={})

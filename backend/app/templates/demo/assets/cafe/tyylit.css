@@ -182,9 +182,12 @@ img { display: block; max-width: 100%; height: auto; }
 .esittely p { max-width: 38ch; font-size: 1.1875rem; }
 
 /* Valikoima (sävy 3) */
-.valikoima { padding-block: 4.5rem; }
+/* Mobiilissa kuva alkaa osion yläreunasta kuten esittelyssä */
+.valikoima { padding-block: 0 4.5rem; }
+.valikoima.ilman-kuvaa { padding-top: 4.5rem; }
 .valikoima-sisa { display: grid; gap: 2.5rem; }
-.valikoima-kuva { width: 78%; margin-left: auto; aspect-ratio: 4 / 5; object-fit: cover; }
+/* Mobiilissa reunasta reunaan kuten esittelyn kuva */
+.valikoima-kuva { width: calc(100% + 2 * var(--ulko)); max-width: none; margin-inline: calc(-1 * var(--ulko)); aspect-ratio: 4 / 5; object-fit: cover; }
 .valikoima h2 { font-size: clamp(2.25rem, 1.5rem + 3.5vw, 4rem); margin-bottom: 1.5rem; }
 .palvelut { list-style: none; margin: 0 0 1.5rem; padding: 0; border-top: 1px solid var(--viiva); }
 .palvelut li { padding: 1rem 0 1.05rem; border-bottom: 1px solid var(--viiva); }
@@ -204,7 +207,8 @@ img { display: block; max-width: 100%; height: auto; }
 .ajat .on-tanaan dt::after { content: ", tänään"; font-weight: 400; color: var(--toinen); }
 .osoite { margin-bottom: 1rem; }
 .yhteys .nappi { margin-top: 0.5rem; }
-.yhteys-kuva { width: calc(100% + 2 * var(--ulko)); max-width: none; margin-inline: calc(-1 * var(--ulko)); aspect-ratio: 4 / 5; object-fit: cover; }
+/* Aina tumma kuva (unsplash.DARK_LAST_TEMPLATES). Mobiilissa matala, ettei tumma loppu katkea. */
+.yhteys-kuva { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 0.5rem; }
 
 /* Alatunniste */
 .ala { font-size: 0.875rem; color: var(--savy-4-toinen); }
@@ -215,10 +219,11 @@ img { display: block; max-width: 100%; height: auto; }
 @media (min-width: 40rem) {
   .tanaan-rivi { grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 4rem; }
   /* Tabletilla täysleveät pystykuvat olisivat liian korkeita */
-  .esittely-kuva, .yhteys-kuva { aspect-ratio: 3 / 2; }
+  .esittely-kuva { aspect-ratio: 3 / 2; }
+  .valikoima { padding-top: 4.5rem; }
   .valikoima-sisa { grid-template-columns: 5fr 7fr; column-gap: 4rem; align-items: start; }
   .valikoima-sisa.ilman-kuvaa { grid-template-columns: minmax(0, 46rem); }
-  .valikoima-kuva { width: 100%; border-radius: 0.5rem; }
+  .valikoima-kuva { width: 100%; margin: 0; border-radius: 0.5rem; }
 }
 @media (min-width: 64rem) {
   .hero-sisa { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; min-height: min(calc(100svh - 6rem), 56rem); padding-block: 2rem 4rem; }
@@ -234,7 +239,7 @@ img { display: block; max-width: 100%; height: auto; }
   .valikoima-sisa { column-gap: 6rem; }
   .yhteys { padding-block: 7rem; }
   .yhteys-sisa { grid-template-columns: 6fr 5fr; gap: 6rem; align-items: start; }
-  .yhteys-kuva { width: 100%; margin: 0; aspect-ratio: 4 / 5; border-radius: 0.5rem; }
+  .yhteys-kuva { aspect-ratio: 4 / 5; }
 }
 
 /* Avausjakso: allas kääntyy kerran, otsikko ja napit nousevat. Vain transform ja opacity. */
