@@ -196,7 +196,9 @@ img { display: block; max-width: 100%; height: auto; }
   :root { --rako: 5px; --porras: 1rem; }
   .kaislat { height: clamp(17rem, 52svh, 34rem); }
   .tanaan-rivi { grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 4rem; }
-  .palvelut { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 3rem; }
+  /* Ei yksinäistä kohtaa viimeiselle riville: 4 -> 2 + 2, muuten 3 saraketta (3, 3 + 2, 3 + 3) */
+  .palvelut { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 2rem; }
+  .palvelut.n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 3rem; }
   .studio-kuva { aspect-ratio: 3 / 2; }
 }
 @media (min-width: 48rem) {
@@ -217,7 +219,7 @@ img { display: block; max-width: 100%; height: auto; }
   .hero-lause { font-size: 1.1875rem; }
   .tanaan-rivi { padding-block: 2.5rem 3rem; margin-top: 3rem; }
   .palvelut-osio { padding-block: 5rem 7rem; }
-  .palvelut { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .palvelut { column-gap: 3rem; }
   .studio { padding-bottom: 7rem; }
   .studio-sisa { display: grid; grid-template-columns: 5fr 7fr; gap: 6rem; align-items: end; }
   .studio-sisa.ilman-kuvaa { grid-template-columns: minmax(0, 46rem); }

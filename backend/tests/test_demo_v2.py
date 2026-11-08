@@ -505,9 +505,10 @@ def _alt(pid: str, alt: str, face: bool = False) -> unsplash.DemoPhoto:
     return _photo(pid).model_copy(update={"alt": alt, "face_risk": face})
 
 
-def test_salon_uses_one_hair_query_and_industry_queries_for_nails() -> None:
-    assert unsplash.image_queries("hair_salon", "salon")[0] == "hair styling close up"
-    assert unsplash.image_queries("beauty_salon", "salon")[0] == "hair styling close up"
+def test_salon_queries_ask_for_finished_hair_and_nails_keep_industry_queries() -> None:
+    assert unsplash.image_queries("hair_salon", "salon") == ["glossy wavy hair close up", "braided hairstyle back view"]
+    assert unsplash.image_queries("beauty_salon", "salon")[0] == "glossy wavy hair close up"
+    assert unsplash.uses_both_queries("salon")
     assert unsplash.image_queries("nail_salon", "salon") == ["nail salon", "manicure"]
 
 
@@ -606,3 +607,56 @@ def test_blade_without_person_is_fine() -> None:
 def test_barber_queries_mix_interior_and_tools() -> None:
     assert unsplash.image_queries("barber_shop", "barber") == ["barbershop interior", "barber tools"]
     assert unsplash.uses_both_queries("barber")
+
+
+# --- Tuotemerkit kuvissa, kampaamon lopputuloskuvat, palvelugrid ---
+
+def test_blocked_photo_ids_never_chosen() -> None:
+    pool = [_alt("WbEibGKHBMY", "stainless steel scissors and hair comb"), _alt("ok1", "barbershop chairs"),
+            _alt("2y4qGxu-4Do", "a black case filled with lots of different items"), _alt("ok2", "scissors on a table")]
+    hero, mood, options = unsplash.choose_images(pool, "barber")
+    chosen = {p.id for p in [hero, *mood, *options] if p}
+    assert not chosen & set(unsplash.BLOCKED_PHOTO_IDS)
+    assert unsplash.mood_for(None, [pool[0], pool[1]], "barber") == [pool[1]]
+
+
+def test_tool_closeups_are_last_resort() -> None:
+    def parsed(pid: str, alt: str) -> unsplash.DemoPhoto:
+        photo = unsplash._to_photo({
+            "id": pid, "urls": {"raw": f"https://images.unsplash.com/{pid}"}, "alt_description": alt,
+            "user": {"name": "N", "links": {"html": "https://unsplash.com/@n"}}, "links": {"download_location": "x"},
+        })
+        assert photo is not None
+        return photo
+    clipper = parsed("c", "a hair clipper on a wooden table")
+    brush = parsed("b", "a close up of a table with a hair brush and a pair of scissors")
+    chairs = parsed("k", "barbershop chairs and mirrors")
+    scissors = parsed("s", "scissors and comb on a table")
+    assert clipper.tool_closeup and brush.tool_closeup and not chairs.tool_closeup
+    hero, mood, options = unsplash.choose_images([clipper, brush, chairs, scissors], "barber")
+    assert hero is not None and hero.id == "k"
+    assert [p.id for p in options][-2:] == ["c", "b"]
+
+
+def test_salon_drops_frizz_and_ranks_non_hair_last() -> None:
+    pool = [
+        _alt("wave", "a close up of a wave"),
+        _alt("frizz", "frizzy static hair close up"),
+        _alt("gloss", "glossy brown hair on black background"),
+        _alt("bun", "a close up of a woman's hair in a bun"),
+        _alt("braid", "a braided hairstyle seen from behind"),
+    ]
+    hero, mood, options = unsplash.choose_images(pool, "salon")
+    assert hero is not None and hero.id == "gloss"
+    assert "frizz" not in {p.id for p in options}
+    assert [p.id for p in mood] == ["bun", "braid", "wave"]
+
+
+@pytest.mark.parametrize("count", [3, 4, 5, 6])
+def test_salon_service_grid_has_count_class(count: int) -> None:
+    services = [{"name": f"Palvelu {chr(65 + i)}", "description": "Kuvaus palvelusta tähän."} for i in range(count)]
+    html = render_demo_html(template="salon", color_scheme="jarvi", business=BUSINESS, sender=SENDER,
+                            content=DemoStoredContent(**{**VALID, "services": services}))
+    assert f'class="palvelut n{count}"' in html
+    css = (ASSET_DIR / "salon" / "tyylit.css").read_text()
+    assert ".palvelut.n4 { grid-template-columns: repeat(2, minmax(0, 1fr));" in css

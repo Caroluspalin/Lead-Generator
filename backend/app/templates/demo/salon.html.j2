@@ -52,7 +52,7 @@
   <section id="palvelut" class="palvelut-osio" aria-labelledby="palvelut-otsikko">
     <div class="kehys">
       <h2 id="palvelut-otsikko">{{ tpl.services_title }}</h2>
-      <ul class="palvelut">
+      <ul class="palvelut n{{ content.services | length }}">
         {% for service in content.services %}
         <li><h3>{{ service.name }}</h3><p>{{ service.description }}</p></li>
         {% endfor %}

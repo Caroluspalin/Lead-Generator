@@ -52,6 +52,10 @@ _DETAIL_RE = re.compile(
 # Hiuspohjissa (salon, barber) eläinkuvat ym. eivät kuulu aiheeseen, vaikka haku tuo ne ("animal fur")
 _OFF_TOPIC_RE = re.compile(r"\b(animals?|fur|dogs?|cats?|pets?|puppy|kitten|horses?|sheep|wool|yarn|feathers?)\b", re.IGNORECASE)
 OFF_TOPIC_TEMPLATES = {"salon", "barber"}
+# Kampaamon kuviin lopputulos (kiiltävät, laitetut, värjätyt hiukset, kampaus takaa), ei pörröä
+_SALON_AVOID_RE = re.compile(r"\b(frizz\w*|static|messy|tangl\w*|unkempt|flyaways?|electric\w*|bed ?head|wild)\b",
+                             re.IGNORECASE)
+_SALON_TOPIC_RE = re.compile(r"\b(hair\w*|braid\w*|buns?|updo|curls?|ponytail|balayage|waves? of hair)\b", re.IGNORECASE)
 
 # Hero-kuvaan ei tuotemerkkejä: logot ja tuotehyllyt voivat antaa vaikutelman, että yritys
 # käyttää tai myy kyseisiä merkkejä. Tunnistus kuvauksesta, alt-tekstistä ja tageista.
@@ -60,6 +64,18 @@ _PRODUCTS_RE = re.compile(
     r"merchandise|retail|shampoos?|conditioners?|skincare|skin care|haircare|hair care products?|jars?|tubes?)\b",
     re.IGNORECASE,
 )
+
+# Kuvat, joissa tuotemerkki näkyy kuvassa, vaikka metatiedoissa ei mainita (todettu silmämääräisesti).
+# Lisää id tähän, kun merkki huomataan esikatselussa; kuva ei enää tule ehdokkaaksi millekään demolle.
+BLOCKED_PHOTO_IDS: dict[str, str] = {
+    "WbEibGKHBMY": "trimmerissä Magic Clip -teksti, harjassa logo (alt: 'stainless steel scissors and hair comb')",
+    "2y4qGxu-4Do": "shaverissa merkki (alt: 'a black case filled with lots of different items')",
+}
+
+# Laitteiden ja harjojen lähikuvissa on usein merkki tai logo, vaikka kuvaus ei sitä mainitse:
+# vain viimeiseksi vaihtoehdoksi (ei ihmisiä kuvassa = tuotteen lähikuva)
+_TOOL_RE = re.compile(r"\b(clippers?|trimmers?|shavers?|razors?|brush(es)?|hairbrush(es)?|hair ?dryers?|blow ?dryers?)\b",
+                      re.IGNORECASE)
 
 # Hakusanat englanniksi (lang-parametri on Unsplashilla beta-ominaisuus, joka vaatii erillisen hakemuksen).
 # Avain täsmätään primary_typen alkuun/sisältöön; yrityksen nimellä ei koskaan haeta.
@@ -104,6 +120,7 @@ class DemoPhoto(BaseModel):
     has_products: bool = False
     color: str = ""  # Unsplashin keskisävy (#rrggbb); tyhjä vanhoissa demoissa
     face_risk: Optional[bool] = None  # None vanhoissa demoissa -> käytetään has_peoplea
+    tool_closeup: bool = False  # laite/harja lähikuvana: mahdollinen merkki, viimeiseksi
 
     @property
     def shows_face(self) -> bool:
@@ -139,9 +156,10 @@ _TEMPLATE_QUERIES: dict[str, list[tuple[Optional[tuple[str, ...]], list[str]]]] 
     ],
     # Kaislikko syntyy mistä tahansa kuvasta; hiuslähikuvat toimivat suikaleina ja kapeina pystykuvina.
     # Kynsi-, spa- ja kauneushoitolat käyttävät oman alansa hakuja (tyhjä lista = _QUERIES).
+    # Hero ensimmäisestä (kiiltävät hiukset), tunnelmakuvat toisesta (kampaus takaa)
     "salon": [
         (("nail", "spa", "massage", "sauna", "makeup", "lash", "brow", "tanning", "beautician"), []),
-        (None, ["hair styling close up", "hair salon interior"]),
+        (None, ["glossy wavy hair close up", "braided hairstyle back view"]),
     ],
     # Parturi: hero liikkeestä tai työkaluista (ei teriä kasvojen lähellä), osiot työkaluista
     "barber": [
@@ -197,6 +215,7 @@ def _to_photo(item: dict[str, object]) -> Optional[DemoPhoto]:
             has_products=bool(_PRODUCTS_RE.search(f"{text} {tag_text}")),
             color=str(item.get("color") or ""),
             face_risk=face_risk(text),
+            tool_closeup=bool(_TOOL_RE.search(text) and not _PEOPLE_RE.search(text)),
         )
     except (KeyError, TypeError, AssertionError, ValueError):
         return None
@@ -231,7 +250,7 @@ def search_photos(query: str, access_key: str, per_page: int = SEARCH_PER_PAGE) 
 
 # Pohjat, joissa hero ja osioiden kuvat tarvitsevat eri aiheen (kahvila: yläkulmasta kuvattu kuppi
 # pyöreään heroon, leivonnaiset ja kahvila osioihin). Molemmat haut aina, tulokset vuorotellen.
-MIXED_QUERY_TEMPLATES = {"cafe", "barber"}
+MIXED_QUERY_TEMPLATES = {"cafe", "salon", "barber"}
 
 
 def uses_both_queries(template: str) -> bool:
@@ -276,16 +295,29 @@ def find_candidates(primary_type: Optional[str], template: str, access_key: str)
 
 
 def _hero_rank(photo: DemoPhoto) -> int:
-    """0 = ei kasvoja eikä tuotteita, 1 = kasvoja, 2 = tuotteita, 3 = molempia. Tuotemerkit ovat pahempia."""
-    return (2 if photo.has_products else 0) + (1 if photo.shows_face else 0)
+    """0 = ei kasvoja eikä tuotteita, 1 = kasvoja, 2 = tuotteita, 3 = molempia, 4+ = laitteen lähikuva
+    (merkki todennäköinen, vain viimeinen vaihtoehto). Tuotemerkit ovat pahempia kuin kasvot."""
+    return (4 if photo.tool_closeup else 0) + (2 if photo.has_products else 0) + (1 if photo.shows_face else 0)
 
 
-def pick_hero(candidates: list[DemoPhoto]) -> Optional[DemoPhoto]:
+def _topic_rank(photo: DemoPhoto, template: str) -> int:
+    """Pohjakohtainen lisä _hero_rankiin. Kampaamo: ei hiuksia kuvauksessa (aalto, vesi, abstrakti)
+    -> viimeiseksi; työkalu ilman ihmistä (harja, föönit) on jo _hero_rankissa viimeisenä."""
+    if template == "salon" and not _SALON_TOPIC_RE.search(photo.alt):
+        return 8
+    return 0
+
+
+def _rank(photo: DemoPhoto, template: str) -> int:
+    return _hero_rank(photo) + _topic_rank(photo, template)
+
+
+def pick_hero(candidates: list[DemoPhoto], template: str = "") -> Optional[DemoPhoto]:
     """Paras hero-kuva. Jos puhdasta ei ole, käytetään parasta jäljelle jäänyttä ja lokitetaan varoitus."""
     if not candidates:
         return None
-    hero = min(candidates, key=_hero_rank)  # min on vakaa: tasatilanteessa hakutuloksen järjestys
-    if _hero_rank(hero) > 0:
+    hero = min(candidates, key=lambda p: _rank(p, template))  # min on vakaa: tasatilanteessa hakujärjestys
+    if _rank(hero, template) > 0:
         reasons = [r for r, flag in (("kasvoja", hero.shows_face), ("tuotteita/merkkejä", hero.has_products)) if flag]
         logger.warning(
             f"Unsplash: ei puhdasta hero-kuvaa {len(candidates)} ehdokkaasta, käytetään parasta jäljelle jäänyttä "
@@ -298,14 +330,17 @@ def choose_images(
     candidates: list[DemoPhoto], template: str = ""
 ) -> tuple[Optional[DemoPhoto], list[DemoPhoto], list[DemoPhoto]]:
     """(hero, mood, options). Hero: ei ihmisiä eikä tuotemerkkejä jos mahdollista."""
+    candidates = [p for p in candidates if p.id not in BLOCKED_PHOTO_IDS]
     if template in OFF_TOPIC_TEMPLATES:
         candidates = [p for p in candidates if not _OFF_TOPIC_RE.search(p.alt)] or candidates
+    if template == "salon":
+        candidates = [p for p in candidates if not _SALON_AVOID_RE.search(p.alt)] or candidates
     if not candidates:
         return None, [], []
-    hero = pick_hero(candidates)
+    hero = pick_hero(candidates, template)
     assert hero is not None
     # Vaihtoehdot: hero-kelpoisimmat ensin, hero mukaan listaan
-    options = sorted(candidates, key=_hero_rank)[:MAX_OPTIONS]
+    options = sorted(candidates, key=lambda p: _rank(p, template))[:MAX_OPTIONS]
     if hero not in options:
         options = [hero] + options[: MAX_OPTIONS - 1]
     if template in DARK_LAST_TEMPLATES and not any(is_dark(p) for p in options if p is not hero):
@@ -322,11 +357,11 @@ def _darkest(pool: list[DemoPhoto]) -> Optional[DemoPhoto]:
 
 
 def mood_for(hero: Optional[DemoPhoto], pool: list[DemoPhoto], template: str = "") -> list[DemoPhoto]:
-    rest = [p for p in pool if hero is None or p.id != hero.id]
+    rest = [p for p in pool if (hero is None or p.id != hero.id) and p.id not in BLOCKED_PHOTO_IDS]
     count = MOOD_COUNTS.get(template, MOOD_COUNT)
     if template not in DARK_LAST_TEMPLATES:
         # Kasvottomat ja merkittömät ensin (järjestys muuten säilyy)
-        return sorted(rest, key=_hero_rank)[:count]
+        return sorted(rest, key=lambda p: _rank(p, template))[:count]
     # Viimeinen tunnelmakuva tummalle osiolle: tummin ehdokas, muuten ei kuvaa
     darkest = _darkest(rest)
     light = [p for p in rest if p is not darkest][: MOOD_COUNT - 1]
