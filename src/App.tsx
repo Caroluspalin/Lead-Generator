@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, MapPin, Loader2, Filter, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Search, MapPin, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import LeadTable from './components/LeadTable';
 import SidebarNav from './components/SidebarNav';
@@ -9,11 +9,41 @@ import PipelineBoard from './components/PipelineBoard';
 import DashboardView from './components/DashboardView';
 import SearchHistoryView from './components/SearchHistoryView';
 import SettingsView from './components/SettingsView';
-import type { Agency, SearchResponse, SearchUsage } from './types/agency';
+import type {
+  Agency,
+  SearchResponse,
+  SearchStatusFilter,
+  SearchSummary,
+  SearchUsage,
+} from './types/agency';
 import { usePipeline } from './context/PipelineContext';
 import { useAuth } from './context/AuthContext';
 import { apiFetch } from './lib/api';
 import Login from './components/Login';
+
+const STATUS_FILTERS: { value: SearchStatusFilter; label: string }[] = [
+  { value: 'no_website', label: 'No website' },
+  { value: 'broken', label: 'Broken' },
+  { value: 'insecure', label: 'No HTTPS' },
+  { value: 'not_mobile', label: 'Not mobile' },
+  { value: 'social_only', label: 'Social media only' },
+];
+
+// Haku jatkaa sivutusta ja analysoi sivuja kunnes määrä täyttyy, joten aikaa kuluu enemmän kuin yhteen hakuun
+const SEARCH_TIMEOUT_MS = 180_000;
+
+function summaryText(summary: SearchSummary): string {
+  const found = `Found ${summary.found} of ${summary.requested} new leads`;
+  if (summary.stop_reason === 'call_limit') {
+    return `${found}. Stopped at the API call limit for one search.`;
+  }
+  if (summary.stop_reason === 'area_exhausted') {
+    return summary.searched_neighbors
+      ? `${found}. No more businesses in this city or the neighbouring areas.`
+      : `${found}. No more businesses in this city. Include neighbouring areas to search further.`;
+  }
+  return `${found}.`;
+}
 
 function App() {
   const { session, loading: authLoading } = useAuth();
@@ -63,7 +93,32 @@ function AppShell() {
   const [showAddModal, setShowAddModal] = useState(false);
   const { addToPipeline } = usePipeline();
 
-  const [showOpportunitiesOnly, setShowOpportunitiesOnly] = useState(true);
+  const [count, setCount] = useState(20);
+  const [statusFilters, setStatusFilters] = useState<SearchStatusFilter[]>([]);
+  const [minScore, setMinScore] = useState(0);
+  const [excludeClosed, setExcludeClosed] = useState(false);
+  const [onlyNew, setOnlyNew] = useState(true);
+  const [expandNeighbors, setExpandNeighbors] = useState(false);
+  const [summary, setSummary] = useState<SearchSummary | null>(null);
+
+  const toggleStatus = (value: SearchStatusFilter) => {
+    setStatusFilters((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    );
+  };
+
+  const handleDismissLead = async (agency: Agency) => {
+    try {
+      const res = await apiFetch(`/places/${encodeURIComponent(agency.id)}/dismiss`, { method: 'POST' });
+      if (!res.ok) throw new Error(res.statusText);
+      setLeads((prev) => prev.filter((l) => l.id !== agency.id));
+      toast.success(`${agency.name} dismissed`, {
+        description: 'It will not appear in searches again. Restore it in Settings.',
+      });
+    } catch {
+      toast.error('Failed to dismiss');
+    }
+  };
 
   const handleSaveLead = async (agency: Agency) => {
     try {
@@ -88,19 +143,25 @@ function AppShell() {
     setError('');
     setLeads([]);
     setUsage(null);
+    setSummary(null);
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
-    }, 60000);
+    }, SEARCH_TIMEOUT_MS);
 
     try {
-      const response = await apiFetch(
-        `/search?business_type=${encodeURIComponent(
-          bt,
-        )}&city=${encodeURIComponent(ct)}`,
-        { signal: controller.signal },
-      );
+      const params = new URLSearchParams({
+        business_type: bt,
+        city: ct,
+        count: String(count),
+        min_score: String(minScore),
+        exclude_closed: String(excludeClosed),
+        only_new: String(onlyNew),
+        expand_neighbors: String(expandNeighbors),
+      });
+      statusFilters.forEach((value) => params.append('status', value));
+      const response = await apiFetch(`/search?${params.toString()}`, { signal: controller.signal });
       window.clearTimeout(timeoutId);
 
       if (!response.ok) {
@@ -112,7 +173,7 @@ function AppShell() {
       const mapped: Agency[] = data.results.map((item) => ({
         id: item.place_id,
         name: item.name,
-        city: ct,
+        city: item.city ?? ct,
         address: item.address,
         phone: item.phone ?? undefined,
         website: item.website ?? undefined,
@@ -130,10 +191,11 @@ function AppShell() {
 
       setLeads(mapped);
       setUsage(data.usage);
+      setSummary(data.summary);
     } catch (err) {
       console.error(err);
       if ((err as DOMException).name === 'AbortError') {
-        setError('Search timed out after 60s. The city may be too large or Google API is throttling.');
+        setError('Search timed out after 3 minutes. Try a smaller count or fewer filters.');
       } else {
         setError('Search failed. Make sure the backend is running.');
       }
@@ -148,10 +210,6 @@ function AppShell() {
     doSearch();
   };
 
-  // "Myyntipaikat" = yritykset joilla ei ole toimivaa mobiilisivua (potentiaaliset asiakkaat)
-  const filteredLeads = showOpportunitiesOnly
-    ? leads.filter(lead => lead.website_status !== "WEBSITE OK")
-    : leads;
 
   return (
     <div className="flex min-h-screen bg-canvas text-fg font-sans">
@@ -174,10 +232,8 @@ function AppShell() {
             </header>
 
             <div className="bg-surface rounded border border-line p-card mb-6">
-              <form
-                onSubmit={handleSearch}
-                className="flex flex-col md:flex-row gap-2.5 items-end"
-              >
+              <form onSubmit={handleSearch} className="flex flex-col gap-4">
+              <div className="flex flex-col md:flex-row gap-2.5 items-end">
                 <div className="flex-1 w-full">
                   <label htmlFor="search-industry" className="block text-2xs font-medium text-fg-muted mb-1.5">
                     Industry
@@ -234,6 +290,82 @@ function AppShell() {
                     'Find leads'
                   )}
                 </button>
+              </div>
+
+              <div className="flex flex-col lg:flex-row lg:items-end gap-4 lg:gap-6">
+                <div className="flex flex-wrap items-end gap-2.5">
+                  <div>
+                    <label htmlFor="search-count" className="block text-2xs font-medium text-fg-muted mb-1.5">
+                      Leads
+                    </label>
+                    <input
+                      id="search-count"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={count}
+                      onChange={(e) => setCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-20 h-control px-2.5 bg-canvas border border-line-strong rounded text-sm text-fg tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="search-min-score" className="block text-2xs font-medium text-fg-muted mb-1.5">
+                      Min score
+                    </label>
+                    <input
+                      id="search-min-score"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={minScore}
+                      onChange={(e) => setMinScore(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                      className="w-20 h-control px-2.5 bg-canvas border border-line-strong rounded text-sm text-fg tabular-nums"
+                    />
+                  </div>
+                </div>
+
+                <fieldset className="min-w-0">
+                  <legend className="block text-2xs font-medium text-fg-muted mb-1.5">
+                    Website {statusFilters.length === 0 && <span className="text-fg-subtle font-normal">(any)</span>}
+                  </legend>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STATUS_FILTERS.map(({ value, label }) => {
+                      const active = statusFilters.includes(value);
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => toggleStatus(value)}
+                          aria-pressed={active}
+                          className={`h-control-sm px-2.5 rounded text-xs font-medium transition-colors border ${
+                            active
+                              ? 'bg-raised text-fg border-line-strong'
+                              : 'text-fg-muted border-line hover:text-fg hover:bg-subtle'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-fg-muted lg:pb-1.5">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />
+                    Only new
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={excludeClosed} onChange={(e) => setExcludeClosed(e.target.checked)} />
+                    Exclude closed
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={expandNeighbors} onChange={(e) => setExpandNeighbors(e.target.checked)} />
+                    Include neighbouring areas
+                  </label>
+                </div>
+              </div>
               </form>
 
               {error && (
@@ -252,32 +384,25 @@ function AppShell() {
               )}
             </div>
 
-            {/* Tulokset ja Filtteri */}
-            <div className="mb-2.5 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+            {/* Tulokset ja hakuyhteenveto */}
+            <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <h2 className="text-sm font-semibold text-fg">
                   Results{' '}
-                  <span className="text-fg-subtle font-normal tabular-nums">
-                    {filteredLeads.length}
-                  </span>
+                  <span className="text-fg-subtle font-normal tabular-nums">{leads.length}</span>
                 </h2>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowOpportunitiesOnly(!showOpportunitiesOnly)
-                  }
-                  aria-pressed={showOpportunitiesOnly}
-                  className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded text-xs font-medium transition-colors border ${
-                    showOpportunitiesOnly
-                      ? 'bg-raised text-fg border-line-strong'
-                      : 'text-fg-muted border-line hover:text-fg hover:bg-subtle'
-                  }`}
-                >
-                  <Filter size={12} />
-                  {showOpportunitiesOnly
-                    ? 'Opportunities only'
-                    : 'Show all'}
-                </button>
+                {summary && (
+                  <p className="text-xs text-fg-muted" role="status">
+                    {summaryText(summary)}
+                    {summary.skipped_in_pipeline + summary.skipped_dismissed + summary.skipped_seen > 0 && (
+                      <span className="text-fg-subtle">
+                        {' '}
+                        Skipped {summary.skipped_in_pipeline} in pipeline, {summary.skipped_dismissed} dismissed
+                        {summary.skipped_seen > 0 ? `, ${summary.skipped_seen} already seen` : ''}.
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
               {usage && (
                 <span
@@ -291,7 +416,12 @@ function AppShell() {
               )}
             </div>
 
-            <LeadTable leads={filteredLeads} loading={loading} onSaveLead={handleSaveLead} />
+            <LeadTable
+              leads={leads}
+              loading={loading}
+              onSaveLead={handleSaveLead}
+              onDismissLead={handleDismissLead}
+            />
           </>
         )}
 

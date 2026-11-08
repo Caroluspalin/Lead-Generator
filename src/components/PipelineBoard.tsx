@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PIPELINE_STATUSES } from '../types/agency';
-import type { PipelineStatus } from '../types/agency';
+import type { PipelineStatus, SavedAgency } from '../types/agency';
 import { usePipeline } from '../context/PipelineContext';
 import { apiFetch } from '../lib/api';
 import PipelineCard from './PipelineCard';
@@ -38,7 +38,7 @@ async function processInBatches<T>(
 }
 
 const PipelineBoard: React.FC = () => {
-  const { savedAgencies, loading, error, updateStatus, updateNotes, removeFromPipeline, refresh } =
+  const { savedAgencies, loading, error, updateStatus, updateNotes, removeFromPipeline, dismissFromPipeline, refresh } =
     usePipeline();
   const [activeTab, setActiveTab] = useState<PipelineStatus>('Shortlisted');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -161,6 +161,22 @@ const PipelineBoard: React.FC = () => {
       toast.success('Lead removed');
     } catch {
       toast.error('Failed to remove lead');
+    }
+  };
+
+  const handleDismiss = async (agency: SavedAgency) => {
+    if (
+      !window.confirm(
+        `Dismiss ${agency.name}? The lead and its demo are deleted and the business never appears in searches again. You can restore it in Settings.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await dismissFromPipeline(agency);
+      toast.success(`${agency.name} dismissed`);
+    } catch {
+      toast.error('Failed to dismiss lead');
     }
   };
 
@@ -300,6 +316,7 @@ const PipelineBoard: React.FC = () => {
                     onStatusChange={handleStatusChange}
                     onNotesChange={handleNotesChange}
                     onRemove={handleRemove}
+                    onDismiss={handleDismiss}
                   />
                 ))}
               </div>

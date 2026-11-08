@@ -10,6 +10,7 @@ import {
   PhoneCall,
   Ban,
   LayoutTemplate,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
@@ -29,6 +30,7 @@ interface PipelineCardProps {
   onStatusChange: (id: number, status: PipelineStatus) => void;
   onNotesChange: (id: number, notes: string) => void;
   onRemove: (id: number) => void;
+  onDismiss: (agency: SavedAgency) => void;
 }
 
 const PipelineCard: React.FC<PipelineCardProps> = ({
@@ -38,8 +40,11 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   onStatusChange,
   onNotesChange,
   onRemove,
+  onDismiss,
 }) => {
   const [notesDraft, setNotesDraft] = useState(agency.notes ?? '');
+  // Käsin lisätyllä liidillä ei ole Googlen paikkaa, jota hakutuloksista voisi hylätä
+  const canDismiss = Boolean(agency.google_place_id && !agency.google_place_id.startsWith('manual-'));
   const [isExpanded, setIsExpanded] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [findingEmail, setFindingEmail] = useState(false);
@@ -164,6 +169,16 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           <h4 className="text-base font-medium text-fg truncate">{agency.name}</h4>
           {agency.address && <p className="text-xs text-fg-subtle truncate">{agency.address}</p>}
         </div>
+        {canDismiss && (
+          <button
+            onClick={() => onDismiss(agency)}
+            className="shrink-0 -mt-1 grid size-control-sm place-content-center rounded text-fg-subtle hover:text-fg hover:bg-raised transition-colors"
+            aria-label={`Dismiss ${agency.name} permanently`}
+            title="Dismiss: remove and never show in searches again"
+          >
+            <XCircle size={14} />
+          </button>
+        )}
         <button
           onClick={() => onRemove(agency.id)}
           className="shrink-0 -mr-1 -mt-1 grid size-control-sm place-content-center rounded text-fg-subtle hover:text-danger hover:bg-danger/10 transition-colors"

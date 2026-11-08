@@ -12,6 +12,7 @@ interface PipelineContextValue {
   updateStatus: (id: number, status: PipelineStatus) => Promise<void>;
   updateNotes: (id: number, notes: string) => Promise<void>;
   removeFromPipeline: (id: number) => Promise<void>;
+  dismissFromPipeline: (agency: SavedAgency) => Promise<void>;
   findEmail: (id: number) => Promise<SavedAgency>;
   setDoNotContact: (id: number, value: boolean) => Promise<void>;
   refresh: () => Promise<void>;
@@ -149,6 +150,20 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     setSavedAgencies((prev) => prev.filter((a) => a.id !== id));
   };
 
+  // Pysyvä hylkäys: backend poistaa liidin (ja demon) ja merkitsee paikan hylätyksi
+  const dismissFromPipeline = async (agency: SavedAgency) => {
+    if (!agency.google_place_id) {
+      throw new Error('Manual leads cannot be dismissed');
+    }
+    const res = await apiFetch(`/places/${encodeURIComponent(agency.google_place_id)}/dismiss`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      throw new Error(`Dismiss failed: ${res.status}`);
+    }
+    setSavedAgencies((prev) => prev.filter((a) => a.id !== agency.id));
+  };
+
   return (
     <PipelineContext.Provider
       value={{
@@ -159,6 +174,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         updateStatus,
         updateNotes,
         removeFromPipeline,
+        dismissFromPipeline,
         findEmail,
         setDoNotContact,
         refresh,

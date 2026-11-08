@@ -7,6 +7,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   PauseCircle,
+  XCircle,
 } from 'lucide-react';
 import type { Agency, WebsiteStatus } from '../types/agency';
 import { ScoreBadge, RatingDisplay, StatusBadge } from './ScoreBadge';
@@ -15,6 +16,7 @@ interface LeadTableProps {
   leads: Agency[];
   loading?: boolean;
   onSaveLead?: (lead: Agency) => void;
+  onDismissLead?: (lead: Agency) => void;
 }
 
 type SortKey = 'score' | 'name' | 'rating' | 'reviews' | 'website';
@@ -116,7 +118,7 @@ const SkeletonRow: React.FC = () => (
   </tr>
 );
 
-const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => {
+const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead, onDismissLead }) => {
   const [sortKey, setSortKey] = useState<SortKey>('score');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -271,16 +273,30 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead }) => 
                       In pipeline
                     </span>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => onSaveLead && onSaveLead(lead)}
-                      aria-label={`Save ${lead.name} to pipeline`}
-                      className="inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-raised transition-colors disabled:opacity-60 whitespace-nowrap"
-                      disabled={!onSaveLead}
-                    >
-                      <PlusCircle size={13} />
-                      Save
-                    </button>
+                    <div className="inline-flex items-center gap-1.5">
+                      {onDismissLead && (
+                        <button
+                          type="button"
+                          onClick={() => onDismissLead(lead)}
+                          aria-label={`Dismiss ${lead.name}`}
+                          title="Dismiss: never show this business in searches again"
+                          className="inline-flex items-center gap-1.5 h-control-sm px-2 text-xs font-medium text-fg-muted rounded hover:text-fg hover:bg-raised transition-colors whitespace-nowrap"
+                        >
+                          <XCircle size={13} />
+                          Dismiss
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onSaveLead && onSaveLead(lead)}
+                        aria-label={`Save ${lead.name} to pipeline`}
+                        className="inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-raised transition-colors disabled:opacity-60 whitespace-nowrap"
+                        disabled={!onSaveLead}
+                      >
+                        <PlusCircle size={13} />
+                        Save
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>

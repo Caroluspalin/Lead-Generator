@@ -131,6 +131,7 @@ export interface SearchResult {
   maps_url: string | null;
   lead_score: number;
   already_saved: boolean;
+  city: string | null; // kunta osoitteesta (naapurialueet), null = haettu kaupunki
 }
 
 export interface SearchUsage {
@@ -144,6 +145,30 @@ export interface SearchUsage {
 export interface SearchResponse {
   results: SearchResult[];
   usage: SearchUsage;
+  summary: SearchSummary | null;
+}
+
+// Hakulomakkeen sivun tila -suodattimet (backend SEARCH_STATUS_FILTERS)
+export type SearchStatusFilter = 'no_website' | 'broken' | 'insecure' | 'not_mobile' | 'social_only';
+
+export type SearchStopReason = 'target_reached' | 'call_limit' | 'area_exhausted';
+
+export interface SearchSummary {
+  requested: number;
+  found: number;
+  stop_reason: SearchStopReason;
+  skipped_in_pipeline: number;
+  skipped_dismissed: number;
+  skipped_seen: number;
+  filtered_out: number;
+  searched_neighbors: boolean;
+}
+
+// GET /places/dismissed: vain place_id ja aika (Places-sisältöä ei tallenneta)
+export interface DismissedPlace {
+  place_id: string;
+  maps_url: string;
+  dismissed_at: string;
 }
 
 // Hakutulos UI:ssa (ei persistoida viela)

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, Save, UserCircle2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Loader2, RotateCcw, Save, UserCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import type { SenderProfile, SenderProfileInput } from '../types/agency';
+import type { DismissedPlace, SenderProfile, SenderProfileInput } from '../types/agency';
 import { apiFetch } from '../lib/api';
 
 const EMPTY: SenderProfileInput = {
@@ -16,6 +16,98 @@ const EMPTY: SenderProfileInput = {
 const inputClass =
   'w-full h-control text-sm bg-canvas border border-line-strong rounded px-3 text-fg transition-colors';
 const labelClass = 'block text-2xs font-medium text-fg-muted mb-1.5';
+
+const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+// Hylätyt paikat: kannassa on vain place_id (Googlen ehdot), joten nimen näkee Google Mapsista
+const DismissedPlaces: React.FC = () => {
+  const [places, setPlaces] = useState<DismissedPlace[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await apiFetch('/places/dismissed');
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data: DismissedPlace[] = await res.json();
+        if (!cancelled) setPlaces(data);
+      } catch {
+        toast.error('Failed to load dismissed businesses');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const restore = async (placeId: string) => {
+    setRestoring(placeId);
+    try {
+      const res = await apiFetch(`/places/${encodeURIComponent(placeId)}/dismiss`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setPlaces((prev) => prev.filter((p) => p.place_id !== placeId));
+      toast.success('Restored. It can appear in searches again.');
+    } catch {
+      toast.error('Failed to restore');
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <section className="mt-6 bg-surface rounded border border-line" aria-labelledby="dismissed-title">
+      <div className="flex items-center gap-2 px-card py-3 border-b border-line">
+        <XCircle size={15} className="text-fg-muted" />
+        <h2 id="dismissed-title" className="text-sm font-semibold text-fg">
+          Dismissed businesses{' '}
+          {!loading && <span className="text-fg-subtle font-normal tabular-nums">{places.length}</span>}
+        </h2>
+      </div>
+      {loading ? (
+        <div className="p-card flex justify-center">
+          <Loader2 size={16} className="animate-spin text-fg-subtle" />
+        </div>
+      ) : places.length === 0 ? (
+        <p className="p-card text-sm text-fg-subtle">
+          Nothing dismissed. Businesses you dismiss in search results or the pipeline are listed here.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {places.map((place) => (
+            <li key={place.place_id} className="flex items-center gap-3 px-card py-2.5">
+              <a
+                href={place.maps_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm text-fg hover:underline"
+              >
+                <ExternalLink size={13} className="text-fg-subtle" />
+                View on Google Maps
+              </a>
+              <span className="text-xs text-fg-subtle tabular-nums">
+                Dismissed {dateFormat.format(new Date(place.dismissed_at))}
+              </span>
+              <button
+                type="button"
+                onClick={() => restore(place.place_id)}
+                disabled={restoring === place.place_id}
+                className="ml-auto inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-raised transition-colors disabled:opacity-60"
+              >
+                {restoring === place.place_id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                Restore
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
 
 const SettingsView: React.FC = () => {
   const [form, setForm] = useState<SenderProfileInput>(EMPTY);
@@ -189,6 +281,8 @@ const SettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      <DismissedPlaces />
     </div>
   );
 };
