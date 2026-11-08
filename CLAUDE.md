@@ -39,6 +39,10 @@ cd backend && alembic downgrade -1                              # peru viimeisin
 # Backend-testit (backend/-kansiosta, venv aktiivisena)
 cd backend && source venv/bin/activate && pip install -r requirements-dev.txt && pytest
 
+# Demopohjien laatuportti ja modaalin kuvakaappaus (valinnainen Playwright, backend/-kansiosta)
+cd backend && pip install -r requirements-screenshot.txt && python -m playwright install chromium webkit
+cd backend && python scripts/demo_check.py --out /tmp/demo-check [--template cafe|salon|barber] [--serve]
+
 # Demo-Worker (Cloudflare): testit ja deploy (worker/-kansiosta)
 cd worker && npm test                      # Workerin yksikkötestit (Node, ei wrangleria)
 cd worker && npm ci && npx wrangler login && npx wrangler deploy

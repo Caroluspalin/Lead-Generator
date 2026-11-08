@@ -161,16 +161,51 @@ h2::before { content: ""; display: block; width: 0.32em; height: 0.32em; margin-
 .kyltti-kuva img { width: 100%; height: 100%; object-fit: cover; }
 .kyltti-tyhja { background: var(--betoni); }
 
-/* Varaversio liian pitkälle nimelle: iso nimi kulmamerkillä, kuva alla */
+/* Varaversio liian pitkälle nimelle: iso nimi kulmamerkillä, kuva alla. Koko rajataan niin, että
+   pisin rivinvaihdoton osa (data-pisin, demo_site.longest_segment) mahtuu leveyteen: 0,55 em/merkki. */
+.kyltti-varaversio { container-type: inline-size; }
 .kyltti-varaversio .nimi {
-  margin: 0 0 1rem; font: 700 clamp(2.5rem, 1.5rem + 5vw, 5.5rem) / 0.95 var(--kyltti-fontti);
+  margin: 0 0 1rem;
+  font: 700 min(clamp(2.5rem, 1.5rem + 5vw, 5.5rem), calc(100cqw / (var(--pisin, 10) * 0.55))) / 0.95 var(--kyltti-fontti);
   text-transform: uppercase; overflow-wrap: normal; text-wrap: balance;
 }
+[data-pisin="2"] { --pisin: 2; }
+[data-pisin="3"] { --pisin: 3; }
+[data-pisin="4"] { --pisin: 4; }
+[data-pisin="5"] { --pisin: 5; }
+[data-pisin="6"] { --pisin: 6; }
+[data-pisin="7"] { --pisin: 7; }
+[data-pisin="8"] { --pisin: 8; }
+[data-pisin="9"] { --pisin: 9; }
+[data-pisin="10"] { --pisin: 10; }
+[data-pisin="11"] { --pisin: 11; }
+[data-pisin="12"] { --pisin: 12; }
+[data-pisin="13"] { --pisin: 13; }
+[data-pisin="14"] { --pisin: 14; }
+[data-pisin="15"] { --pisin: 15; }
+[data-pisin="16"] { --pisin: 16; }
+[data-pisin="17"] { --pisin: 17; }
+[data-pisin="18"] { --pisin: 18; }
+[data-pisin="19"] { --pisin: 19; }
+[data-pisin="20"] { --pisin: 20; }
+[data-pisin="21"] { --pisin: 21; }
+[data-pisin="22"] { --pisin: 22; }
+[data-pisin="23"] { --pisin: 23; }
+[data-pisin="24"] { --pisin: 24; }
+[data-pisin="25"] { --pisin: 25; }
+[data-pisin="26"] { --pisin: 26; }
+[data-pisin="27"] { --pisin: 27; }
+[data-pisin="28"] { --pisin: 28; }
+[data-pisin="29"] { --pisin: 29; }
+[data-pisin="30"] { --pisin: 30; }
 .kyltti-varaversio .nimi::before { content: ""; display: block; width: 0.32em; height: 0.32em; margin-bottom: 0.3em; background: var(--kyltti); }
 .varaversio-kuva { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 
-.hero-teksti { padding-block: 1.75rem 2.5rem; }
-.hero h1 { font-size: clamp(2.5rem, 1.6rem + 4vw, 5.25rem); max-width: 16ch; }
+.hero-teksti { padding-block: 1.75rem 2.5rem; container-type: inline-size; }
+.parturit .kehys { container-type: inline-size; }
+/* AI:n otsikoissa voi olla pitkä yhdyssana: koko rajataan pisimmän sanan mukaan (0,52 em/merkki) */
+.hero h1[data-pisin], .parturit h2[data-pisin] { --mahtuu: calc(100cqw / (var(--pisin) * 0.52)); }
+.hero h1 { font-size: min(clamp(2.5rem, 1.6rem + 4vw, 5.25rem), var(--mahtuu, 5.25rem)); max-width: 16ch; }
 .hero-lause { max-width: 38ch; margin: 1rem 0 1.5rem; color: var(--harmaa); }
 
 /* Tänään-rivi */
@@ -183,7 +218,7 @@ h2::before { content: ""; display: block; width: 0.32em; height: 0.32em; margin-
 
 /* Hintataulu */
 .hinnasto { background: var(--musta); color: var(--liitu); padding-block: 4rem 4.5rem; }
-.hinnasto h2, .parturit h2, .yhteys h2 { font-size: clamp(2.75rem, 2rem + 4vw, 5.5rem); margin-bottom: 2rem; }
+.hinnasto h2, .parturit h2, .yhteys h2 { font-size: min(clamp(2.75rem, 2rem + 4vw, 5.5rem), var(--mahtuu, 5.5rem)); margin-bottom: 2rem; }
 .taulu { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--viiva-musta); }
 /* Palvelutaulu: nimi kyltin korostusvärillä, kuvaus alla (ei hintoja eikä kestoja) */
 .taulu li { padding: 1rem 0; border-bottom: 1px solid var(--viiva-musta); }

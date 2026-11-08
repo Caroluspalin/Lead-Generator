@@ -149,7 +149,8 @@ img { display: block; max-width: 100%; height: auto; }
 /* Hero */
 .hero { overflow: clip; }
 .hero-sisa { display: grid; grid-template-columns: minmax(0, 1fr); padding-top: 1rem; }
-.hero h1 { font-size: clamp(2.375rem, 1.6rem + 4.4vw, 6rem); max-width: 12ch; }
+.hero-teksti, .esittely-teksti { container-type: inline-size; }
+.hero h1 { font-size: min(clamp(2.375rem, 1.6rem + 4.4vw, 6rem), var(--mahtuu, 6rem)); max-width: 12ch; }
 .hero-lause { max-width: 34ch; margin: 1rem 0 1.5rem; font-size: 1.125rem; color: var(--savy-1-toinen); }
 
 /* Pyöreä kuva, joka jatkuu ruudun reunan yli. Mobiilissa kuva alkaa heti nappien alta,
@@ -178,7 +179,7 @@ img { display: block; max-width: 100%; height: auto; }
 .esittely-kuva { width: calc(100% + 2 * var(--ulko)); max-width: none; margin-inline: calc(-1 * var(--ulko)); aspect-ratio: 4 / 5; object-fit: cover; }
 .esittely-teksti { padding-top: 2.5rem; }
 .ilman-kuvaa .esittely-teksti { padding-top: 0; }
-.esittely h2 { font-size: clamp(2.25rem, 1.5rem + 3.5vw, 4rem); max-width: 14ch; margin-bottom: 1.25rem; }
+.esittely h2 { font-size: min(clamp(2.25rem, 1.5rem + 3.5vw, 4rem), var(--mahtuu, 4rem)); max-width: 14ch; margin-bottom: 1.25rem; }
 .esittely p { max-width: 38ch; font-size: 1.1875rem; }
 
 /* Valikoima (sävy 3) */
@@ -215,6 +216,39 @@ img { display: block; max-width: 100%; height: auto; }
 .ala-sisa { display: grid; gap: 0.5rem; padding-block: 2rem 2.5rem; border-top: 1px solid var(--savy-4-viiva); }
 .ala p { margin: 0; }
 
+/* AI:n otsikoissa voi olla pitkä yhdyssana: koko rajataan niin, että pisin sana (data-pisin,
+   demo_site.longest_segment) mahtuu säiliön leveyteen. 0.66 em/merkki = mitattu fontin leveys + varaa. */
+[data-pisin] { --mahtuu: calc(100cqw / (var(--pisin) * 0.66)); }
+[data-pisin="2"] { --pisin: 2; }
+[data-pisin="3"] { --pisin: 3; }
+[data-pisin="4"] { --pisin: 4; }
+[data-pisin="5"] { --pisin: 5; }
+[data-pisin="6"] { --pisin: 6; }
+[data-pisin="7"] { --pisin: 7; }
+[data-pisin="8"] { --pisin: 8; }
+[data-pisin="9"] { --pisin: 9; }
+[data-pisin="10"] { --pisin: 10; }
+[data-pisin="11"] { --pisin: 11; }
+[data-pisin="12"] { --pisin: 12; }
+[data-pisin="13"] { --pisin: 13; }
+[data-pisin="14"] { --pisin: 14; }
+[data-pisin="15"] { --pisin: 15; }
+[data-pisin="16"] { --pisin: 16; }
+[data-pisin="17"] { --pisin: 17; }
+[data-pisin="18"] { --pisin: 18; }
+[data-pisin="19"] { --pisin: 19; }
+[data-pisin="20"] { --pisin: 20; }
+[data-pisin="21"] { --pisin: 21; }
+[data-pisin="22"] { --pisin: 22; }
+[data-pisin="23"] { --pisin: 23; }
+[data-pisin="24"] { --pisin: 24; }
+[data-pisin="25"] { --pisin: 25; }
+[data-pisin="26"] { --pisin: 26; }
+[data-pisin="27"] { --pisin: 27; }
+[data-pisin="28"] { --pisin: 28; }
+[data-pisin="29"] { --pisin: 29; }
+[data-pisin="30"] { --pisin: 30; }
+
 /* Leveät näytöt */
 @media (min-width: 40rem) {
   .tanaan-rivi { grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 4rem; }
@@ -227,7 +261,7 @@ img { display: block; max-width: 100%; height: auto; }
 }
 @media (min-width: 64rem) {
   .hero-sisa { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; min-height: min(calc(100svh - 6rem), 56rem); padding-block: 2rem 4rem; }
-  .hero h1 { font-size: clamp(3.5rem, 1rem + 4.6vw, 5.75rem); max-width: 13ch; }
+  .hero h1 { font-size: min(clamp(3.5rem, 1rem + 4.6vw, 5.75rem), var(--mahtuu, 5.75rem)); max-width: 13ch; }
   .hero-lause { font-size: 1.25rem; margin: 1.25rem 0 1.75rem; }
   .allas { width: 60vw; max-width: 64rem; margin: 0 0 0 2vw; }
   .tanaan-rivi { padding-block: 2rem 3.5rem; }

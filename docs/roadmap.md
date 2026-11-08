@@ -113,6 +113,15 @@
   - Luettavat demo-osoitteet `/{nimi}-{satunnainen}` (esim. `taina-lantiainen-k7x2m`), `Demo.public_slug` (migraatio `9148408efe32`); vanhat token-osoitteet toimivat, Worker hyväksyy molemmat, törmäykset käsitellään
   - Sähköpostin rakenne kun demo on julkaistu: malli kirjoittaa vain kappaleet 1–2 (kuka olen + miten löysin, mitä asiakkaalle tapahtuu nyt per ongelmatyyppi), koodi kokoaa linkin omalle rivilleen, riskittömyyden ja seuraavan askeleen; ei loppukysymystä; aihe "Tein teille luonnoksen nettisivuista"
   - `SenderProfile.brand_name` (migraatio `3d717a6775b2`) + Settings-kenttä, allekirjoitus nimi / brändi · sivusto / puhelin
+- **Phase 16**: Premium-demopohjat portfolion esimerkkisivuista:
+  - Uudet pohjat (versio 2): `cafe` (Paahtoaste, Pikkupaahtimo), `salon` (Kaislikko, Kaislaranta), `barber` (Kulmakyltti, Kulmapää). Valinta primary_typestä, vanhat pohjat valittavissa nimellä "Classic …". 2–3 palettia per pohja, AA-kontrastit testataan suoraan CSS:stä
+  - Erilliset CSS/JS/fonttitiedostot sisällön tiivisteellä (`?v=`), R2:ssa `assets/{ryhmä}/{tiiviste}/` (ei koskaan poisteta), Worker `/a/...` immutable + CORS, CSP demon muodon mukaan (`style-src`/`script-src 'self'`, ei inlineä)
+  - Aukioloajat myös koneluettavina (`periods`, sama field mask) → `aukiolo.js` "Auki nyt, sulkeutuu klo X", useampi jakso per päivä, kiinteä viikkoaikataulu ilman JS:ää
+  - Sisältö: valinnainen `about_title`, pohjakohtainen price_note, väitteet joita lähdetiedoissa ei ole (sijainti, oma valmistus, perhe/omistajat, perinteet, koko) hylätään; osiot ilman dataa (hinnasto, lounas, kampaajat, sitaatti) korvattu yleisillä
+  - Kuvat: pohjakohtaiset haut (kahvila: kuppi yläkulmasta + leivonnaiset, kampaamo: lopputulos, parturi: liike + työkalut), kasvoriski kuvauksesta, eläin/pörrö-kuvat pois, laitteiden lähikuvat viimeisiksi, estolista (`BLOCKED_PHOTO_IDS`) näkyville merkeille, kahvilan yhteystietoihin tumma kuva, parturissa mustavalko CSS:llä
+  - Kulmakyltin jakosääntö ja varaversio, AI-otsikoiden koko rajataan pisimmän sanan mukaan (ei vaakavieritystä pitkillä yhdyssanoilla)
+  - Esikatselumodaaliin automaattinen 390 px kuvakaappaus (Playwright, valinnainen), iframe `sandbox="allow-scripts"`
+  - Laatuportti `backend/scripts/demo_check.py`: 6 mock-demoa, Chromium + WebKit 320–1440 px, ilman JS:ää, kuva-arkki; Lighthouse mobiili 98–100 (SEO 58 = noindex)
 
 ## Seuraavaksi
 

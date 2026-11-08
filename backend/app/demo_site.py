@@ -911,6 +911,13 @@ def kyltti_split(name: str) -> Optional[Kyltti]:
     return Kyltti(vaaka=pair[0], pysty=pair[1])
 
 
+def longest_segment(name: str) -> int:
+    """Pisin rivinvaihdoton osa (välilyönnin tai väliviivan jälkeen saa vaihtaa riviä), 2-30.
+    Kyltin varaversion otsikko mitoitetaan tästä, ettei pitkä sana vuoda yli kapealla ruudulla."""
+    parts = [seg for word in name.split() for seg in re.findall(r"[^-]+-?", word)]
+    return max(2, min(30, max((len(seg) for seg in parts), default=2)))
+
+
 def banner_text(business: DemoBusiness, sender: DemoSender) -> str:
     return f"Tämä on luonnos, jonka {sender.name} teki yritykselle {business.name}. Ei yrityksen virallinen sivu."
 
@@ -1008,6 +1015,8 @@ def _render_v2(
         week=rows,
         summary=hours_summary(rows) if rows else None,
         kyltti=kyltti_split(business.name) if template == "barber" else None,
+        nimi_pisin=longest_segment(business.name),
+        pisin=longest_segment,
     )
 
 

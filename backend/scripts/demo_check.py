@@ -275,7 +275,8 @@ _BROKEN_WORDS_JS = """() => {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-      const re = /\\S+/g; let m;
+      // Väliviivan jälkeen saa vaihtaa riviä ("Parturi-|kampaamo"), joten osat tarkistetaan erikseen
+      const re = /[^\\s-]+-?/g; let m;
       while ((m = re.exec(node.textContent))) {
         const r = document.createRange(); r.setStart(node, m.index); r.setEnd(node, m.index + m[0].length);
         const tops = new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top)));

@@ -129,8 +129,8 @@ img { display: block; max-width: 100%; height: auto; }
 .kaisla:nth-child(6) { --i: 5; --a: 5.5; }
 .kaisla:nth-child(7) { --i: 6; --a: 1.6; }
 
-.hero-teksti { padding-top: 1.5rem; padding-bottom: 2.5rem; }
-.hero h1 { font-size: clamp(2.375rem, 1.45rem + 4.4vw, 5.75rem); max-width: 13ch; }
+.hero-teksti { padding-top: 1.5rem; padding-bottom: 2.5rem; container-type: inline-size; }
+.hero h1 { font-size: min(clamp(2.375rem, 1.45rem + 4.4vw, 5.75rem), var(--mahtuu, 5.75rem)); max-width: 13ch; }
 .hero-lause { max-width: 36ch; margin: 0.9rem 0 1.4rem; color: var(--harmaa); }
 
 /* Tänään-rivi */
@@ -153,8 +153,8 @@ img { display: block; max-width: 100%; height: auto; }
 .studio { padding-bottom: 4.5rem; }
 .studio-sisa.ilman-kuvaa { padding-top: 1rem; border-top: 1px solid var(--viiva); }
 .studio-kuva { width: calc(100% + 2 * var(--ulko)); max-width: none; margin-inline: calc(-1 * var(--ulko)); aspect-ratio: 4 / 5; object-fit: cover; }
-.studio-teksti { padding-top: 2rem; }
-.studio h2 { font-size: clamp(2rem, 1.5rem + 2.4vw, 3.5rem); max-width: 16ch; margin-bottom: 1.25rem; }
+.studio-teksti { padding-top: 2rem; container-type: inline-size; }
+.studio h2 { font-size: min(clamp(2rem, 1.5rem + 2.4vw, 3.5rem), var(--mahtuu, 3.5rem)); max-width: 16ch; margin-bottom: 1.25rem; }
 .studio p { max-width: 42ch; color: var(--harmaa); }
 
 /* Kolme kapeaa pystykuvaa (portfolion kampaajien paikalla), porrastettuina kuin kaislat */
@@ -192,6 +192,39 @@ img { display: block; max-width: 100%; height: auto; }
 .ala p { margin: 0; }
 .ala-logo { font-family: var(--otsikko); font-size: 1.75rem; color: #fff; line-height: 1.1; }
 
+/* AI:n otsikoissa voi olla pitkä yhdyssana: koko rajataan niin, että pisin sana (data-pisin,
+   demo_site.longest_segment) mahtuu säiliön leveyteen. 0.6 em/merkki = mitattu fontin leveys + varaa. */
+[data-pisin] { --mahtuu: calc(100cqw / (var(--pisin) * 0.6)); }
+[data-pisin="2"] { --pisin: 2; }
+[data-pisin="3"] { --pisin: 3; }
+[data-pisin="4"] { --pisin: 4; }
+[data-pisin="5"] { --pisin: 5; }
+[data-pisin="6"] { --pisin: 6; }
+[data-pisin="7"] { --pisin: 7; }
+[data-pisin="8"] { --pisin: 8; }
+[data-pisin="9"] { --pisin: 9; }
+[data-pisin="10"] { --pisin: 10; }
+[data-pisin="11"] { --pisin: 11; }
+[data-pisin="12"] { --pisin: 12; }
+[data-pisin="13"] { --pisin: 13; }
+[data-pisin="14"] { --pisin: 14; }
+[data-pisin="15"] { --pisin: 15; }
+[data-pisin="16"] { --pisin: 16; }
+[data-pisin="17"] { --pisin: 17; }
+[data-pisin="18"] { --pisin: 18; }
+[data-pisin="19"] { --pisin: 19; }
+[data-pisin="20"] { --pisin: 20; }
+[data-pisin="21"] { --pisin: 21; }
+[data-pisin="22"] { --pisin: 22; }
+[data-pisin="23"] { --pisin: 23; }
+[data-pisin="24"] { --pisin: 24; }
+[data-pisin="25"] { --pisin: 25; }
+[data-pisin="26"] { --pisin: 26; }
+[data-pisin="27"] { --pisin: 27; }
+[data-pisin="28"] { --pisin: 28; }
+[data-pisin="29"] { --pisin: 29; }
+[data-pisin="30"] { --pisin: 30; }
+
 @media (min-width: 40rem) {
   :root { --rako: 5px; --porras: 1rem; }
   .kaislat { height: clamp(17rem, 52svh, 34rem); }
@@ -215,7 +248,7 @@ img { display: block; max-width: 100%; height: auto; }
   }
   .kaislat { grid-column: 2; grid-row: 1; height: auto; padding: 0; }
   .hero-teksti { grid-column: 1; grid-row: 1; align-self: end; padding: 0 3rem 0 0; }
-  .hero h1 { font-size: clamp(3.5rem, 1rem + 3.9vw, 5.25rem); max-width: none; }
+  .hero h1 { font-size: min(clamp(3.5rem, 1rem + 3.9vw, 5.25rem), var(--mahtuu, 5.25rem)); max-width: none; }
   .hero-lause { font-size: 1.1875rem; }
   .tanaan-rivi { padding-block: 2.5rem 3rem; margin-top: 3rem; }
   .palvelut-osio { padding-block: 5rem 7rem; }

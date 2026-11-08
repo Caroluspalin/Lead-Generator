@@ -28,7 +28,7 @@
       {% endfor %}
     </div>
     <div class="kehys hero-teksti">
-      <h1>{{ content.hero_title }}</h1>
+      <h1 data-pisin="{{ pisin(content.hero_title) }}">{{ content.hero_title }}</h1>
       <p class="hero-lause">{{ content.hero_subtitle }}</p>
       <div class="napit">
         {% if tel %}<a class="nappi" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
@@ -71,7 +71,7 @@
         <img class="studio-kuva" src="{{ esittely_kuva.src }}" srcset="{{ esittely_kuva.srcset }}" sizes="(min-width: 64rem) 30vw, 100vw" width="1280" height="1920" alt="" loading="lazy" decoding="async">
         {% endif %}
         <div class="studio-teksti">
-          <h2 id="meista-otsikko">{{ about_title }}</h2>
+          <h2 id="meista-otsikko" data-pisin="{{ pisin(about_title) }}">{{ about_title }}</h2>
           <p>{{ content.about }}</p>
         </div>
       </div>

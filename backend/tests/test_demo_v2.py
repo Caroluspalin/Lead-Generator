@@ -693,3 +693,37 @@ def test_screenshot_without_playwright_is_501(
 
 def test_screenshot_is_owner_only(client_b: TestClient, cafe_demo: dict[str, Any]) -> None:
     assert client_b.get(f"/leads/{cafe_demo['lead_id']}/demo/screenshot").status_code == 404
+
+
+# --- Kyltin varaversion otsikon koko (live-demo: "Olarin Parturi-kampaamo Saloon lion") ---
+
+from app.demo_site import longest_segment  # noqa: E402
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("Olarin Parturi-kampaamo Saloon lion", 8),      # "Parturi-" / "kampaamo" / "Olarin"
+    ("Parturi-Kampaamo Kauniaisten Hiuspiste Oy", 11),  # "Kauniaisten"
+    ("Ab", 2),
+    ("Ylivoimaisenpitkäsanainenparturiliike Oy", 30),  # katto 30
+])
+def test_longest_segment(name: str, expected: int) -> None:
+    assert longest_segment(name) == expected
+
+
+def test_fallback_heading_sized_by_longest_segment() -> None:
+    html = _barber("Olarin Parturi-kampaamo Saloon lion")
+    assert 'class="nimi" data-pisin="8"' in html
+    css = (ASSET_DIR / "barber" / "tyylit.css").read_text()
+    assert all(f'[data-pisin="{n}"] {{ --pisin: {n}; }}' in css for n in range(2, 31))
+
+
+@pytest.mark.parametrize("template", V2_TEMPLATES)
+def test_ai_headings_carry_longest_word_for_css_sizing(template: str) -> None:
+    content = DemoStoredContent(**{**VALID, "hero_title": "Kampaamopalvelut Kauniaisissa",
+                                   "about_title": "Parturi- ja kampaamopalvelut"})
+    html = render_demo_html(template=template, color_scheme=next(iter(TEMPLATES[template].schemes)),
+                            business=BUSINESS, sender=SENDER, content=content)
+    assert '<h1 data-pisin="16">Kampaamopalvelut Kauniaisissa</h1>' in html
+    assert 'data-pisin="16">Parturi- ja kampaamopalvelut</h2>' in html
+    css = (ASSET_DIR / template / "tyylit.css").read_text()
+    assert "container-type: inline-size" in css and "var(--mahtuu" in css
