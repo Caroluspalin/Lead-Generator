@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -102,11 +103,13 @@ def test_search_live_path_wires_service_and_website_analysis(
          "rating": None, "review_count": None, "business_status": "CLOSED_TEMPORARILY", "primary_type": None,
          "maps_url": None},
     ]
-    def _fake_search_grid(self: GooglePlacesService, city: str, keyword: str) -> list[dict[str, Any]]:
+    def _fake_iter_places(
+        self: GooglePlacesService, city: str, keyword: str, *, expand_neighbors: bool = False
+    ) -> Iterator[list[dict[str, Any]]]:
         self._calls = {"geocode": 1, "text_search": 1}
-        return places
+        yield places
 
-    monkeypatch.setattr("app.main.GooglePlacesService.search_grid", _fake_search_grid)
+    monkeypatch.setattr("app.main.GooglePlacesService.iter_places", _fake_iter_places)
     monkeypatch.setattr(
         "app.main.analyze_website",
         lambda url: WebsiteCheck("INSECURE", "no HTTPS") if url else WebsiteCheck("NO WEBSITE"),
@@ -136,7 +139,7 @@ def test_search_results_sorted_by_score_desc(client_a: TestClient) -> None:
     assert temp_closed["lead_score"] < results[0]["lead_score"]
 
 
-def test_search_marks_already_saved_instead_of_hiding(
+def test_search_hides_pipeline_leads_even_when_showing_seen(
     client_a: TestClient, client_b: TestClient, make_lead: Any
 ) -> None:
     first = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
@@ -144,14 +147,15 @@ def test_search_marks_already_saved_instead_of_hiding(
     target = first[2]
     make_lead(name=target["name"], google_place_id=target["place_id"])
 
-    again = client_a.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
-    assert len(again) == len(first)
-    saved = [r["place_id"] for r in again if r["already_saved"]]
-    assert saved == [target["place_id"]]
+    again = client_a.get(
+        "/search", params={"business_type": "parturi", "city": "Espoo", "only_new": "false"}
+    ).json()["results"]
+    assert len(again) == len(first) - 1
+    assert target["place_id"] not in {r["place_id"] for r in again}
 
     # Toisen käyttäjän pipeline ei vaikuta
     other = client_b.get("/search", params={"business_type": "parturi", "city": "Espoo"}).json()["results"]
-    assert not any(r["already_saved"] for r in other)
+    assert target["place_id"] in {r["place_id"] for r in other}
 
 
 def test_search_live_path_with_no_places_still_reports_usage(
@@ -160,11 +164,13 @@ def test_search_live_path_with_no_places_still_reports_usage(
     monkeypatch.setattr("app.main.USE_LIVE_GOOGLE", True)
     monkeypatch.setattr("app.main.GOOGLE_API_KEY", "AIza-test")
 
-    def _empty(self: GooglePlacesService, city: str, keyword: str) -> list[dict[str, Any]]:
+    def _empty(
+        self: GooglePlacesService, city: str, keyword: str, *, expand_neighbors: bool = False
+    ) -> Iterator[list[dict[str, Any]]]:
         self._calls = {"geocode": 1, "text_search": 1}
-        return []
+        yield from ()
 
-    monkeypatch.setattr("app.main.GooglePlacesService.search_grid", _empty)
+    monkeypatch.setattr("app.main.GooglePlacesService.iter_places", _empty)
     body = client_a.get("/search", params={"business_type": "parturi", "city": "Kauniainen"}).json()
     assert body["results"] == []
     assert body["usage"]["api_calls"] == 2

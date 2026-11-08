@@ -24,6 +24,23 @@ class SearchHistoryEntry(SQLModel, table=True):
     searched_at: datetime = Field(default_factory=utc_now)
 
 
+# Käyttäjän näkemä tila Google-paikalle. Vain place_id ja tila: Googlen ehdot sallivat place_id:n
+# pysyvän tallennuksen, muuta Places-sisältöä ei tallenneta tähän tauluun.
+PLACE_STATUSES = ["seen", "in_pipeline", "dismissed"]
+
+
+class PlaceStatus(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("user_id", "place_id", name="uq_placestatus_user_place"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    place_id: str
+    status: str
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class EmailDraft(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: str = Field(index=True)

@@ -9,7 +9,7 @@ import threading
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from collections import OrderedDict, deque
-from typing import AsyncIterator, Callable, List, Optional, Dict
+from typing import AsyncIterator, Callable, Iterable, Iterator, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus, urlparse
@@ -26,7 +26,8 @@ import requests
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
 from .models import (
-    Demo, Lead, LeadCreate, LeadUpdate, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate, utc_now,
+    Demo, Lead, LeadCreate, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
+    utc_now,
 )
 from .utils import unsplash
 from .database import engine
@@ -68,7 +69,7 @@ from .demo_site import (
     validate_template_choice,
 )
 from .utils.scraper import scrape_website_text
-from .utils.website_check import analyze_website
+from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_social_media_url
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
@@ -102,7 +103,7 @@ MAX_PAGES_PER_CELL = 3     # Text Search (New): max 20/sivu, max 60 tulosta per 
 PAGE_SIZE = 20
 MAX_RESULTS_PER_QUERY = PAGE_SIZE * MAX_PAGES_PER_CELL  # täysi tulos -> alue voi sisältää enemmän
 MAX_SPLIT_DEPTH = 2        # koko alue -> 4 -> 16 ruutua, vain täyttyneet ruudut jaetaan
-MAX_WORKERS_WEBSITE = 5
+MAX_WORKERS_WEBSITE = 8   # sivuanalyysi per hakusivu (ilmaisia HTTP-pyyntöjä, ei Places-kutsuja)
 
 # Listahinnat per kutsu (Googlen hinnasto 11/2026, 0-100k-taso, ilman ilmaiskiintiötä).
 # Text Search -hinta on Enterprise, koska field maskissa on Enterprise-kenttiä.
@@ -210,11 +211,26 @@ class GoogleSearchResult(BaseModel):
     maps_url: Optional[str] = None
     lead_score: int = 0
     already_saved: bool = False
+    # Kunta osoitteesta (naapurialueiden tulokset), muuten haettu kaupunki
+    city: Optional[str] = None
+
+
+class SearchSummary(BaseModel):
+    requested: int
+    found: int
+    # target_reached | call_limit | area_exhausted
+    stop_reason: str
+    skipped_in_pipeline: int = 0
+    skipped_dismissed: int = 0
+    skipped_seen: int = 0
+    filtered_out: int = 0
+    searched_neighbors: bool = False
 
 
 class SearchResponse(BaseModel):
     results: List[GoogleSearchResult]
     usage: SearchUsage
+    summary: Optional[SearchSummary] = None
 
 
 def normalize_place(place: Dict) -> Dict:
@@ -282,6 +298,7 @@ class GooglePlacesService:
         self.key = api_key
         self._calls: Dict[str, int] = {kind: 0 for kind in PRICE_PER_CALL_USD}
         self._lock = threading.Lock()
+        self.searched_neighbors = False
 
     def _reserve_call(self, kind: str) -> bool:
         """Varaa yhden kutsun budjetista. Lukko pitää rajan myös rinnakkaisissa kutsuissa."""
@@ -372,8 +389,11 @@ class GooglePlacesService:
             for lo0, lo1 in lngs
         ]
 
-    def search_cell(self, rectangle: Dict, keyword: str) -> List[Dict]:
-        """Text Search (New) yhdelle ruudulle, max MAX_PAGES_PER_CELL sivua."""
+    def iter_cell_pages(self, rectangle: Dict, keyword: str) -> Iterator[List[Dict]]:
+        """Text Search (New) yhdelle ruudulle sivu kerrallaan, max MAX_PAGES_PER_CELL sivua.
+
+        Generaattori: jos kuluttaja lopettaa, seuraavaa sivua ei haeta (ei maksua).
+        """
         base_body: Dict = {
             "textQuery": keyword,
             "locationRestriction": {"rectangle": rectangle},
@@ -381,55 +401,87 @@ class GooglePlacesService:
             "languageCode": "fi",
             "regionCode": "FI",
         }
-        all_places: List[Dict] = []
         page_token: Optional[str] = None
 
         for _ in range(MAX_PAGES_PER_CELL):
+            if self.calls_used >= MAX_SEARCH_CALLS:
+                return
             # Googlen ehto: sivutuspyynnön muiden parametrien pitää olla identtiset
             body = {**base_body, "pageToken": page_token} if page_token else base_body
             data = self._post_json(PLACES_TEXT_SEARCH_URL, body)
-            all_places.extend(data.get("places", []))
+            yield data.get("places", [])
 
             page_token = data.get("nextPageToken")
             if not page_token:
-                break
+                return
 
-        return all_places
+    def search_cell(self, rectangle: Dict, keyword: str) -> List[Dict]:
+        return [place for page in self.iter_cell_pages(rectangle, keyword) for place in page]
 
-    def search_grid(self, city: str, keyword: str) -> List[Dict]:
-        """Mukautuva ruudukko: koko kaupunki yhdellä kyselyllä, jaetaan vain täyttyneet alueet.
+    @staticmethod
+    def neighbor_rectangles(rectangle: Dict) -> List[Dict]:
+        """Kahdeksan samankokoista ruutua alueen ympärillä (naapurikunnat ilman lisä-Geocodingia)."""
+        low, high = rectangle["low"], rectangle["high"]
+        d_lat = high["latitude"] - low["latitude"]
+        d_lng = high["longitude"] - low["longitude"]
+        return [
+            {
+                "low": {"latitude": low["latitude"] + i * d_lat, "longitude": low["longitude"] + j * d_lng},
+                "high": {"latitude": high["latitude"] + i * d_lat, "longitude": high["longitude"] + j * d_lng},
+            }
+            for i in (-1, 0, 1)
+            for j in (-1, 0, 1)
+            if (i, j) != (0, 0)
+        ]
+
+    def iter_places(self, city: str, keyword: str, *, expand_neighbors: bool = False) -> Iterator[List[Dict]]:
+        """Mukautuva ruudukko sivu kerrallaan, normalisoidut paikat (ei vielä duplikaattien poistoa).
 
         Text Search palauttaa max 60 tulosta per kysely. Jos alue täyttyy, siellä voi olla
         lisää yrityksiä -> jaetaan 2x2 ja haetaan neljännekset (leveyshaku, max MAX_SPLIT_DEPTH).
-        MAX_SEARCH_CALLS katkaisee haun aina.
+        expand_neighbors: kun kaupungin ruudukko on käyty, jatketaan ympäröivillä ruuduilla.
+        MAX_SEARCH_CALLS katkaisee haun aina, ja kuluttaja voi lopettaa minkä sivun jälkeen tahansa.
         """
         viewport = self.get_city_bounds(city)
         if not viewport:
             logger.warning(f"Kaupungin '{city}' viewport-rajoja ei löytynyt")
-            return []
+            return
 
-        unique: Dict[str, Dict] = {}
-        queue: deque[tuple[Dict, int]] = deque([(self.viewport_to_rectangle(viewport), 0)])
+        city_rect = self.viewport_to_rectangle(viewport)
+        queue: deque[tuple[Dict, int]] = deque([(city_rect, 0)])
+        neighbors_queued = not expand_neighbors
         areas = 0
-        while queue:
+        while True:
+            if not queue:
+                if neighbors_queued:
+                    return
+                neighbors_queued = True
+                self.searched_neighbors = True
+                logger.info("Kaupungin alue käyty, jatketaan naapurialueille")
+                queue.extend((r, 0) for r in self.neighbor_rectangles(city_rect))
             if self.calls_used >= MAX_SEARCH_CALLS:
                 logger.warning(f"Kutsuraja täynnä, {len(queue)} aluetta jäi hakematta")
-                break
+                return
             rect, depth = queue.popleft()
-            places = self.search_cell(rect, keyword)
             areas += 1
-            before = len(unique)
-            for place in places:
-                normalized = normalize_place(place)
-                if normalized["place_id"]:
-                    unique[normalized["place_id"]] = normalized
-            saturated = len(places) >= MAX_RESULTS_PER_QUERY
+            found = 0
+            for page in self.iter_cell_pages(rect, keyword):
+                found += len(page)
+                yield [n for n in (normalize_place(p) for p in page) if n["place_id"]]
+            saturated = found >= MAX_RESULTS_PER_QUERY
             logger.info(
-                f"  Alue {areas} (taso {depth}): {len(places)} tulosta, {len(unique) - before} uutta"
+                f"  Alue {areas} (taso {depth}): {found} tulosta"
                 f"{' — täynnä, jaetaan' if saturated and depth < MAX_SPLIT_DEPTH else ''}"
             )
             if saturated and depth < MAX_SPLIT_DEPTH:
                 queue.extend((q, depth + 1) for q in self.split_rectangle(rect))
+
+    def search_grid(self, city: str, keyword: str) -> List[Dict]:
+        """Koko ruudukko kerralla: uniikit, avoimet ja yhdistetyt paikat."""
+        unique: Dict[str, Dict] = {}
+        for page in self.iter_places(city, keyword):
+            for place in page:
+                unique[place["place_id"]] = place
 
         open_places = drop_permanently_closed(list(unique.values()))
         results = merge_duplicates(open_places)
@@ -437,7 +489,7 @@ class GooglePlacesService:
         logger.info(
             f"Haku valmis: '{keyword}' / '{city}': {len(results)} yritystä "
             f"({len(unique) - len(open_places)} pysyvästi suljettua pois, "
-            f"{len(open_places) - len(results)} duplikaattia yhdistetty), {areas} aluetta, "
+            f"{len(open_places) - len(results)} duplikaattia yhdistetty), "
             f"{usage.api_calls}/{MAX_SEARCH_CALLS} kutsua "
             f"(geocode {usage.geocode_calls}, text search {usage.text_search_calls}), "
             f"~${usage.estimated_cost_usd:.3f}"
@@ -481,9 +533,11 @@ def _mock_places(business_type: str, city: str) -> List[Dict]:
         (f"{bt} Linna Esimerkki", "linna-esimerkki.example", "UNKNOWN", "HTTP 403", 4.5, 64, "OPERATIONAL"),
     ]
     primary_type = _mock_primary_type(business_type)
+    # Tunniste haun mukaan, jotta "vain uudet" -suodatus toimii devissä eri hauille erikseen
+    key = hashlib.sha256(f"{low}|{city.strip().lower()}".encode()).hexdigest()[:8]
     return [
         {
-            "place_id": f"dev-{i}",
+            "place_id": f"dev-{key}-{i}",
             "name": name,
             "address": f"Esimerkkikatu {i}, {city}",
             "phone": f"040 000 00{i:02d}" if i % 4 else None,
@@ -500,6 +554,144 @@ def _mock_places(business_type: str, city: str) -> List[Dict]:
     ]
 
 
+# --- Hakusuodattimet ---
+
+# Lomakkeen sivun tila -> mitä analyze_website-tuloksia se vastaa
+SEARCH_STATUS_FILTERS = ("no_website", "broken", "insecure", "not_mobile", "social_only")
+# Oikean (ei-some) sivun mahdolliset tilat suodatinta kohden ennen analyysia
+_REAL_SITE_STATUSES: Dict[str, tuple[str, ...]] = {
+    "broken": ("BROKEN WEBSITE",),
+    "insecure": ("INSECURE",),
+    "not_mobile": ("NOT MOBILE", "INSECURE"),
+}
+_ALL_REAL_SITE_STATUSES = ("BROKEN WEBSITE", "INSECURE", "NOT MOBILE", "WEBSITE OK", "UNKNOWN")
+DEFAULT_SEARCH_COUNT = 20
+MAX_SEARCH_COUNT = 100
+
+
+class SearchFilters(BaseModel):
+    statuses: List[str] = Field(default_factory=list)  # tyhjä = kaikki tilat
+    min_score: int = 0
+    exclude_closed: bool = False
+
+
+def status_categories(website_status: Optional[str], website_issue: Optional[str]) -> set[str]:
+    issue = website_issue or ""
+    if website_status == "NO WEBSITE":
+        return {"social_only"} if issue == SOCIAL_MEDIA_ISSUE else {"no_website"}
+    if website_status == "BROKEN WEBSITE":
+        return {"broken"}
+    if website_status == "INSECURE":
+        # Salaamaton sivu ilman viewportia on myös "ei mobiili"
+        return {"insecure", "not_mobile"} if "no viewport" in issue else {"insecure"}
+    if website_status == "NOT MOBILE":
+        return {"not_mobile"}
+    return set()
+
+
+def matches_filters(result: GoogleSearchResult, filters: SearchFilters) -> bool:
+    if filters.exclude_closed and result.business_status == "CLOSED_TEMPORARILY":
+        return False
+    if filters.statuses and not (status_categories(result.website_status, result.website_issue) & set(filters.statuses)):
+        return False
+    return result.lead_score >= filters.min_score
+
+
+def could_match(place: Dict, filters: SearchFilters) -> bool:
+    """Voiko paikka vielä täyttää suodattimet sivuanalyysin jälkeen? Säästää hitaat sivupyynnöt."""
+    if filters.exclude_closed and place.get("business_status") == "CLOSED_TEMPORARILY":
+        return False
+    website = (place.get("website") or "").strip()
+    if not website or is_social_media_url(website):
+        category = "social_only" if website else "no_website"
+        if filters.statuses and category not in filters.statuses:
+            return False
+        possible: tuple[str, ...] = ("NO WEBSITE",)
+    elif filters.statuses:
+        possible = tuple(st for f in filters.statuses for st in _REAL_SITE_STATUSES.get(f, ()))
+    else:
+        possible = _ALL_REAL_SITE_STATUSES
+    # Paras mahdollinen pistemäärä sallituilla tiloilla
+    return any(
+        lead_score(st, place.get("rating"), place.get("review_count"), place.get("business_status")) >= filters.min_score
+        for st in possible
+    )
+
+
+_POSTAL_CITY_RE = re.compile(r"\b\d{5}\s+([^,\d]+?)\s*(?:,|$)")
+
+
+def city_from_address(address: Optional[str]) -> Optional[str]:
+    """"Katu 1, 02700 Kauniainen, Suomi" -> "Kauniainen"."""
+    match = _POSTAL_CITY_RE.search(address or "")
+    return match.group(1).strip() if match else None
+
+
+class CollectOutcome(BaseModel):
+    results: List[GoogleSearchResult]
+    target_reached: bool
+    skipped: Dict[str, int]
+    filtered_out: int
+
+
+def collect_new_leads(
+    pages: Iterable[List[Dict]],
+    analyze: Callable[[List[Dict]], List[GoogleSearchResult]],
+    *,
+    count: int,
+    filters: SearchFilters,
+    excluded: Dict[str, str],
+) -> CollectOutcome:
+    """Käy hakusivuja läpi kunnes `count` suodattimet täyttävää uutta liidiä on löytynyt.
+
+    excluded: place_id -> syy (in_pipeline | dismissed | seen). Pois suljetuille ja suodattimiin
+    mahtumattomille ei tehdä sivuanalyysia. Lopettaa sivujen kuluttamisen heti kun määrä täyttyy,
+    jolloin seuraavia Places-kutsuja ei tehdä.
+    """
+    seen_ids: set[str] = set()
+    found: List[GoogleSearchResult] = []
+    skipped = {"in_pipeline": 0, "dismissed": 0, "seen": 0}
+    filtered_out = 0
+    target_reached = False
+    iterator = iter(pages)
+    try:
+        for page in iterator:
+            candidates: List[Dict] = []
+            for place in drop_permanently_closed(page):
+                pid = place["place_id"]
+                if pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+                reason = excluded.get(pid)
+                if reason is not None:
+                    skipped[reason] = skipped.get(reason, 0) + 1
+                elif could_match(place, filters):
+                    candidates.append(place)
+                else:
+                    filtered_out += 1
+            for result in analyze(candidates) if candidates else []:
+                result.lead_score = lead_score(result.website_status, result.rating, result.review_count, result.business_status)
+                if matches_filters(result, filters):
+                    found.append(result)
+                else:
+                    filtered_out += 1
+            if len(_merge_results(found)) >= count:
+                target_reached = True
+                break
+    finally:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
+    merged = sorted(_merge_results(found), key=lambda r: (-r.lead_score, r.name))
+    return CollectOutcome(results=merged[:count], target_reached=target_reached, skipped=skipped, filtered_out=filtered_out)
+
+
+def _merge_results(results: List[GoogleSearchResult]) -> List[GoogleSearchResult]:
+    by_id = {id(r): r for r in results}
+    merged = merge_duplicates([{**r.model_dump(), "_key": id(r)} for r in results])
+    return [by_id[m["_key"]] for m in merged]
+
+
 def _finalize_search(
     results: List[GoogleSearchResult],
     business_type: str,
@@ -507,8 +699,10 @@ def _finalize_search(
     session: Session,
     user: AuthUser,
     usage: SearchUsage,
+    summary: Optional[SearchSummary] = None,
 ) -> SearchResponse:
-    """Pisteyttää, merkitsee jo tallennetut, järjestää (paras ensin) ja tallentaa hakuhistorian."""
+    """Pisteyttää, merkitsee jo tallennetut, järjestää (paras ensin), merkitsee näytetyt nähdyiksi
+    ja tallentaa hakuhistorian."""
     saved_ids = set(session.exec(
         select(Lead.google_place_id).where(
             Lead.user_id == user.id,
@@ -518,36 +712,68 @@ def _finalize_search(
     for r in results:
         r.lead_score = lead_score(r.website_status, r.rating, r.review_count, r.business_status)
         r.already_saved = r.place_id in saved_ids
+        r.city = city_from_address(r.address) or city
     results.sort(key=lambda r: (-r.lead_score, r.name))
 
+    mark_seen(session, user.id, [r.place_id for r in results])
     session.add(SearchHistoryEntry(user_id=user.id, business_type=business_type, city=city, result_count=len(results)))
     session.commit()
-    return SearchResponse(results=results, usage=usage)
+    return SearchResponse(results=results, usage=usage, summary=summary)
 
 
-# 1. HAKU (Stateless, Google API)
+def _excluded_places(session: Session, user_id: str, *, only_new: bool) -> Dict[str, str]:
+    """place_id -> syy. Pipeline ja hylätyt aina, nähdyt vain "vain uudet" -tilassa."""
+    excluded = {
+        row.place_id: row.status
+        for row in session.exec(select(PlaceStatus).where(PlaceStatus.user_id == user_id)).all()
+        if only_new or row.status != "seen"
+    }
+    # Lead-taulu on pipelinen totuus myös jos tila-rivi puuttuisi
+    for pid in session.exec(
+        select(Lead.google_place_id).where(Lead.user_id == user_id, Lead.google_place_id.is_not(None))
+    ).all():
+        if pid:
+            excluded[pid] = "in_pipeline"
+    return excluded
+
+
+# 1. HAKU (Google API)
 # HUOM: Muutettu polku /leads -> /search, jotta /leads jää tietokannalle
 @app.get("/search", response_model=SearchResponse)
 async def search_google(
     business_type: str = Query(..., min_length=2),
     city: str = Query(..., min_length=2),
+    count: int = Query(DEFAULT_SEARCH_COUNT, ge=1, le=MAX_SEARCH_COUNT),
+    status: List[str] = Query(default_factory=list),
+    min_score: int = Query(0, ge=0, le=100),
+    exclude_closed: bool = Query(False),
+    only_new: bool = Query(True),
+    expand_neighbors: bool = Query(False),
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
 ):
+    unknown = [s for s in status if s not in SEARCH_STATUS_FILTERS]
+    if unknown:
+        raise HTTPException(422, f"Unknown status filter: {', '.join(unknown)}")
+    filters = SearchFilters(statuses=list(dict.fromkeys(status)), min_score=min_score, exclude_closed=exclude_closed)
+    excluded = _excluded_places(session, user.id, only_new=only_new)
+
     if not USE_LIVE_GOOGLE:
-        places = drop_permanently_closed(_mock_places(business_type, city))
-        results = [GoogleSearchResult(**p, discovery_method="DEV-MOCK") for p in places]
-        return _finalize_search(results, business_type, city, session, user, SearchUsage())
+        mock_pages = [_mock_places(business_type, city)]
+        outcome = collect_new_leads(
+            mock_pages,
+            lambda places: [GoogleSearchResult(**p, discovery_method="DEV-MOCK") for p in places],
+            count=count, filters=filters, excluded=excluded,
+        )
+        summary = _search_summary(outcome, count, call_limit_hit=False, searched_neighbors=False)
+        return _finalize_search(outcome.results, business_type, city, session, user, SearchUsage(), summary)
 
     if "AIza" not in GOOGLE_API_KEY:
         raise HTTPException(500, "API Key missing")
 
     service = GooglePlacesService(GOOGLE_API_KEY)
 
-    # Google-kutsut ja website-analyysi blokkaavat -> taustasäikeeseen, event loop ei jäädy
-    places = await asyncio.to_thread(service.search_grid, city, business_type)
-
-    def _blocking_website_analysis() -> List[GoogleSearchResult]:
+    def _analyze(places: List[Dict]) -> List[GoogleSearchResult]:
         output = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS_WEBSITE) as ex:
             future_map = {ex.submit(analyze_website, p.get("website")): p for p in places}
@@ -561,8 +787,43 @@ async def search_google(
                 ))
         return output
 
-    results = await asyncio.to_thread(_blocking_website_analysis) if places else []
-    return _finalize_search(results, business_type, city, session, user, service.usage())
+    # Google-kutsut ja website-analyysi blokkaavat -> taustasäikeeseen, event loop ei jäädy
+    outcome = await asyncio.to_thread(
+        collect_new_leads,
+        service.iter_places(city, business_type, expand_neighbors=expand_neighbors),
+        _analyze,
+        count=count, filters=filters, excluded=excluded,
+    )
+    summary = _search_summary(
+        outcome, count,
+        call_limit_hit=service.calls_used >= MAX_SEARCH_CALLS,
+        searched_neighbors=service.searched_neighbors,
+    )
+    usage = service.usage()
+    logger.info(
+        f"Uudet liidit '{business_type}' / '{city}': {summary.found}/{count} ({summary.stop_reason}), "
+        f"{usage.api_calls}/{MAX_SEARCH_CALLS} kutsua, ~${usage.estimated_cost_usd:.3f}"
+    )
+    return _finalize_search(outcome.results, business_type, city, session, user, usage, summary)
+
+
+def _search_summary(outcome: CollectOutcome, count: int, *, call_limit_hit: bool, searched_neighbors: bool) -> SearchSummary:
+    if outcome.target_reached:
+        reason = "target_reached"
+    elif call_limit_hit:
+        reason = "call_limit"
+    else:
+        reason = "area_exhausted"
+    return SearchSummary(
+        requested=count,
+        found=len(outcome.results),
+        stop_reason=reason,
+        skipped_in_pipeline=outcome.skipped.get("in_pipeline", 0),
+        skipped_dismissed=outcome.skipped.get("dismissed", 0),
+        skipped_seen=outcome.skipped.get("seen", 0),
+        filtered_out=outcome.filtered_out,
+        searched_neighbors=searched_neighbors,
+    )
 
 # 2. TALLENNA LIIDI (Database)
 # Sivusto toimii -> kannattaa etsiä sähköpostia (BROKEN/NO WEBSITE/UNKNOWN eivät vastaa luotettavasti)
@@ -616,6 +877,8 @@ def create_lead(
     score = lead_score(lead.website_status, lead.rating, lead.review_count, lead.business_status)
     db_lead = Lead.model_validate(lead, update={"user_id": user.id, "lead_score": score})
     session.add(db_lead)
+    if is_google_place_id(db_lead.google_place_id):
+        set_place_status(session, user.id, db_lead.google_place_id, "in_pipeline")
     session.commit()
     session.refresh(db_lead)
 
@@ -822,12 +1085,134 @@ def delete_lead(
     db_lead = session.get(Lead, lead_id)
     if not db_lead or db_lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found")
-    for demo in session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).all():
-        _take_offline(demo)
-        session.delete(demo)
-    session.delete(db_lead)
+    _remove_lead(session, db_lead)
+    # Poistettu liidi ei ole hylätty: se voi tulla hakuun uudelleen, mutta ei "vain uudet" -haussa
+    if is_google_place_id(db_lead.google_place_id):
+        current = get_place_status(session, user.id, db_lead.google_place_id)
+        if current is not None and current.status == "in_pipeline":
+            set_place_status(session, user.id, db_lead.google_place_id, "seen")
     session.commit()
     return {"ok": True}
+
+
+def _remove_lead(session: Session, lead: Lead) -> None:
+    """Poistaa liidin ja sen demon (julkaistu demo otetaan ensin pois R2:sta). Ei commitoi."""
+    for demo in session.exec(select(Demo).where(Demo.lead_id == lead.id, Demo.user_id == lead.user_id)).all():
+        _take_offline(demo)
+        session.delete(demo)
+    session.delete(lead)
+
+
+# --- Paikkojen tila (seen / in_pipeline / dismissed) ---
+
+# Googlen place id: kirjaimia, numeroita, _ ja -. dev- = mock-haun tunnisteet (toimivat devissä samoin)
+_PLACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,300}$")
+
+
+def is_google_place_id(place_id: Optional[str]) -> bool:
+    # Käsin lisätyillä liideillä on frontendin keksimä manual-tunniste, ei Googlen paikkaa
+    return bool(place_id) and not (place_id or "").startswith("manual-") and bool(_PLACE_ID_RE.match(place_id or ""))
+
+
+def get_place_status(session: Session, user_id: str, place_id: str) -> Optional[PlaceStatus]:
+    return session.exec(
+        select(PlaceStatus).where(PlaceStatus.user_id == user_id, PlaceStatus.place_id == place_id)
+    ).first()
+
+
+def set_place_status(session: Session, user_id: str, place_id: str, status: str) -> None:
+    """Upsert ilman committia."""
+    row = get_place_status(session, user_id, place_id)
+    if row is None:
+        row = PlaceStatus(user_id=user_id, place_id=place_id, status=status)
+    else:
+        row.status, row.updated_at = status, utc_now()
+    session.add(row)
+
+
+def place_statuses(session: Session, user_id: str, place_ids: List[str]) -> Dict[str, str]:
+    if not place_ids:
+        return {}
+    rows = session.exec(
+        select(PlaceStatus).where(PlaceStatus.user_id == user_id, PlaceStatus.place_id.in_(place_ids))
+    ).all()
+    return {r.place_id: r.status for r in rows}
+
+
+def mark_seen(session: Session, user_id: str, place_ids: List[str]) -> None:
+    """Uusille paikoille seen. Ei koskaan alenna in_pipeline- tai dismissed-tilaa. Ei commitoi."""
+    known = place_statuses(session, user_id, place_ids)
+    for pid in dict.fromkeys(place_ids):
+        if pid not in known and is_google_place_id(pid):
+            session.add(PlaceStatus(user_id=user_id, place_id=pid, status="seen"))
+
+
+def maps_url_for_place(place_id: str) -> str:
+    return f"https://www.google.com/maps/place/?q=place_id:{quote_plus(place_id)}"
+
+
+class DismissedPlace(BaseModel):
+    place_id: str
+    maps_url: str
+    dismissed_at: datetime
+
+
+class DismissResponse(BaseModel):
+    place_id: str
+    status: str
+    removed_lead_id: Optional[int] = None
+
+
+def _require_place_id(place_id: str) -> str:
+    if not is_google_place_id(place_id):
+        raise HTTPException(422, "Invalid place id")
+    return place_id
+
+
+@app.post("/places/{place_id}/dismiss", response_model=DismissResponse)
+def dismiss_place(
+    place_id: str,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> DismissResponse:
+    """Pysyvä hylkäys: paikka ei palaa hakutuloksiin. Jos se on pipelinessa, liidi ja demo poistetaan."""
+    _require_place_id(place_id)
+    lead = session.exec(select(Lead).where(Lead.user_id == user.id, Lead.google_place_id == place_id)).first()
+    removed = lead.id if lead else None
+    if lead is not None:
+        _remove_lead(session, lead)
+    set_place_status(session, user.id, place_id, "dismissed")
+    session.commit()
+    return DismissResponse(place_id=place_id, status="dismissed", removed_lead_id=removed)
+
+
+@app.delete("/places/{place_id}/dismiss")
+def restore_place(
+    place_id: str,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> dict[str, bool]:
+    """Palauttaa hylätyn: rivi poistetaan, joten paikka näkyy hauissa taas uutena."""
+    _require_place_id(place_id)
+    row = get_place_status(session, user.id, place_id)
+    if row is None or row.status != "dismissed":
+        raise HTTPException(404, "Place is not dismissed")
+    session.delete(row)
+    session.commit()
+    return {"ok": True}
+
+
+@app.get("/places/dismissed", response_model=List[DismissedPlace])
+def list_dismissed_places(
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> List[DismissedPlace]:
+    rows = session.exec(
+        select(PlaceStatus)
+        .where(PlaceStatus.user_id == user.id, PlaceStatus.status == "dismissed")
+        .order_by(PlaceStatus.updated_at.desc())
+    ).all()
+    return [DismissedPlace(place_id=r.place_id, maps_url=maps_url_for_place(r.place_id), dismissed_at=r.updated_at) for r in rows]
 
 # --- AI EMAIL SERVICE ---
 
