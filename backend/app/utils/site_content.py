@@ -10,8 +10,10 @@ Rakenteistus (palvelut, hinnat, esittely) tehdään AI:lla main.py:ssä; tämä 
 tekstit ja tarkistaa AI:n vastauksen niitä vasten (verify_site_facts): hinta kelpaa vain jos sen
 luvut ja valuutta lukevat samalla sivulla palvelun nimen lähellä.
 """
+import ipaddress
 import logging
 import re
+import socket
 import time
 import warnings
 from dataclasses import dataclass
@@ -114,26 +116,86 @@ def _with_scheme(url: str) -> str:
     return url if "://" in url else f"https://{url}"
 
 
-def _get(url: str) -> Optional[requests.Response]:
-    """GET; huono sertifikaatti (INSECURE-sivut) luetaan ilman tarkistusta, https -> http jos ei vastaa."""
+MAX_REDIRECTS = 5
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+
+
+def _resolve(host: str) -> list[str]:
+    return [info[4][0] for info in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)]
+
+
+def is_public_url(url: str) -> bool:
+    """SSRF-suoja: vain http(s) oletusporteissa ja nimi, jonka KAIKKI osoitteet ovat julkisia.
+
+    Liidin osoite tulee clientiltä, joten ilman tätä skannaus voisi hakea sisäverkon tai
+    pilven metadatapalvelun (169.254.169.254) ja tekstin päätyä website_contextiin.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
     try:
-        return requests.get(url, headers=HEADERS, timeout=TIMEOUT_SECONDS, allow_redirects=True)
+        port = parsed.port
+    except ValueError:
+        return False
+    if port not in (None, 80, 443):
+        return False
+    try:
+        # IP-literaali tarkistetaan sellaisenaan, nimi kaikkien osoitteidensa mukaan
+        return ipaddress.ip_address(parsed.hostname.split("%", 1)[0]).is_global
+    except ValueError:
+        pass
+    try:
+        addresses = _resolve(parsed.hostname)
+    except (socket.gaierror, UnicodeError, OSError):
+        return False
+    try:
+        return bool(addresses) and all(ipaddress.ip_address(a.split("%", 1)[0]).is_global for a in addresses)
+    except ValueError:
+        return False
+
+
+def _request_once(url: str) -> Optional[requests.Response]:
+    """Yksi GET ilman uudelleenohjauksia. Huono sertifikaatti (INSECURE-sivut) luetaan ilman tarkistusta,
+    https -> http jos https ei vastaa."""
+    try:
+        return requests.get(url, headers=HEADERS, timeout=TIMEOUT_SECONDS, allow_redirects=False)
     except requests.exceptions.SSLError:
         # Sama periaate kuin website_checkissä: INSECURE-sivun julkinen teksti luetaan ilman
         # sertifikaattitarkistusta, eikä sivulle lähetetä mitään (ei evästeitä, tunnuksia tai lomakkeita)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", urllib3.exceptions.InsecureRequestWarning)
-                return requests.get(url, headers=HEADERS, timeout=TIMEOUT_SECONDS, allow_redirects=True, verify=False)
+                return requests.get(url, headers=HEADERS, timeout=TIMEOUT_SECONDS, allow_redirects=False, verify=False)
         except requests.RequestException:
             return None
     except requests.RequestException:
         if url.startswith("https://"):
+            fallback = "http://" + url[len("https://"):]
+            if not is_public_url(fallback):
+                return None
             try:
-                return requests.get("http://" + url[len("https://"):], headers=HEADERS, timeout=TIMEOUT_SECONDS, allow_redirects=True)
+                return requests.get(fallback, headers=HEADERS, timeout=TIMEOUT_SECONDS, allow_redirects=False)
             except requests.RequestException:
                 return None
         return None
+
+
+def _get(url: str) -> Optional[requests.Response]:
+    """GET, jossa jokainen uudelleenohjaus tarkistetaan erikseen (ei ohjausta sisäverkkoon)."""
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        if not is_public_url(current):
+            logger.warning(f"Sivuston skannaus: osoite ei ole julkinen, ohitetaan ({current})")
+            return None
+        response = _request_once(current)
+        if response is None:
+            return None
+        location = response.headers.get("Location")
+        if response.status_code in _REDIRECT_STATUSES and location:
+            current = urljoin(response.url or current, location)
+            continue
+        return response
+    return None
 
 
 class _Politeness:
@@ -232,6 +294,9 @@ def scan_site(website: str) -> Optional[SiteScan]:
     Rikki-tilan sivu kelpaa jos se silti palauttaa HTML:ää ja tekstiä (esim. HTTP 500 sisällöllä).
     """
     base = _with_scheme(website.strip())
+    if not is_public_url(base):
+        logger.warning(f"Sivuston skannaus: osoite ei ole julkinen, ei skannata ({base})")
+        return None
     polite = _Politeness(base)
     blocked: list[str] = []
     if not polite.allowed(base):

@@ -40,11 +40,12 @@ SITE = "https://parturi-esimerkki.fi"
 
 
 class _Resp:
-    def __init__(self, url: str, status: int, text: str, content_type: str = "text/html; charset=utf-8") -> None:
+    def __init__(self, url: str, status: int, text: str, content_type: str = "text/html; charset=utf-8",
+                 location: Optional[str] = None) -> None:
         self.url = url
         self.status_code = status
         self.text = text
-        self.headers = {"Content-Type": content_type}
+        self.headers = {"Content-Type": content_type, **({"Location": location} if location else {})}
 
 
 def _html(body: str) -> str:
@@ -116,11 +117,20 @@ def _site(robots: Optional[_Resp] = None, **overrides: _Resp) -> dict[str, _Resp
     return pages
 
 
+# Testien kuvitteelliset nimet "resolvoituvat" julkiseen osoitteeseen (ei oikeaa DNS-kyselyä)
+PRIVATE_HOSTS = {"sisainen.example": "10.0.0.5", "metadata.example": "169.254.169.254", "localhost": "127.0.0.1"}
+
+
+def _fake_resolve(host: str) -> list[str]:
+    return [PRIVATE_HOSTS.get(host, "93.184.216.34")]
+
+
 @pytest.fixture
 def site(monkeypatch: pytest.MonkeyPatch) -> Any:
     def _install(pages: dict[str, _Resp]) -> FakeSite:
         fake = FakeSite(pages)
         monkeypatch.setattr("app.utils.site_content.requests.get", fake.get)
+        monkeypatch.setattr("app.utils.site_content._resolve", _fake_resolve)
         return fake
 
     return _install
@@ -495,3 +505,59 @@ def test_email_deep_scan_for_partial_site_respects_robots(
     assert client_a.post(f"/leads/{site_lead['id']}/generate-email", json={}).status_code == 200
     assert fake.requested == [f"{SITE}/robots.txt"]
     assert site_content.USER_AGENT in site_content.HEADERS["User-Agent"]
+
+
+# --- SSRF-suoja: vain julkiset osoitteet, myös uudelleenohjauksissa ---
+
+@pytest.mark.parametrize("url", [
+    "http://localhost/", "http://127.0.0.1/", "http://10.0.0.1/", "http://192.168.1.1/",
+    "http://169.254.169.254/latest/meta-data/", "http://[::1]/", "http://sisainen.example/",
+    "http://metadata.example/", "https://parturi-esimerkki.fi:8080/", "ftp://parturi-esimerkki.fi/",
+    "file:///etc/passwd",
+])
+def test_non_public_urls_are_rejected(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.utils.site_content._resolve", _fake_resolve)
+    assert not site_content.is_public_url(url)
+
+
+def test_public_url_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.utils.site_content._resolve", _fake_resolve)
+    assert site_content.is_public_url(SITE)
+    assert site_content.is_public_url("http://parturi-esimerkki.fi:80/palvelut")
+
+
+def test_internal_site_is_never_requested(site: Any, sleeps: list[float]) -> None:
+    fake = site({})
+    assert scan_site("http://metadata.example/latest/meta-data/") is None
+    assert fake.requested == []
+
+
+def test_redirect_to_internal_address_is_not_followed(site: Any, sleeps: list[float]) -> None:
+    fake = site(_site(**{SITE: _Resp(SITE, 302, "", location="http://169.254.169.254/latest/meta-data/")}))
+    assert scan_site(SITE) is None
+    assert not any("169.254" in u for u in fake.requested)
+
+
+def test_public_redirect_is_followed(site: Any, sleeps: list[float]) -> None:
+    target = "https://www.parturi-esimerkki.fi/"
+    pages = _site(**{SITE: _Resp(SITE, 301, "", location=target)})
+    pages[target] = _Resp(target, 200, HOME)
+    fake = site(pages)
+    scan = scan_site(SITE)
+    assert scan is not None and scan.pages[0].url == target
+    assert target in fake.requested
+
+
+def test_demo_for_lead_with_internal_website_does_not_fetch_it(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    site: Any, sleeps: list[float], session: Session,
+) -> None:
+    fake = site({})
+    # BROKEN (HTTP 500): skannataan, mutta sähköpostihaku (contact_finder) ei käynnisty taustalla
+    lead = make_lead(name="Parturi Sisä", website="http://169.254.169.254/latest/meta-data/",
+                     website_status="BROKEN WEBSITE", website_issue="HTTP 500", primary_type="barber_shop")
+    fake_openai.reply = json.dumps(VALID)
+    assert client_a.post(f"/leads/{lead['id']}/demo", json={}).status_code == 200
+    assert fake.requested == []
+    db_lead = session.get(Lead, lead["id"])
+    assert db_lead is not None and db_lead.website_context is None
