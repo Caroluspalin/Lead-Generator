@@ -1,5 +1,35 @@
 # Agency Hunter — Save State (nykytila)
 
+## Mihin jäätiin (päivitetty 2026-11-09)
+
+Viimeisin valmis vaihe: **Phase 17** (Uudet liidit -haku + nykyisen sivun sisältö demoon), commitit
+`f8c3403`, `4ce53b7`, `73d3f53` ja SSRF-suoja `c92b677`. Testit: pytest 730 passed, `alembic check` puhdas,
+`npm run lint && npm run build` ok, demojen laatuportti (`scripts/demo_check.py`) ok Chromium + WebKit 320–1440 px.
+
+Ennen käyttöä: `cd backend && alembic upgrade head` (migraatiot `cd994575ba52` PlaceStatus + backfill,
+`abdec4f1ad33` Lead.website_facts). Worker pitää deployata (`cd worker && npx wrangler deploy`) ennen
+ensimmäistä v2-demon julkaisua (Phase 16).
+
+Ei vielä testattu oikeita palveluja vasten: uusi haku oikealla Places API:lla ja laajennettu Deep Scan
+oikeilla sivuilla (testit ajettu mockatuilla sivuilla ja Placesilla).
+
+### Jäljellä olevat vaiheet (päätös käyttäjällä, ei aloitettu)
+
+1. **DNS rebinding -suoja laajennettuun Deep Scaniin** (`app/utils/site_content.py`). Nyt `is_public_url()`
+   tarkistaa nimen osoitteet, mutta `requests` selvittää nimen uudelleen pyynnössä (TOCTOU). Vaihtoehdot:
+   (a) suositus: sido yhteys tarkistettuun IP:hen omalla HTTPAdapterilla (Host-header ja TLS SNI /
+   hostname-tarkistus alkuperäisellä nimellä), testit; (b) egress-proxy, joka estää sisäverkon osoitteet
+   (kattaisi myös kohdan 2). Riski pieni jos käyttäjiä on vähän: vaatii kirjautuneen käyttäjän, joka
+   hallitsee omaa nimipalvelinta.
+2. **SSRF-suoja vanhoihin sivupyyntöihin** (olemassa olevaa koodia, ei korjattu pyytämättä): sähköpostihaku
+   (`utils/contact_finder.py` → `website_check.fetch_page`, käynnistyy taustalla `POST /leads`:n jälkeen)
+   ja vanha Deep Scan (`utils/scraper.py`, sähköpostin generointi muille kuin osittain toimiville sivuille)
+   hakevat clientin antaman `website`-osoitteen ilman tarkistusta, ja teksti päätyy `website_context`iin
+   (näkyy `GET /leads`:ssä). Korjaus: käytä `site_content.is_public_url()` -tarkistusta ja käsin seurattuja
+   uudelleenohjauksia myös niissä. Lisäksi harkittavaksi: `website_status` lasketaan serverissä
+   (`analyze_website`) eikä oteta clientiltä.
+3. Pieni: Search-näkymä 390 px:ssä, avoin sivupalkki vie tilaa (sama ennen Phase 17:ää).
+
 ## Arkkitehtuuri
 
 ```
