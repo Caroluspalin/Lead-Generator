@@ -169,7 +169,7 @@ def test_edit_upload_failure_is_502_and_not_saved(client_a: TestClient, demo: di
     store.fail_put = True
     res = client_a.patch(f"/leads/{demo['lead_id']}/demo", json={"template": "services"})
     assert res.status_code == 502
-    assert client_a.get(f"/leads/{demo['lead_id']}/demo").json()["template"] == "beauty"
+    assert client_a.get(f"/leads/{demo['lead_id']}/demo").json()["template"] == "salon"
 
 
 def test_regenerate_published_demo_republishes(

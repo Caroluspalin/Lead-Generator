@@ -121,7 +121,7 @@ def test_extract_json_object() -> None:
 @pytest.mark.parametrize(
     ("primary_type", "template"),
     [
-        ("hair_salon", "beauty"), ("barber_shop", "beauty"), ("beauty_salon", "beauty"), ("nail_salon", "beauty"),
+        ("hair_salon", "salon"), ("barber_shop", "barber"), ("beauty_salon", "salon"), ("nail_salon", "salon"),
         ("restaurant", "restaurant"), ("cafe", "cafe"), ("coffee_shop", "cafe"), ("bakery", "cafe"), ("tea_house", "cafe"),
         ("steak_house", "restaurant"), ("pizza_restaurant", "restaurant"),
         ("plumber", "services"), ("car_repair", "services"), (None, "services"),
@@ -132,7 +132,7 @@ def test_template_for_primary_type(primary_type: str | None, template: str) -> N
 
 
 def test_each_template_has_two_to_three_schemes() -> None:
-    assert set(TEMPLATES) == {"cafe", "beauty", "restaurant", "services"}
+    assert set(TEMPLATES) == {"cafe", "salon", "barber", "beauty", "restaurant", "services"}
     for t in TEMPLATES.values():
         assert 2 <= len(t.schemes) <= 3
 
@@ -267,7 +267,7 @@ def lead(make_lead: Any) -> dict[str, Any]:
 
 
 def test_generate_demo(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
-    res = client_a.post(f"/leads/{lead['id']}/demo", json={})
+    res = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "beauty"})
     assert res.status_code == 200, res.text
     demo = res.json()
     assert demo["template"] == "beauty" and demo["color_scheme"] == "rose"
@@ -415,9 +415,9 @@ def test_unknown_token_is_404(client_a: TestClient) -> None:
 def test_templates_catalog_endpoint(client_a: TestClient) -> None:
     catalog = client_a.get("/demo-templates").json()
     # Uudet (versio 2) pohjat ensin
-    assert [t["id"] for t in catalog] == ["cafe", "beauty", "restaurant", "services"]
+    assert [t["id"] for t in catalog] == ["cafe", "salon", "barber", "beauty", "restaurant", "services"]
     assert {s["id"] for s in catalog[0]["color_schemes"]} == {"paahto", "kaura", "ruis"}
-    assert {s["id"] for s in catalog[1]["color_schemes"]} == {"rose", "sage", "noir"}
+    assert {s["id"] for s in catalog[3]["color_schemes"]} == {"rose", "sage", "noir"}
 
 
 # --- Tenant-isolaatio ---
@@ -660,7 +660,7 @@ def unsplash_ready(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_generate_demo_with_images_tracks_downloads(
     client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]
 ) -> None:
-    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "beauty"}).json()
     images = demo["content"]["images"]
     assert images["hero"]["id"] == "a"
     assert [m["id"] for m in images["mood"]] == ["b", "c", "d"]
@@ -675,13 +675,13 @@ def test_generate_demo_with_images_tracks_downloads(
 def test_generate_demo_without_unsplash_key_uses_gradient(
     client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
 ) -> None:
-    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "beauty"}).json()
     assert demo["content"]["images"] == {"hero": None, "mood": [], "options": []}
     assert 'class="hero no-image"' in client_a.get(f"/demo/{demo['public_path']}").text
 
 
 def test_patch_hero_image(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], unsplash_ready: list[str]) -> None:
-    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "beauty"}).json()
     unsplash_ready.clear()
     calls_before = len(demo_ready.calls)
 

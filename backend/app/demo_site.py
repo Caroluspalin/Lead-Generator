@@ -91,6 +91,28 @@ TEMPLATES: dict[str, DemoTemplate] = {
             "ruis": Palette("Rye", "#E7E1DB"),
         },
     ),
+    "salon": DemoTemplate(
+        label="Hair & beauty salon",
+        services_title="Palvelut",
+        services_lead="Varatkaa aika puhelimitse.",
+        about_title="Meistä",
+        version=2,
+        schemes={
+            "jarvi": Palette("Lake", "#E8EBE6"),
+            "kanerva": Palette("Heather", "#ECE8EB"),
+        },
+    ),
+    "barber": DemoTemplate(
+        label="Barber",
+        services_title="Palvelut",
+        services_lead="Varatkaa aika puhelimitse.",
+        about_title="Meistä",
+        version=2,
+        schemes={
+            "kyltti": Palette("Sign yellow", "#F2F1EC"),
+            "emali": Palette("Enamel green", "#F0F1EC"),
+        },
+    ),
     "beauty": DemoTemplate(
         label="Classic hair & beauty",
         services_title="Palvelut",
@@ -132,8 +154,10 @@ _RESTAURANT_TYPES = ("restaurant", "cafe", "coffee", "bakery", "bar", "pub", "pi
 
 def template_for_primary_type(primary_type: Optional[str]) -> str:
     t = (primary_type or "").lower()
+    if "barber" in t:
+        return "barber"
     if any(k in t for k in _BEAUTY_TYPES):
-        return "beauty"
+        return "salon"
     # Kahvila ennen ravintoloita: "cafe" osuu myös _RESTAURANT_TYPES-listaan
     if _CAFE_WORDS & set(re.split(r"[^a-z]+", t)):
         return "cafe"
@@ -201,7 +225,7 @@ class DemoContent(DemoAIContent):
 class DemoImages(BaseModel):
     """Unsplash-kuvat (hotlinkattavat URLit + attribuutiotiedot). hero None -> gradientti."""
     hero: Optional[DemoPhoto] = None
-    mood: list[DemoPhoto] = Field(default_factory=list, max_length=3)
+    mood: list[DemoPhoto] = Field(default_factory=list, max_length=4)
     options: list[DemoPhoto] = Field(default_factory=list, max_length=8)
 
 
@@ -815,6 +839,78 @@ def address_lines(address: Optional[str]) -> list[str]:
     return parts
 
 
+# --- Parturin kulmakyltti: nimi kahdelle seinälle ---
+
+KYLTTI_MIN, KYLTTI_MAX = 2, 16  # CSS:ssä määritellyt data-vaaka/data-pysty-arvot
+KYLTTI_FALLBACK_MAX = 5  # tätä lyhyempi nimi ei jakaudu: koko nimi vaakaan, alan sana pystyyn
+# Yhdyssanojen tunnetut osat (pisin ensin): "Kulmapää" -> Kulma|pää, "Hiusateljee" -> Hius|ateljee
+_COMPOUND_PARTS = sorted([
+    "parturi", "kampaamo", "leikkaamo", "parta", "pää", "kulma", "hius", "hiukset", "tukka", "studio",
+    "salonki", "salon", "ateljee", "sakset", "herra", "herrain", "tupa", "paja", "nurkka", "katu",
+], key=len, reverse=True)
+
+
+@dataclass(frozen=True)
+class Kyltti:
+    vaaka: str
+    pysty: str
+
+    @property
+    def n_vaaka(self) -> int:
+        return len(self.vaaka)
+
+    @property
+    def n_pysty(self) -> int:
+        return len(self.pysty)
+
+
+def _fits(text: str) -> bool:
+    return KYLTTI_MIN <= len(text) <= KYLTTI_MAX
+
+
+def _compound_split(word: str) -> Optional[tuple[str, str]]:
+    lower = word.lower()
+    for part in _COMPOUND_PARTS:
+        if lower.startswith(part) and len(word) - len(part) >= 2:
+            return word[:len(part)], word[len(part):]
+        if lower.endswith(part) and len(word) - len(part) >= 2:
+            return word[:-len(part)], word[-len(part):]
+    return None
+
+
+def kyltti_split(name: str) -> Optional[Kyltti]:
+    """Nimi vaaka- ja pystyseinälle (portfolion Kulmapää-sääntö).
+
+    1. Monisanainen nimi jaetaan sanan kohdalta, kohdasta jossa osat ovat lähimpänä samanpituisia
+       (väliviiva lasketaan sanan osaksi: "Parturi-Kampaamo Taina Lantiainen").
+    2. Yksi sana jaetaan tunnetun yhdyssanaosan kohdalta (Kulma|pää), tai väliviivan kohdalta.
+    3. Varaversio: enintään 5 merkkiä tai ei jakokohtaa -> koko nimi vaakaan ja "Parturi" pystyyn
+       ("Barber", jos nimessä on jo sana parturi).
+    None = jompikumpi seinä olisi yli 16 merkkiä: sivulla näkyy tavallinen nimiotsikko.
+    """
+    words = [w for w in name.split() if w.lower().strip(".,") not in _LEGAL_FORMS]
+    clean = " ".join(words).strip()
+    if not clean:
+        return None
+    pair: Optional[tuple[str, str]] = None
+    if len(clean) > KYLTTI_FALLBACK_MAX:
+        if len(words) >= 2:
+            cut = min(range(1, len(words)),
+                      key=lambda i: abs(len(" ".join(words[:i])) - len(" ".join(words[i:]))))
+            pair = " ".join(words[:cut]), " ".join(words[cut:])
+        elif "-" in clean.strip("-"):
+            first, _, rest = clean.partition("-")
+            pair = first, rest
+        else:
+            pair = _compound_split(clean)
+    if pair is None:
+        side = "Barber" if "parturi" in clean.lower() else "Parturi"
+        pair = clean, side
+    if not (_fits(pair[0]) and _fits(pair[1])):
+        return None
+    return Kyltti(vaaka=pair[0], pysty=pair[1])
+
+
 def banner_text(business: DemoBusiness, sender: DemoSender) -> str:
     return f"Tämä on luonnos, jonka {sender.name} teki yritykselle {business.name}. Ei yrityksen virallinen sivu."
 
@@ -856,9 +952,13 @@ def render_demo_html(
 # Kuvien muodot ja leveydet pohjittain: (leveydet, korkeus/leveys). Hero preloadataan.
 _V2_HERO: dict[str, tuple[tuple[int, ...], Optional[float]]] = {
     "cafe": ((640, 960, 1280), 1.0),  # pyöreä allas
+    "salon": ((640, 960, 1280), 1.0),  # kaislikko: sama neliökuva seitsemänä suikaleena
+    "barber": ((640, 960, 1280), 1.0),  # kulmakyltin kuva
 }
 _V2_MOOD: dict[str, tuple[tuple[int, ...], Optional[float]]] = {
     "cafe": ((640, 960, 1280), 1.25),  # 4:5 pystykuvat
+    "salon": ((480, 800, 1200), 1.5),  # 2:3 esittely, 3:5 kapeat (CSS rajaa)
+    "barber": ((640, 960, 1280), 1.25),  # esittely 3:2/1:1 ja yhteystiedot 4:5 (CSS rajaa)
 }
 
 
@@ -907,4 +1007,5 @@ def _render_v2(
         aukiolo=aukiolo_attrs(content.opening_periods),
         week=rows,
         summary=hours_summary(rows) if rows else None,
+        kyltti=kyltti_split(business.name) if template == "barber" else None,
     )

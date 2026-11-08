@@ -1,0 +1,135 @@
+{% extends "base_v2.html.j2" %}
+{#
+  Parturi: "Kulmakyltti". Nimi on kuin kulmaliikkeen kyltti kahdella mustalla seinällä, jotka
+  kohtaavat keltaisessa kulmassa. Koko lasketaan CSS:ssä seinien merkkimääristä (data-vaaka,
+  data-pysty), jako demo_site.kyltti_split(). Kuvat mustavalkoisina (CSS-suodatin).
+  Alkuperä: portfolion esimerkki Kulmapää. Hintataulu on palvelutaulu ilman hintoja ja kestoja,
+  ja parturien esittelyn tilalla on yleinen esittely (ei keksittyjä nimiä).
+#}
+{% block preload %}
+<link rel="preload" href="{{ asset('barber', 'antonio.woff2').url }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ asset('barber', 'public-sans.woff2').url }}" as="font" type="font/woff2" crossorigin>
+{% if hero_image %}<link rel="preload" as="image" href="{{ hero_image.src }}" imagesrcset="{{ hero_image.srcset }}" imagesizes="(min-width: 64rem) 50vw, 80vw" fetchpriority="high">{% endif %}
+{% endblock %}
+{% block body %}
+<header class="yla">
+  <div class="kehys yla-sisa">
+    <a class="logo" href="#sisalto">{{ business.name }}</a>
+    {% if week %}<a class="tila" href="#yhteys" data-tila>Aukioloajat</a>{% endif %}
+  </div>
+</header>
+
+<main id="sisalto">
+  <section class="hero">
+    <div class="kehys hero-sisa">
+      {% if kyltti %}
+      <div class="kyltti">
+        <div class="kyltti-sisa" data-vaaka="{{ kyltti.n_vaaka }}" data-pysty="{{ kyltti.n_pysty }}">
+          <span class="seina seina-vaaka" aria-hidden="true"><span>{{ kyltti.vaaka }}</span></span>
+          <span class="kulma" aria-hidden="true"></span>
+          <span class="seina seina-pysty" aria-hidden="true"><span>{{ kyltti.pysty }}</span></span>
+          <div class="kyltti-kuva{% if not hero_image %} kyltti-tyhja{% endif %}">
+            {% if hero_image %}<img src="{{ hero_image.src }}" srcset="{{ hero_image.srcset }}" sizes="(min-width: 64rem) 50vw, 80vw" width="1280" height="1280" alt="" fetchpriority="high" decoding="async">{% endif %}
+          </div>
+        </div>
+      </div>
+      {% else %}
+      {# Liian pitkä nimi kyltille: tavallinen nimiotsikko samalla kulmamerkillä #}
+      <div class="kyltti-varaversio">
+        <p class="nimi" aria-hidden="true">{{ business.name }}</p>
+        {% if hero_image %}<img class="varaversio-kuva" src="{{ hero_image.src }}" srcset="{{ hero_image.srcset }}" sizes="(min-width: 64rem) 50vw, 100vw" width="1280" height="1280" alt="" fetchpriority="high" decoding="async">{% endif %}
+      </div>
+      {% endif %}
+      <div class="hero-teksti">
+        <h1>{{ content.hero_title }}</h1>
+        <p class="hero-lause">{{ content.hero_subtitle }}</p>
+        <div class="napit">
+          {% if tel %}<a class="nappi" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
+          <a class="nappi{% if tel %} nappi-toissijainen{% endif %}" href="#palvelut">{{ tpl.services_title }}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {% if summary or address_lines or business.phone %}
+  <section class="tanaan" aria-label="Aukiolo ja osoite">
+    <div class="kehys">
+      <dl class="tanaan-rivi">
+        {% if summary %}<div><dt>Tänään</dt><dd data-tanaan>{{ summary }}</dd></div>{% endif %}
+        {% if address_lines %}<div><dt>Osoite</dt><dd>{{ address_lines | join(', ') }}</dd></div>{% endif %}
+        {% if business.phone %}<div><dt>Puhelin</dt><dd>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}</dd></div>{% endif %}
+      </dl>
+    </div>
+  </section>
+  {% endif %}
+
+  <section id="palvelut" class="hinnasto" aria-labelledby="palvelut-otsikko">
+    <div class="kehys">
+      <h2 id="palvelut-otsikko">{{ tpl.services_title }}</h2>
+      <ul class="taulu">
+        {% for service in content.services %}
+        <li><h3>{{ service.name }}</h3><p>{{ service.description }}</p></li>
+        {% endfor %}
+      </ul>
+      <p class="huom">{{ tpl.services_lead }} {{ content.price_note }}</p>
+    </div>
+  </section>
+
+  {% set esittely_kuva = mood_images[0] if mood_images | length > 0 else None %}
+  {% set yhteys_kuva = mood_images[1] if mood_images | length > 1 else None %}
+
+  <div class="jatko">
+    <section id="meista" class="parturit" aria-labelledby="meista-otsikko">
+      <div class="kehys">
+        <h2 id="meista-otsikko">{{ about_title }}</h2>
+        <div class="tiimi{% if not esittely_kuva %} ilman-kuvaa{% endif %}">
+          {% if esittely_kuva %}
+          <img class="tiimi-kuva" src="{{ esittely_kuva.src }}" srcset="{{ esittely_kuva.srcset }}" sizes="(min-width: 48rem) 40vw, 100vw" width="1280" height="1280" alt="" loading="lazy" decoding="async">
+          {% endif %}
+          <p class="esittely">{{ content.about }}</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="yhteys" class="yhteys" aria-labelledby="yhteys-otsikko">
+      <div class="kehys yhteys-sisa{% if not yhteys_kuva %} ilman-kuvaa{% endif %}">
+        {% if yhteys_kuva %}
+        <img class="yhteys-kuva" src="{{ yhteys_kuva.src }}" srcset="{{ yhteys_kuva.srcset }}" sizes="(min-width: 64rem) 50vw, 100vw" width="1280" height="1600" alt="" loading="lazy" decoding="async">
+        {% endif %}
+        <div class="yhteys-teksti">
+          <h2 id="yhteys-otsikko">{{ street or "Yhteystiedot" }}</h2>
+          {% if address_lines %}<p class="osoite">{% for line in address_lines %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+          {% if week %}
+          <dl class="ajat">
+            {% for row in week %}
+            <div data-paiva="{{ row.paiva }}"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
+            {% endfor %}
+          </dl>
+          {% else %}
+          <p>Kysykää aukioloajat puhelimitse.</p>
+          {% endif %}
+          <p class="yhteys-linkit">
+            {% if business.phone %}{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}{% endif %}
+            {% if business.maps_url %}{% if business.phone %}<br>{% endif %}<a href="{{ business.maps_url }}" rel="noopener noreferrer">Avaa kartalla</a>{% endif %}
+          </p>
+        </div>
+      </div>
+    </section>
+
+    {# Mobiilin palkki: tarttuu alareunaan esittelystä alkaen (pelkkä CSS, position: sticky) #}
+    {% if tel %}
+    <nav class="palkki" aria-label="Soita tai katso sijainti">
+      <a class="nappi" href="tel:{{ tel }}">Soita</a>
+      <a class="nappi nappi-toissijainen" href="#yhteys">Sijainti</a>
+    </nav>
+    {% endif %}
+  </div>
+</main>
+
+<footer class="ala">
+  <div class="kehys ala-sisa">
+    <p>© {{ business.name }}{% if business.city %}, {{ business.city }}{% endif %}</p>
+    {% if credits %}<p class="kiitos">Kuvat: {% for img in credits %}<a href="{{ img.credit_url }}" rel="noopener noreferrer">{{ img.credit_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %} / <a href="{{ unsplash_url }}" rel="noopener noreferrer">Unsplash</a></p>{% endif %}
+  </div>
+</footer>
+{% endblock %}

@@ -112,6 +112,78 @@ SAMPLES: list[Sample] = [
         periods=[],
         hero_index=1,
     ),
+    Sample(
+        slug="saga-g6h7j", template="salon", palette="jarvi", name="Saga", city="Helsinki",
+        address="Esimerkkitie 3, 00100 Helsinki, Suomi", phone="050 000 0000", primary_type="hair_salon",
+        content={
+            "hero_title": "Hiukset kuntoon Helsingissä",
+            "hero_subtitle": "Leikkaukset, värit ja kampaukset naisille, miehille ja lapsille.",
+            "about_title": "Kampaamopalvelut ajanvarauksella",
+            "about": "Kertokaa toiveenne, niin suunnitellaan sopiva malli yhdessä. Kysykää myös hoitoa omille hiuksillenne.",
+            "services": [
+                {"name": "Leikkaukset", "description": "Naisten, miesten ja lasten hiustenleikkaukset."},
+                {"name": "Värjäykset", "description": "Kestovärit, raidat ja sävytykset."},
+                {"name": "Juhlakampaukset", "description": "Kampaukset häihin ja muihin tilaisuuksiin."},
+                {"name": "Hoidot", "description": "Tehohoidot kuiville ja käsitellyille hiuksille."},
+            ],
+        },
+        periods=_periods({**{d: [("10:00", "19:00")] for d in [2, 3, 4, 5]}, 6: [("09:00", "15:00")]}),
+    ),
+    Sample(
+        slug="hopeapaju-k8m9n", template="salon", palette="kanerva", name="Kampaamo Hopeapaju & Kumppanit",
+        city="Tampere", address="Esimerkkikatu 21, 33100 Tampere, Suomi", phone="040 000 0000",
+        primary_type="beauty_salon",
+        content={
+            "hero_title": "Hiukset ja kauneus Tampereella",
+            "hero_subtitle": "Hiukset, kulmat ja ripset samalla käynnillä.",
+            "about_title": "Hiuksista kulmiin",
+            "about": "Palvelemme ajanvarauksella. Kertokaa toiveistanne, niin valitaan yhdessä teille sopiva palvelu.",
+            "services": [
+                {"name": "Leikkaus", "description": "Leikkaus ja föönaus toiveidenne mukaan."},
+                {"name": "Värjäys", "description": "Kestovärit, raidat ja sävytykset."},
+                {"name": "Kampaukset", "description": "Juhla- ja hääkampaukset tilaisuuksiin."},
+                {"name": "Kulmien muotoilu", "description": "Muotoilu ja värjäys kulmille sekä ripsille."},
+                {"name": "Hiushoidot", "description": "Tehohoidot kuiville hiuksille."},
+            ],
+        },
+        periods=[],
+        hero_index=1,
+    ),
+    Sample(
+        slug="assa-p2q3r", template="barber", palette="kyltti", name="Ässä", city="Kuopio",
+        address="Esimerkkikatu 7, 70100 Kuopio, Suomi", phone="040 000 0000", primary_type="barber_shop",
+        content={
+            "hero_title": "Hiukset ja parta kuntoon",
+            "hero_subtitle": "Hiustenleikkaukset, koneajot ja partatyöt.",
+            "about_title": "Parturi Kuopiossa",
+            "about": "Kertokaa toiveenne, niin leikkaus tehdään niiden mukaan. Ajan voi varata soittamalla.",
+            "services": [
+                {"name": "Hiustenleikkaus", "description": "Leikkaus saksilla tai koneella."},
+                {"name": "Koneajo", "description": "Tasainen koneajo tai häivytys."},
+                {"name": "Parran muotoilu", "description": "Parran siistiminen ja ääriviivat."},
+                {"name": "Lasten leikkaus", "description": "Leikkaukset myös lapsille."},
+            ],
+        },
+        periods=_periods({**{d: [("10:00", "19:00")] for d in WEEKDAYS}, 6: [("10:00", "15:00")]}),
+    ),
+    Sample(
+        slug="herrasmiesten-s4t5u", template="barber", palette="emali", name="Herrasmiesten Parturi",
+        city="Oulu", address="Esimerkkikatu 15, 90100 Oulu, Suomi", phone="050 000 0000", primary_type="barber_shop",
+        content={
+            "hero_title": "Leikkaukset ja parranajot Oulussa",
+            "hero_subtitle": "Leikkaus, parta ja kuumapyyhe samalla käynnillä.",
+            "about_title": "Parturi Oulussa",
+            "about": "Hiukset leikataan toiveiden mukaan, ja partaan saa muotoilun tai ajon. Kysykää vapaita aikoja puhelimitse.",
+            "services": [
+                {"name": "Hiustenleikkaus", "description": "Saksi- ja koneleikkaukset."},
+                {"name": "Parranajo", "description": "Parranajo kuumapyyhkeellä."},
+                {"name": "Parran muotoilu", "description": "Ääriviivat ja tasaus koneella."},
+                {"name": "Kulmat ja korvat", "description": "Siistiminen leikkauksen yhteydessä."},
+            ],
+        },
+        periods=[],
+        hero_index=1,
+    ),
 ]
 
 
@@ -224,6 +296,21 @@ _OVERFLOW_JS = """() => {
 }"""
 
 
+def settle(page: Any) -> None:
+    """Unsplashin CDN voi joskus pitää yhteyttä auki: networkidle ei saa kaataa ajoa."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=8000)
+    except PlaywrightTimeout:
+        pass
+
+
+def open_page(page: Any, url: str) -> None:
+    page.goto(url, wait_until="load", timeout=60000)
+    settle(page)
+
+
 def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
     from playwright.sync_api import sync_playwright
 
@@ -243,7 +330,7 @@ def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
                     errors: list[str] = []
                     page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
                     page.on("pageerror", lambda exc: errors.append(str(exc)))
-                    page.goto(url, wait_until="networkidle")
+                    open_page(page, url)
                     page.evaluate("document.fonts.ready")
                     if width in (390, 1440):
                         # Lazy-kuvat latautuvat vasta näkyviin vieritettäessä
@@ -253,7 +340,7 @@ def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
                           }
                           scrollTo(0, 0);
                         }""")
-                        page.wait_for_load_state("networkidle")
+                        settle(page)
                     overflow = page.evaluate(_OVERFLOW_JS)
                     broken = page.evaluate(_BROKEN_WORDS_JS)
                     problems = []
@@ -276,7 +363,7 @@ def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
             for sample in samples:
                 context = browser.new_context(java_script_enabled=False, viewport={"width": 390, "height": 844})
                 page = context.new_page()
-                page.goto(f"{base}/{sample.slug}", wait_until="networkidle")
+                open_page(page, f"{base}/{sample.slug}")
                 text = page.inner_text("body")
                 ok = (not sample.periods) or ("Maanantai" in text and "Tänään" in text)
                 failures += not ok

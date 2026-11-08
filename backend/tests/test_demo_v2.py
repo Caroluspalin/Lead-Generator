@@ -145,7 +145,10 @@ def _contrast(a: str, b: str) -> float:
 
 def _palette_tokens(template: str, palette: str) -> dict[str, str]:
     css = (ASSET_DIR / template / "tyylit.css").read_text()
-    blocks = dict(re.findall(r'(:root|\[data-paletti="[a-z]+"\])\s*\{([^}]*)\}', css))
+    # Kaikki saman valitsimen lohkot (myös mediakyselyjen :root, joissa ei ole värejä)
+    blocks: dict[str, str] = {}
+    for selector, body in re.findall(r'(:root|\[data-paletti="[a-z]+"\])\s*\{([^}]*)\}', css):
+        blocks[selector] = blocks.get(selector, "") + body
     tokens: dict[str, str] = {}
     for selector in (":root", f'[data-paletti="{palette}"]'):
         tokens.update(re.findall(r"--([a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})", blocks.get(selector, "")))
@@ -158,6 +161,14 @@ CONTRAST_PAIRS: dict[str, list[tuple[str, str]]] = {
         *[(f"savy-{n}-teksti", f"savy-{n}") for n in range(1, 5)],
         *[(f"savy-{n}-toinen", f"savy-{n}") for n in range(1, 5)],
         ("#FFFFFF", "korostus"), ("#FFFFFF", "korostus-tumma"),
+    ],
+    "salon": [
+        ("muste", "usva"), ("harmaa", "usva"), ("jarvi", "usva"), ("#FFFFFF", "jarvi"), ("#FFFFFF", "jarvi-syva"),
+        ("kaisla", "jarvi"), ("jarvi-teksti", "jarvi"), ("jarvi-teksti", "jarvi-syva"),
+    ],
+    "barber": [
+        ("musta", "liitu"), ("harmaa", "liitu"), ("musta", "betoni"), ("harmaa-betoni", "betoni"),
+        ("liitu", "musta"), ("harmaa-musta", "musta"), ("kyltti-teksti", "kyltti"), ("kyltti-musta", "musta"),
     ],
 }
 
@@ -224,7 +235,9 @@ def test_v2_hours_render_machine_readable_and_static_week(template: str) -> None
     html = _render(template, [_p(1, "10:00", "12:00"), _p(1, "13:00", "17:00")])
     assert 'id="aukiolo" data-ma="10:00-12:00,13:00-17:00"' in html
     assert 'data-paiva="1"' in html and "10–12, 13–17" in html
-    assert "data-tanaan" in html and "data-tila" in html
+    assert "data-tanaan" in html
+    # Kahvilan ja parturin yläpalkissa on tila ("Auki nyt"), kampaamon yläpalkissa Varaa aika -nappi
+    assert ("data-tila" in html) == (template in ("cafe", "barber"))
 
 
 @pytest.mark.parametrize("template", V2_TEMPLATES)
@@ -470,3 +483,126 @@ def test_other_templates_keep_plain_mood_order() -> None:
     pool = [_colored("h", "#f0f0f0"), _colored("d", "#101010"), _colored("a", "#eeeeee"), _colored("b", "#dddddd")]
     _, mood, _ = unsplash.choose_images(pool, "beauty")
     assert [p.id for p in mood] == ["d", "a", "b"]
+
+
+# --- Kampaamo: kasvoriski, aiheen ulkopuoliset kuvat, neljä tunnelmakuvaa ---
+
+@pytest.mark.parametrize("text,risky", [
+    ("Close-up of a person's dark curly hair", False),
+    ("the back of a woman's head with long dark hair", False),
+    ("hands holding scissors and a comb", False),
+    ("brown hair on black background", False),
+    ("Close-up of a young woman with braided hair", True),
+    ("a woman is cutting another woman's hair with scissors", True),
+    ("woman smiling in salon", True),
+    ("Close up of a person's eyes with braided hair", True),
+])
+def test_face_risk_from_caption(text: str, risky: bool) -> None:
+    assert unsplash.face_risk(text) is risky
+
+
+def _alt(pid: str, alt: str, face: bool = False) -> unsplash.DemoPhoto:
+    return _photo(pid).model_copy(update={"alt": alt, "face_risk": face})
+
+
+def test_salon_uses_one_hair_query_and_industry_queries_for_nails() -> None:
+    assert unsplash.image_queries("hair_salon", "salon")[0] == "hair styling close up"
+    assert unsplash.image_queries("beauty_salon", "salon")[0] == "hair styling close up"
+    assert unsplash.image_queries("nail_salon", "salon") == ["nail salon", "manicure"]
+
+
+def test_salon_drops_off_topic_and_prefers_faceless_mood() -> None:
+    pool = [
+        _alt("brush", "Macro view of a hairbrush"),
+        _alt("fur", "Close-up of thick animal fur"),
+        _alt("face", "young woman with braided hair", face=True),
+        *[_alt(f"h{i}", f"close up of a person's hair {i}") for i in range(4)],
+    ]
+    hero, mood, options = unsplash.choose_images(pool, "salon")
+    assert hero is not None and hero.id == "brush"
+    assert "fur" not in {p.id for p in options}
+    assert [p.id for p in mood] == ["h0", "h1", "h2", "h3"]
+
+
+def test_salon_renders_seven_strips_from_one_image_and_three_narrow() -> None:
+    pool = [_alt(f"p{i}", f"close up of a person's hair {i}") for i in range(6)]
+    from app.demo_site import DemoImages
+    hero, mood, options = unsplash.choose_images(pool, "salon")
+    html = render_demo_html(
+        template="salon", color_scheme="jarvi", business=BUSINESS, sender=SENDER,
+        content=DemoStoredContent(**VALID, images=DemoImages(hero=hero, mood=mood, options=options)),
+    )
+    assert html.count('class="kaisla"') == 7
+    # Sama kuva seitsemässä suikaleessa: selain lataa sen kerran
+    assert html.count('<img src="https://images.unsplash.com/p0?') == 7
+    assert html.count("<li><img") == 3
+
+
+# --- Parturi: kulmakyltti ---
+
+from app.demo_site import Kyltti, kyltti_split  # noqa: E402
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("Kulmapää", ("Kulma", "pää")),                                   # yhdyssanan liitos
+    ("Hiusateljee", ("Hius", "ateljee")),
+    ("Herrasmiesten Parturi", ("Herrasmiesten", "Parturi")),           # sanan kohdalta
+    ("Parturi-Kampaamo Taina Lantiainen", ("Parturi-Kampaamo", "Taina Lantiainen")),  # tasaisin jako
+    ("Parturi Salo Oy", ("Parturi", "Salo")),                          # yritysmuoto pois
+    ("Ässä", ("Ässä", "Parturi")),                                     # varaversio: <= 5 merkkiä
+    ("Xyzabcdef", ("Xyzabcdef", "Parturi")),                           # varaversio: ei jakokohtaa
+    ("Parturi", ("Parturi", "Barber")),                                # ei "Parturi Parturi"
+])
+def test_kyltti_split(name: str, expected: tuple[str, str]) -> None:
+    assert kyltti_split(name) == Kyltti(*expected)
+
+
+def test_kyltti_split_too_long_falls_back_to_plain_heading() -> None:
+    assert kyltti_split("Parturi-Kampaamo Kauniaisten Hiuspiste Oy") is None
+
+
+def test_kyltti_counts_have_css_rules() -> None:
+    css = (ASSET_DIR / "barber" / "tyylit.css").read_text()
+    for n in range(2, 17):
+        assert f'[data-vaaka="{n}"]' in css and f'[data-pysty="{n}"]' in css
+
+
+def _barber(name: str) -> str:
+    business = DemoBusiness(name=name, city="Oulu", address="Esimerkkikatu 15, 90100 Oulu, Suomi",
+                            phone="050 000 0000", maps_url="https://maps.google.com/?cid=1")
+    return render_demo_html(template="barber", color_scheme="kyltti", business=business, sender=SENDER,
+                            content=DemoStoredContent(**VALID))
+
+
+def test_barber_renders_kyltti_with_counts_and_readable_name() -> None:
+    html = _barber("Herrasmiesten Parturi")
+    assert 'data-vaaka="13" data-pysty="7"' in html
+    assert '<a class="logo" href="#sisalto">Herrasmiesten Parturi</a>' in html  # luettava nimi yläpalkissa
+    assert 'class="seina seina-vaaka" aria-hidden="true"' in html
+    assert "<h2 id=\"yhteys-otsikko\">Esimerkkikatu 15</h2>" in html
+
+
+def test_barber_long_name_uses_plain_heading() -> None:
+    html = _barber("Parturi-Kampaamo Kauniaisten Hiuspiste Oy")
+    assert "kyltti-varaversio" in html and "data-vaaka" not in html
+
+
+def test_barber_images_are_grayscale_by_css() -> None:
+    assert "main img { filter: grayscale(1)" in (ASSET_DIR / "barber" / "tyylit.css").read_text()
+
+
+@pytest.mark.parametrize("text", [
+    "barber shaving a man's beard with a straight razor",
+    "man getting a shave at the barbershop",
+])
+def test_blade_with_person_is_face_risk(text: str) -> None:
+    assert unsplash.face_risk(text)
+
+
+def test_blade_without_person_is_fine() -> None:
+    assert not unsplash.face_risk("straight razor and comb on a wooden table")
+
+
+def test_barber_queries_mix_interior_and_tools() -> None:
+    assert unsplash.image_queries("barber_shop", "barber") == ["barbershop interior", "barber tools"]
+    assert unsplash.uses_both_queries("barber")
