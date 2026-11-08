@@ -138,3 +138,72 @@ test('malformed slug-like paths are 404 without touching R2', async () => {
   }
   assert.equal(bucket.keys.length, 0);
 });
+
+// --- Version 2: erilliset tiedostot ja CSP ---
+
+test('format 2 demo gets CSP that allows own files but no inline code', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'x', customMetadata: { format: '2' } });
+  const res = await handleRequest(get(`/${SLUG}`), env(bucket), NOW);
+  const csp = res.headers.get('content-security-policy') ?? '';
+  assert.match(csp, /style-src 'self';/);
+  assert.match(csp, /script-src 'self';/);
+  assert.match(csp, /font-src 'self';/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.doesNotMatch(csp, /unsafe-inline/);
+});
+
+test('old demo without format keeps inline-only CSP', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'x' });
+  const csp = (await handleRequest(get(`/${SLUG}`), env(bucket), NOW)).headers.get('content-security-policy') ?? '';
+  assert.match(csp, /style-src 'unsafe-inline'/);
+  assert.doesNotMatch(csp, /script-src/);
+});
+
+test('serves versioned asset from content-addressed key with immutable caching and CORS', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set('assets/cafe/0123456789/young-serif.woff2', { body: 'font' });
+  const res = await handleRequest(get('/a/cafe/young-serif.woff2?v=0123456789'), env(bucket), NOW);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'font/woff2');
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+  assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+  assert.deepEqual(bucket.keys, ['assets/cafe/0123456789/young-serif.woff2']);
+});
+
+test('asset content type comes from extension', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set('assets/yhteinen/abcdef0123/aukiolo.js', { body: 'js' });
+  bucket.objects.set('assets/cafe/abcdef0123/tyylit.css', { body: 'css' });
+  assert.equal(
+    (await handleRequest(get('/a/yhteinen/aukiolo.js?v=abcdef0123'), env(bucket), NOW)).headers.get('content-type'),
+    'text/javascript; charset=utf-8',
+  );
+  assert.equal(
+    (await handleRequest(get('/a/cafe/tyylit.css?v=abcdef0123'), env(bucket), NOW)).headers.get('content-type'),
+    'text/css; charset=utf-8',
+  );
+});
+
+test('malformed asset paths and missing version are 404 without touching R2', async () => {
+  const bucket = new FakeBucket();
+  for (const path of [
+    '/a/cafe/tyylit.css',
+    '/a/cafe/tyylit.css?v=zz',
+    '/a/cafe/tyylit.html?v=0123456789',
+    '/a/../demos/x.html?v=0123456789',
+    '/a/cafe/sub/tyylit.css?v=0123456789',
+    '/a/Cafe/tyylit.css?v=0123456789',
+    '/a/cafe/OFL.txt?v=0123456789',
+  ]) {
+    assert.equal((await handleRequest(get(path), env(bucket), NOW)).status, 404, path);
+  }
+  assert.deepEqual(bucket.keys, []);
+});
+
+test('unknown asset version is 404', async () => {
+  const bucket = new FakeBucket();
+  assert.equal((await handleRequest(get('/a/cafe/tyylit.css?v=0123456789'), env(bucket), NOW)).status, 404);
+});
