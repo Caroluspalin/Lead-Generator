@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus, Globe, Copy, EyeOff, Send } from 'lucide-react';
+import { X, LayoutTemplate, Loader2, ExternalLink, RefreshCw, Trash2, Save, Plus, Minus, Globe, Copy, EyeOff, Send, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Demo, DemoContent, DemoPhoto, DemoTemplateOption, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
@@ -27,6 +27,14 @@ const thumbUrl = (photo: DemoPhoto): string =>
 const inputClass =
   'w-full text-sm font-normal bg-canvas border border-line-strong rounded px-2.5 py-1.5 text-fg transition-colors';
 
+// Puhelinnäkymän kuvakaappaus (backend /demo/screenshot, Playwright). unavailable = Playwright
+// puuttuu palvelimelta (501): näytetään skaalattu 390 px iframe.
+type PhoneShot =
+  | { status: 'loading' }
+  | { status: 'ready'; url: string }
+  | { status: 'unavailable' }
+  | { status: 'error' };
+
 const toEditable = (demo: Demo): DemoContent => ({
   hero_title: demo.content.hero_title,
   hero_subtitle: demo.content.hero_subtitle,
@@ -45,6 +53,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
   const [busy, setBusy] = useState<'generate' | 'save' | 'delete' | 'publish' | null>(null);
   const [error, setError] = useState('');
   const [previewVersion, setPreviewVersion] = useState(0);
+  const [phoneShot, setPhoneShot] = useState<PhoneShot>({ status: 'loading' });
 
   const applyDemo = (next: Demo) => {
     setDemo(next);
@@ -81,6 +90,40 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
   useEffect(() => {
     if (isOpen) load();
   }, [isOpen, load]);
+
+  // Automaattinen 390 px kuvakaappaus aina kun demo muuttuu: tarkistus ennen julkaisua
+  const demoId = demo?.id;
+  useEffect(() => {
+    if (!isOpen || demoId === undefined) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPhoneShot({ status: 'loading' });
+    apiFetch(`/leads/${agency.id}/demo/screenshot`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.status === 501) {
+          setPhoneShot({ status: 'unavailable' });
+          return;
+        }
+        if (!res.ok) {
+          setPhoneShot({ status: 'error' });
+          return;
+        }
+        objectUrl = URL.createObjectURL(await res.blob());
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setPhoneShot({ status: 'ready', url: objectUrl });
+      })
+      .catch(() => {
+        if (!cancelled) setPhoneShot({ status: 'error' });
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isOpen, agency.id, demoId, previewVersion]);
 
   const generate = async () => {
     if (demo && !window.confirm('Generate new texts with AI? Your manual edits will be replaced.')) return;
@@ -297,14 +340,46 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                 </div>
               ) : (
                 <div className="grid lg:grid-cols-[1fr_340px]">
-                  <div className="p-4 bg-canvas border-b lg:border-b-0 lg:border-r border-line">
+                  <div className="p-4 bg-canvas border-b lg:border-b-0 lg:border-r border-line grid gap-4 xl:grid-cols-[1fr_auto] items-start">
+                    {/* allow-scripts ilman allow-same-origin: aukiolo.js toimii, sivu pysyy eristettynä */}
                     <iframe
                       key={previewVersion}
                       title={`Demo preview: ${agency.name}`}
                       src={`${demo.preview_url}?v=${previewVersion}`}
-                      sandbox=""
+                      sandbox="allow-scripts"
                       className="w-full h-[60vh] lg:h-[70vh] bg-canvas rounded border border-line"
                     />
+                    <figure className="m-0 w-[234px] justify-self-center">
+                      <figcaption className="flex items-center gap-1.5 mb-2 text-2xs font-medium text-fg-muted">
+                        <Smartphone size={12} />
+                        Phone, 390 px (first screen)
+                      </figcaption>
+                      <div className="w-[234px] h-[506px] overflow-hidden rounded border border-line bg-surface grid place-content-center">
+                        {phoneShot.status === 'ready' && (
+                          <img src={phoneShot.url} alt={`Phone view of the demo for ${agency.name}`} className="w-[234px] h-[506px] object-cover object-top" />
+                        )}
+                        {phoneShot.status === 'loading' && (
+                          <span role="status" className="flex items-center gap-2 text-xs text-fg-subtle">
+                            <Loader2 size={14} className="animate-spin" />
+                            Rendering phone view...
+                          </span>
+                        )}
+                        {phoneShot.status === 'unavailable' && (
+                          <div className="w-[234px] h-[506px] overflow-hidden">
+                            <iframe
+                              key={`phone-${previewVersion}`}
+                              title={`Phone preview: ${agency.name}`}
+                              src={`${demo.preview_url}?v=${previewVersion}`}
+                              sandbox="allow-scripts"
+                              className="w-[390px] h-[844px] origin-top-left scale-[0.6] border-0"
+                            />
+                          </div>
+                        )}
+                        {phoneShot.status === 'error' && (
+                          <p className="px-4 text-xs text-fg-subtle text-center">Phone view failed. Check the preview at 390 px in a new tab.</p>
+                        )}
+                      </div>
+                    </figure>
                   </div>
 
                   <div className="p-4 space-y-4">

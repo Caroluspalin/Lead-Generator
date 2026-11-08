@@ -660,3 +660,36 @@ def test_salon_service_grid_has_count_class(count: int) -> None:
     assert f'class="palvelut n{count}"' in html
     css = (ASSET_DIR / "salon" / "tyylit.css").read_text()
     assert ".palvelut.n4 { grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+
+
+# --- Puhelinnäkymän kuvakaappaus ---
+
+def test_screenshot_endpoint_returns_jpeg_and_caches(
+    client_a: TestClient, cafe_demo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("app.main._SCREENSHOT_CACHE", __import__("collections").OrderedDict())
+    monkeypatch.setattr("app.main.screenshot_demo", lambda html: calls.append(html) or b"\xff\xd8jpeg")
+    url = f"/leads/{cafe_demo['lead_id']}/demo/screenshot"
+    res = client_a.get(url)
+    assert res.status_code == 200 and res.headers["content-type"] == "image/jpeg"
+    assert res.content == b"\xff\xd8jpeg"
+    client_a.get(url)
+    assert len(calls) == 1  # sama HTML -> välimuistista
+
+
+def test_screenshot_without_playwright_is_501(
+    client_a: TestClient, cafe_demo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.demo_site import ScreenshotUnavailable
+
+    def unavailable(html: str) -> bytes:
+        raise ScreenshotUnavailable("Playwright not installed")
+
+    monkeypatch.setattr("app.main._SCREENSHOT_CACHE", __import__("collections").OrderedDict())
+    monkeypatch.setattr("app.main.screenshot_demo", unavailable)
+    assert client_a.get(f"/leads/{cafe_demo['lead_id']}/demo/screenshot").status_code == 501
+
+
+def test_screenshot_is_owner_only(client_b: TestClient, cafe_demo: dict[str, Any]) -> None:
+    assert client_b.get(f"/leads/{cafe_demo['lead_id']}/demo/screenshot").status_code == 404

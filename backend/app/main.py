@@ -1,13 +1,14 @@
 # FILE: backend/app/main.py
 import asyncio
 import csv
+import hashlib
 import io
 import logging
 import re
 import threading
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from collections import deque
+from collections import OrderedDict, deque
 from typing import AsyncIterator, Callable, List, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
@@ -49,8 +50,10 @@ from .demo_site import (
     PLACE_DETAILS_FIELD_MASK,
     find_repeated_phrases,
     TEMPLATES,
+    ScreenshotUnavailable,
     build_demo_prompt,
     demo_asset,
+    screenshot_demo,
     fetch_opening_hours,
     is_v2_template,
     price_note_for,
@@ -1928,6 +1931,34 @@ def update_demo(
     session.commit()
     session.refresh(demo)
     return _demo_out(demo, request)
+
+
+# Puhelinnäkymän kuvakaappaukset: avain = HTML:n tiiviste, joten muutos tekee uuden kuvan
+_SCREENSHOT_CACHE: OrderedDict[str, bytes] = OrderedDict()
+SCREENSHOT_CACHE_SIZE = 30
+
+
+@app.get("/leads/{lead_id}/demo/screenshot", include_in_schema=False)
+async def demo_screenshot(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> Response:
+    """390 px puhelinnäkymä JPEG:nä esikatselumodaaliin ennen julkaisua. 501 jos Playwright puuttuu."""
+    _, demo = _get_owned_demo(session, lead_id, user)
+    key = hashlib.sha256(demo.html.encode("utf-8")).hexdigest()
+    image = _SCREENSHOT_CACHE.get(key)
+    if image is None:
+        try:
+            image = await asyncio.to_thread(screenshot_demo, demo.html)
+        except ScreenshotUnavailable as e:
+            raise HTTPException(501, f"Screenshot not available: {e}")
+        _SCREENSHOT_CACHE[key] = image
+        while len(_SCREENSHOT_CACHE) > SCREENSHOT_CACHE_SIZE:
+            _SCREENSHOT_CACHE.popitem(last=False)
+    else:
+        _SCREENSHOT_CACHE.move_to_end(key)
+    return Response(image, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
 
 
 @app.post("/leads/{lead_id}/demo/publish", response_model=DemoOut)

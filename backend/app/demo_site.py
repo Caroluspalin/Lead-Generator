@@ -1009,3 +1009,65 @@ def _render_v2(
         summary=hours_summary(rows) if rows else None,
         kyltti=kyltti_split(business.name) if template == "barber" else None,
     )
+
+
+# --- Puhelinnäkymän kuvakaappaus esikatselumodaaliin (valinnainen Playwright) ---
+
+PHONE_VIEWPORT = {"width": 390, "height": 844}
+_SCREENSHOT_ORIGIN = "https://demo.invalid"
+
+
+class ScreenshotUnavailable(Exception):
+    """Playwright tai selain puuttuu (requirements-screenshot.txt): modaali näyttää iframen."""
+
+
+def screenshot_demo(html: str) -> bytes:
+    """390 × 844 -näkymä JPEG:nä (DPR 2). Blokkaava: kutsu asyncio.to_thread():lla.
+
+    Sivu ladataan väliaikaisesta osoitteesta: HTML ja a/-tiedostot palvellaan suoraan paketista,
+    Unsplash-kuvat haetaan verkosta. Liike pois (reduced motion), jotta kuva näyttää lopputilan.
+    """
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import Route, sync_playwright
+    except ImportError as e:
+        raise ScreenshotUnavailable("Playwright not installed") from e
+
+    page_url = f"{_SCREENSHOT_ORIGIN}/esikatselu"
+
+    def handle(route: Route) -> None:
+        url = route.request.url
+        if url.split("?")[0] == page_url:
+            route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
+            return
+        if url.startswith(f"{_SCREENSHOT_ORIGIN}/a/"):
+            parts = url[len(_SCREENSHOT_ORIGIN) + 3:].split("?")[0].split("/")
+            asset = demo_asset(parts[0], parts[1]) if len(parts) == 2 else None
+            if asset is None:
+                route.fulfill(status=404, body="")
+            else:
+                route.fulfill(status=200, content_type=asset.content_type, body=asset.body)
+            return
+        if url.startswith("https://images.unsplash.com/") or url.startswith("data:"):
+            route.continue_()
+            return
+        route.abort()
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            try:
+                page = browser.new_page(viewport=PHONE_VIEWPORT, device_scale_factor=2, reduced_motion="reduce")
+                page.route("**/*", handle)
+                page.goto(page_url, wait_until="load", timeout=30000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except PlaywrightError:
+                    pass  # hidas kuva-CDN: otetaan kuva silti
+                page.evaluate("document.fonts.ready")
+                return page.screenshot(type="jpeg", quality=80)
+            finally:
+                browser.close()
+    except PlaywrightError as e:
+        # Tyypillisesti selain asentamatta: python -m playwright install chromium
+        raise ScreenshotUnavailable(str(e).splitlines()[0]) from e
