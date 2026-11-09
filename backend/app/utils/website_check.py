@@ -154,6 +154,21 @@ def is_booking_url(url: Optional[str]) -> bool:
     return any(host == h or host.endswith("." + h) for h in BOOKING_HOSTS)
 
 
+# Vain tunnettu yrityssivun polkumuoto kelpaa varauslinkiksi; juuri ja markkinointisivut
+# (esim. timma.fi/pro/book-demo/...) eivät. Muut alustat: polkumuotoa ei tiedetä -> ei linkkiä.
+BUSINESS_PAGE_PATHS = {"timma.fi": "/yritys/"}
+
+
+def is_business_booking_page(url: str) -> bool:
+    parsed = urlparse(url if "://" in url else f"//{url}")
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    prefix = BUSINESS_PAGE_PATHS.get(host)
+    if not prefix:
+        return False
+    path = parsed.path
+    return path.startswith(prefix) and len(path) > len(prefix) and path[len(prefix):].strip("/") != ""
+
+
 def _is_parked(response: requests.Response) -> bool:
     final_host = _host(response.url)
     if any(final_host == h or final_host.endswith("." + h) for h in PARKING_HOSTS):

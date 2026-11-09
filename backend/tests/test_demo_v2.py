@@ -767,7 +767,7 @@ def test_booking_lead_demo_gets_online_price_note_and_follows_template(
     client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
 ) -> None:
     lead = make_lead(
-        name="Kampaamo Lumo", phone="040 000 0000", primary_type="hair_salon", website="https://timma.fi/lumo",
+        name="Kampaamo Lumo", phone="040 000 0000", primary_type="hair_salon", website="https://timma.fi/yritys/lumo",
         website_status="NO WEBSITE", website_issue="booking platform only",
     )
     fake_openai.reply = json.dumps(VALID)
@@ -802,3 +802,18 @@ def test_cafe_ignores_booking_url_in_services_line() -> None:
     html = _render_with_booking("cafe", "https://timma.fi/kahvila")
     assert TEMPLATES["cafe"].services_lead in html and "verkossa tai puhelimitse" not in html
 
+
+
+@pytest.mark.parametrize("website,expected", [
+    ("https://timma.fi/yritys/natawat", "https://timma.fi/yritys/natawat"),
+    ("https://timma.fi/yritys/scissor-room-matinkyla?landingPage=parturi-espoo", "https://timma.fi/yritys/scissor-room-matinkyla?landingPage=parturi-espoo"),
+    ("https://timma.fi/pro/book-demo/642fff026759411f4a6cf069", None),
+    ("https://timma.fi/", None),
+    ("https://timma.fi/yritys/", None),
+    ("https://timma.fi/hinnasto", None),
+    ("https://www.varaa.com/salonki", None),
+])
+def test_demo_booking_url_only_for_business_pages(website: str, expected: Optional[str]) -> None:
+    from app.main import demo_booking_url
+    from app.models import Lead
+    assert demo_booking_url(Lead(name="X", website=website)) == expected

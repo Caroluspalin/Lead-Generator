@@ -448,7 +448,7 @@ def test_prompts_forbid_long_official_name(
 def test_email_prompt_mentions_existing_booking_platform(
     client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
 ) -> None:
-    lead = make_lead(website="https://timma.fi/salonki", website_status="NO WEBSITE", website_issue="booking platform only")
+    lead = make_lead(website="https://timma.fi/yritys/salonki", website_status="NO WEBSITE", website_issue="booking platform only")
     client_a.post(f"/leads/{lead['id']}/generate-email", json={})
     prompt = _user_prompt(fake_openai)
     assert "HAVAINTO (varma, tein sen itse): Googlesta löytyi teille vain ajanvaraussivu" in prompt

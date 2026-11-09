@@ -82,7 +82,7 @@ from .utils.site_content import (
     should_scan,
     verify_site_facts,
 )
-from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_booking_url, is_social_media_url
+from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_booking_url, is_business_booking_page, is_social_media_url
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
@@ -2100,6 +2100,8 @@ def demo_booking_url(lead: Lead) -> Optional[str]:
     if not is_booking_url(lead.website):
         return None
     url = (lead.website or "").strip()
+    if not is_business_booking_page(url):
+        return None
     return _safe_web_url(url if "://" in url else f"https://{url}")
 
 
