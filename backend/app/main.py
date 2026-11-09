@@ -59,6 +59,7 @@ from .demo_site import (
     fetch_opening_hours,
     is_v2_template,
     attach_site_prices,
+    BOOKING_TEMPLATES,
     is_default_price_note,
     price_note_for,
     site_prices_allowed,
@@ -1457,7 +1458,7 @@ DEMO_LINK_PARAGRAPH_SITE = (
 )
 # Liidin website on ajanvarausalusta: salon/barber-demon Varaa aika -nappi vie sinne
 DEMO_BOOKING_SENTENCE = "Nykyinen ajanvarauksenne toimii sivulla sellaisenaan."
-DEMO_BOOKING_TEMPLATES = ("salon", "barber")
+DEMO_BOOKING_TEMPLATES = BOOKING_TEMPLATES
 DEMO_RISK_PARAGRAPH = (
     "Luonnos on ilmainen eikä sido teitä mihinkään. Jos se näyttää hyvältä, "
     "viimeistelen sen teidän omilla tiedoillanne ja kuvillanne."

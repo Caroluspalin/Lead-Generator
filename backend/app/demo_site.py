@@ -39,8 +39,10 @@ PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
 PLACE_DETAILS_FIELD_MASK = "regularOpeningHours"
 
 DEFAULT_PRICE_NOTE = "Hinnat ja ajanvaraus puhelimitse."
-# Kun Varaa aika -nappi vie yrityksen ajanvarausalustalle (DemoBusiness.booking_url)
-DEFAULT_PRICE_NOTE_BOOKING = "Hinnat ja ajanvaraus verkossa."
+# Kun Varaa aika -nappi vie yrityksen ajanvarausalustalle (DemoBusiness.booking_url, vain BOOKING_TEMPLATES)
+BOOKING_TEMPLATES = ("salon", "barber")
+DEFAULT_PRICE_NOTE_BOOKING = "Hinnat näette ajanvarauksesta."
+SERVICES_LEAD_BOOKING = "Varatkaa aika verkossa tai puhelimitse."
 # Kun hinnat ovat yrityksen omalta sivulta, huomautus ei puhu hinnoista (ne näkyvät palveluissa)
 DEFAULT_PRICE_NOTE_SITE = "Ajanvaraus puhelimitse."
 SITE_PRICES_NOTE = "Hinnat nykyiseltä sivultanne."
@@ -446,7 +448,8 @@ KIRJOITUSTYYLI — kuin oikea alan yrittäjä puhuisi asiakkaalle, ei mainostoim
 - about: 2-3 lyhyttä lausetta, max ~300 merkkiä. Älä toista yrityksen nimeä (se on jo sivun otsikkona).
 - MIKÄÄN fraasi ei saa toistua sivulla: älä aloita lauseita samalla tavalla, älä toista samoja sanapareja
   eri kohdissa (esim. "autamme teitä", "hiusten leikkaus" kahteen kertaan).
-- Sivulla on jo valmiina tekstit "Varatkaa aika puhelimitse." / "Hinnat ja ajanvaraus puhelimitse." — älä toista niitä.
+- Sivulla on jo valmiina tekstit "Varatkaa aika puhelimitse." / "Hinnat ja ajanvaraus puhelimitse."
+  (tai "Varatkaa aika verkossa tai puhelimitse." / "Hinnat näette ajanvarauksesta.") — älä toista niitä.
 
 SÄÄNNÖT:
 - Yritys puhuu me-muodossa, asiakasta puhutellaan te-muodossa.
@@ -1078,6 +1081,9 @@ def _render_v2(
         tpl=tpl,
         content=content,
         site_prices_note=site_prices_note(content),
+        services_lead=(
+            SERVICES_LEAD_BOOKING if business.booking_url and template in BOOKING_TEMPLATES else tpl.services_lead
+        ),
         about_title=content.about_title or tpl.about_title,
         asset=asset,
         hero_image=_image_view(images.hero, hero_widths, utm_app, hero_ratio) if images.hero else None,

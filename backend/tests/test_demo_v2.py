@@ -756,7 +756,7 @@ def test_book_button_without_booking_url_is_phone_link(template: str) -> None:
 
 
 def test_price_note_with_booking_platform_says_online() -> None:
-    assert price_note_for("salon", has_booking=True) == "Hinnat ja ajanvaraus verkossa."
+    assert price_note_for("salon", has_booking=True) == "Hinnat näette ajanvarauksesta."
     assert price_note_for("salon") == "Hinnat ja ajanvaraus puhelimitse."
     # Vain hinnaton oletusteksti vaihtuu; kahvilan ja hinnallinen teksti ennallaan
     assert price_note_for("salon", has_prices=True, has_booking=True) == price_note_for("salon", has_prices=True)
@@ -772,9 +772,33 @@ def test_booking_lead_demo_gets_online_price_note_and_follows_template(
     )
     fake_openai.reply = json.dumps(VALID)
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "salon"}).json()
-    assert demo["content"]["price_note"] == "Hinnat ja ajanvaraus verkossa."
+    assert demo["content"]["price_note"] == "Hinnat näette ajanvarauksesta."
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "cafe"}).json()
     assert res["content"]["price_note"] == price_note_for("cafe")
     res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "barber"}).json()
-    assert res["content"]["price_note"] == "Hinnat ja ajanvaraus verkossa."
+    assert res["content"]["price_note"] == "Hinnat näette ajanvarauksesta."
+
+
+@pytest.mark.parametrize("template", ["salon", "barber"])
+def test_services_line_with_booking_platform(template: str) -> None:
+    business = DemoBusiness(
+        name="Salonki Lumo", city="Espoo", address="Esimerkkikatu 4, 02100 Espoo, Suomi",
+        phone="050 000 0000", maps_url=None, booking_url="https://timma.fi/salonki-lumo",
+    )
+    content = DemoStoredContent(**VALID, price_note=price_note_for(template, has_booking=True))
+    html = render_demo_html(template=template, color_scheme=next(iter(TEMPLATES[template].schemes)),
+                            content=content, business=business, sender=SENDER)
+    assert '<p class="huom">Varatkaa aika verkossa tai puhelimitse. Hinnat näette ajanvarauksesta.</p>' in html
+    assert "Varatkaa aika puhelimitse." not in html
+
+
+@pytest.mark.parametrize("template", ["salon", "barber"])
+def test_services_line_without_booking_is_unchanged(template: str) -> None:
+    html = _render_with_booking(template, None)
+    assert '<p class="huom">Varatkaa aika puhelimitse. Hinnat ja ajanvaraus puhelimitse.</p>' in html
+
+
+def test_cafe_ignores_booking_url_in_services_line() -> None:
+    html = _render_with_booking("cafe", "https://timma.fi/kahvila")
+    assert TEMPLATES["cafe"].services_lead in html and "verkossa tai puhelimitse" not in html
 
