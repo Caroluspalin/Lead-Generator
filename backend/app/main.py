@@ -81,7 +81,7 @@ from .utils.site_content import (
     should_scan,
     verify_site_facts,
 )
-from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_social_media_url
+from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_booking_url, is_social_media_url
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
@@ -614,8 +614,8 @@ def could_match(place: Dict, filters: SearchFilters) -> bool:
     if filters.exclude_closed and place.get("business_status") == "CLOSED_TEMPORARILY":
         return False
     website = (place.get("website") or "").strip()
-    if not website or is_social_media_url(website):
-        category = "social_only" if website else "no_website"
+    if not website or is_social_media_url(website) or is_booking_url(website):
+        category = "social_only" if is_social_media_url(website) else "no_website"
         if filters.statuses and category not in filters.statuses:
             return False
         possible: tuple[str, ...] = ("NO WEBSITE",)
@@ -1255,6 +1255,7 @@ MAX_EMAIL_WORDS = 90
 # Avain täsmätään issue-tekstin alkuun; yhdistetyt syyt ("no HTTPS; no viewport meta") pilkotaan.
 ISSUE_DESCRIPTIONS: list[tuple[str, str]] = [
     ("social media only", "löysin teidät vain Facebookista, omaa nettisivua en löytänyt"),
+    ("booking platform only", "Googlesta löytyi teille vain ajanvaraussivu, omaa nettisivua en löytänyt"),
     ("DNS not resolving", "Googlen kautta löytyvä nettisivuosoitteenne ei avaudu"),
     ("connection refused", "nettisivunne ei avautunut, kun yritin avata sen"),
     ("connection failed", "nettisivunne ei avautunut, kun yritin avata sen"),
@@ -1454,6 +1455,9 @@ DEMO_LINK_PARAGRAPH_SITE = (
     "Tein luonnoksen nykyisten tietojenne pohjalta, jotta näette miltä sivunne voisivat näyttää:\n{url}\n"
     "Voitte katsoa sen suoraan puhelimella."
 )
+# Liidin website on ajanvarausalusta: salon/barber-demon Varaa aika -nappi vie sinne
+DEMO_BOOKING_SENTENCE = "Nykyinen ajanvarauksenne toimii sivulla sellaisenaan."
+DEMO_BOOKING_TEMPLATES = ("salon", "barber")
 DEMO_RISK_PARAGRAPH = (
     "Luonnos on ilmainen eikä sido teitä mihinkään. Jos se näyttää hyvältä, "
     "viimeistelen sen teidän omilla tiedoillanne ja kuvillanne."
@@ -1464,6 +1468,7 @@ DEMO_NEXT_STEP = "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin."
 # Mitä asiakkaalle konkreettisesti tapahtuu nyt (vihje kappaleeseen 2). Tarkin osuma issue-tekstistä ensin.
 CUSTOMER_IMPACT_BY_ISSUE: list[tuple[str, str]] = [
     ("social media only", "Googlesta asiakas löytää teidät vain Facebookin kautta, eikä sieltä näe palveluitanne, hintoja tai aukioloaikoja yhdellä silmäyksellä."),
+    ("booking platform only", "Googlesta asiakas pääsee ajanvaraukseen, mutta omaa sivua, jolta näkisi palvelut, aukioloajat ja esittelyn, ei ole."),
     ("DNS not resolving", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea lainkaan.'),
     ("connection", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea lainkaan.'),
     ("parked domain", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, hän päätyy sivulle, jolla ei ole teidän tietojanne.'),
@@ -1535,9 +1540,13 @@ def demo_next_step(profile: SenderProfile) -> str:
     return DEMO_NEXT_STEP_WITH_PHONE.format(phone=profile.phone) if profile.phone else DEMO_NEXT_STEP
 
 
-def build_demo_email_body(text: str, profile: SenderProfile, demo_url: str, *, site_based: bool = False) -> str:
+def build_demo_email_body(
+    text: str, profile: SenderProfile, demo_url: str, *, site_based: bool = False, has_booking: bool = False
+) -> str:
     """Hei + mallin kappaleet 1–2 + linkki omalla rivillään + riskittömyys + seuraava askel + allekirjoitus."""
     link = (DEMO_LINK_PARAGRAPH_SITE if site_based else DEMO_LINK_PARAGRAPH).format(url=demo_url)
+    if has_booking:
+        link = f"{link} {DEMO_BOOKING_SENTENCE}"
     parts = ["Hei,", *clean_demo_paragraphs(text), link, DEMO_RISK_PARAGRAPH, demo_next_step(profile)]
     head = "\n\n".join(parts)
     return f"{head}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
@@ -1796,6 +1805,9 @@ def _prompt_facts(lead: Lead, profile: SenderProfile, *, has_demo: bool = False)
         parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
     offer = DEMO_OFFER if has_demo else OFFERS.get(lead.website_status or "", DEFAULT_OFFER)
     parts.append(f"TARJOUS: {offer}")
+    if demo_booking_url(lead):
+        parts.append("AJANVARAUS: yrityksellä on jo verkkoajanvaraus. Mainitse yhdellä lyhyellä lauseella, "
+                     "että nykyinen ajanvaraus toimisi uudella sivulla sellaisenaan.")
     return parts
 
 
@@ -1956,7 +1968,8 @@ async def generate_email(
         )
         model = result.model
         site_based = DemoStoredContent.model_validate_json(demo.content_json).site_based if demo else False
-        body = build_demo_email_body(result.text, profile, demo_url, site_based=site_based)
+        has_booking = demo_booking_url(db_lead) is not None and demo is not None and demo.template in DEMO_BOOKING_TEMPLATES
+        body = build_demo_email_body(result.text, profile, demo_url, site_based=site_based, has_booking=has_booking)
         check_generated_text(email_head(body), kind="sähköposti", lead_id=lead_id, model=model, max_words=DEMO_EMAIL_MAX_WORDS - 20)
         subject = demo_email_subject(db_lead)
     else:
@@ -2082,6 +2095,13 @@ def _safe_web_url(url: Optional[str]) -> Optional[str]:
     return url if url and url.lower().startswith(("http://", "https://")) else None
 
 
+def demo_booking_url(lead: Lead) -> Optional[str]:
+    if not is_booking_url(lead.website):
+        return None
+    url = (lead.website or "").strip()
+    return _safe_web_url(url if "://" in url else f"https://{url}")
+
+
 def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lead: Lead, profile: SenderProfile) -> str:
     return render_demo_html(
         template=demo_template,
@@ -2090,7 +2110,7 @@ def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lea
         utm_app=UNSPLASH_APP_NAME,
         business=DemoBusiness(
             name=lead.name, city=lead.city, address=lead.address, phone=lead.phone,
-            maps_url=_safe_web_url(lead.maps_url),
+            maps_url=_safe_web_url(lead.maps_url), booking_url=demo_booking_url(lead),
         ),
         sender=DemoSender(
             name=profile.name, company_name=profile.company_name, phone=profile.phone,

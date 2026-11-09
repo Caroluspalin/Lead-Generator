@@ -443,3 +443,21 @@ def test_prompts_forbid_long_official_name(
     system = fake_openai.calls[-1]["messages"][0]["content"]
     assert "Älä käytä yrityksen pitkää virallista nimeä" in system
     assert "teidän kampaamonne/ravintolanne" in system
+
+
+def test_email_prompt_mentions_existing_booking_platform(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
+) -> None:
+    lead = make_lead(website="https://timma.fi/salonki", website_status="NO WEBSITE", website_issue="booking platform only")
+    client_a.post(f"/leads/{lead['id']}/generate-email", json={})
+    prompt = _user_prompt(fake_openai)
+    assert "HAVAINTO (varma, tein sen itse): Googlesta löytyi teille vain ajanvaraussivu" in prompt
+    assert "nykyinen ajanvaraus toimisi uudella sivulla sellaisenaan" in prompt
+
+
+def test_email_prompt_without_booking_platform_has_no_booking_hint(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
+) -> None:
+    lead = make_lead(website_status="NO WEBSITE")
+    client_a.post(f"/leads/{lead['id']}/generate-email", json={})
+    assert "AJANVARAUS" not in _user_prompt(fake_openai)

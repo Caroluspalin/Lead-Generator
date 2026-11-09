@@ -684,6 +684,7 @@ class DemoBusiness:
     address: Optional[str]
     phone: Optional[str]
     maps_url: Optional[str]
+    booking_url: Optional[str] = None  # ajanvarausalusta (timma.fi tms.), vain liidin omasta website-kentästä
 
 
 @dataclass(frozen=True)

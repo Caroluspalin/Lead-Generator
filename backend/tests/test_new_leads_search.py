@@ -399,3 +399,8 @@ def test_creating_lead_marks_place_in_pipeline(client_a: TestClient, make_lead: 
     rows = session.exec(select(PlaceStatus)).all()
     assert [(r.place_id, r.status) for r in rows] == [("ChIJnew1", "in_pipeline")]
     assert session.exec(select(Lead)).all()
+
+
+def test_could_match_treats_booking_platform_as_no_website() -> None:
+    assert could_match(_place(website="https://timma.fi/salonki"), SearchFilters(statuses=["no_website"]))
+    assert not could_match(_place(website="https://timma.fi/salonki"), SearchFilters(statuses=["social_only"]))

@@ -38,6 +38,9 @@ HEADERS = {
 # Pelkkä somesivu ei ole oma nettisivu -> NO WEBSITE. Näihin ei tehdä pyyntöä lainkaan.
 SOCIAL_MEDIA_HOSTS = ("facebook.com", "fb.com", "fb.me", "instagram.com", "linktr.ee")
 SOCIAL_MEDIA_ISSUE = "social media only"
+# Ajanvarausalusta ei myöskään ole oma sivu: NO WEBSITE, ja osoite toimii demossa varauslinkkinä
+BOOKING_HOSTS = ("timma.fi", "varaa.com", "vello.fi", "slotti.fi", "fresha.com")
+BOOKING_ISSUE = "booking platform only"
 
 BROKEN_HTTP_STATUSES = {404, 410}
 BOT_BLOCK_HTTP_STATUSES = {401, 403, 429}
@@ -144,6 +147,13 @@ def is_social_media_url(url: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in SOCIAL_MEDIA_HOSTS)
 
 
+def is_booking_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    host = _host(url if "://" in url else f"//{url}")
+    return any(host == h or host.endswith("." + h) for h in BOOKING_HOSTS)
+
+
 def _is_parked(response: requests.Response) -> bool:
     final_host = _host(response.url)
     if any(final_host == h or final_host.endswith("." + h) for h in PARKING_HOSTS):
@@ -200,6 +210,8 @@ def analyze_website(url: Optional[str]) -> WebsiteCheck:
     url = url.strip()
     if is_social_media_url(url):
         return WebsiteCheck(NO_WEBSITE, SOCIAL_MEDIA_ISSUE)
+    if is_booking_url(url):
+        return WebsiteCheck(NO_WEBSITE, BOOKING_ISSUE)
 
     # 1) HTTPS ensin (moni Google-websiteUri on http:// vaikka https toimii)
     https_url = _with_scheme(url, "https")
@@ -237,7 +249,7 @@ def fetch_page(url: str) -> Optional[requests.Response]:
 
     Palauttaa None jos sivu ei vastaa. Ei tee pyyntöä someosoitteisiin.
     """
-    if not url or is_social_media_url(url):
+    if not url or is_social_media_url(url) or is_booking_url(url):
         return None
     https_url = url if url.lower().startswith("https://") else _with_scheme(url, "https")
     try:

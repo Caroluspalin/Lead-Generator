@@ -247,3 +247,10 @@ def test_sender_profile_brand_name_roundtrip(client_a: TestClient, sender_profil
     cleared = client_a.put("/sender-profile", json={**sender_profile, "brand_name": "   "}).json()
     assert cleared["brand_name"] is None
     assert client_a.put("/sender-profile", json={**sender_profile, "brand_name": "x" * 61}).status_code == 422
+
+
+def test_demo_email_mentions_existing_booking() -> None:
+    body = build_demo_email_body(MODEL_TEXT, _profile(), URL, has_booking=True)
+    assert "Nykyinen ajanvarauksenne toimii sivulla sellaisenaan." in email_head(body)
+    assert word_count(email_head(body)) <= DEMO_EMAIL_MAX_WORDS
+    assert "ajanvaraus" not in build_demo_email_body(MODEL_TEXT, _profile(), URL).lower()

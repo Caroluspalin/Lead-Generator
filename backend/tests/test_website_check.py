@@ -300,3 +300,28 @@ def test_fetch_page_never_requests_social_media(monkeypatch: pytest.MonkeyPatch)
 def test_fetch_page_dns_failure_is_none(web: Callable[..., _FakeWeb]) -> None:
     web({("https", True): _dns_error()})
     assert wc.fetch_page("eiole.fi") is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://timma.fi/kampaamo-x",
+        "https://www.varaa.com/place/parturi",
+        "vello.fi/salonki",
+        "https://slotti.fi/booking/abc",
+        "https://www.fresha.com/a/salon-helsinki",
+    ],
+)
+def test_booking_platform_url_is_no_website_without_request(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("requests.get", lambda u, **_k: calls.append(u))
+    assert analyze_website(url) == WebsiteCheck("NO WEBSITE", "booking platform only")
+    assert wc.fetch_page(url) is None
+    assert calls == []
+
+
+def test_is_booking_url_matches_host_not_substring() -> None:
+    assert wc.is_booking_url("https://kampaamo.timma.fi/")
+    assert not wc.is_booking_url("https://notvaraa.com/")
+    assert not wc.is_booking_url("https://kampaamo.fi/?ref=timma.fi")
+    assert not wc.is_booking_url(None)

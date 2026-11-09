@@ -727,3 +727,29 @@ def test_ai_headings_carry_longest_word_for_css_sizing(template: str) -> None:
     assert 'data-pisin="16">Parturi- ja kampaamopalvelut</h2>' in html
     css = (ASSET_DIR / template / "tyylit.css").read_text()
     assert "container-type: inline-size" in css and "var(--mahtuu" in css
+
+
+def _render_with_booking(template: str, booking_url: Optional[str]) -> str:
+    business = DemoBusiness(
+        name="Salonki Lumo", city="Espoo", address="Esimerkkikatu 4, 02100 Espoo, Suomi",
+        phone="050 000 0000", maps_url="https://maps.google.com/?cid=1", booking_url=booking_url,
+    )
+    content = DemoStoredContent(**VALID, price_note=price_note_for(template))
+    return render_demo_html(template=template, color_scheme=next(iter(TEMPLATES[template].schemes)),
+                            content=content, business=business, sender=SENDER)
+
+
+@pytest.mark.parametrize("template", ["salon", "barber"])
+def test_book_button_links_to_booking_platform(template: str) -> None:
+    html = _render_with_booking(template, "https://timma.fi/salonki-lumo")
+    assert re.search(r'<a class="nappi[^"]*" href="https://timma\.fi/salonki-lumo" rel="noopener noreferrer">Varaa aika</a>', html)
+    assert "<iframe" not in html
+
+
+@pytest.mark.parametrize("template", ["salon", "barber"])
+def test_book_button_without_booking_url_is_phone_link(template: str) -> None:
+    html = _render_with_booking(template, None)
+    assert "timma" not in html and "verkossa" not in html
+    assert re.search(r'href="tel:\+358500000000">(Varaa aika|Soita 050 000 0000)</a>', html)
+    if template == "salon":
+        assert '<a class="nappi nappi-pieni" href="tel:+358500000000">Varaa aika</a>' in html

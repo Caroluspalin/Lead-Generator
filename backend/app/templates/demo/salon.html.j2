@@ -11,10 +11,14 @@
 {% if hero_image %}<link rel="preload" as="image" href="{{ hero_image.src }}" imagesrcset="{{ hero_image.srcset }}" imagesizes="(min-width: 64rem) 58vw, 100vw" fetchpriority="high">{% endif %}
 {% endblock %}
 {% block body %}
+{# Varaa aika: yrityksen oma ajanvarausalusta jos se on tiedossa, muuten puhelin #}
+{% set varaus = business.booking_url %}
 <header class="yla">
   <div class="kehys yla-sisa">
     <a class="logo" href="#sisalto">{{ business.name }}</a>
-    <a class="nappi nappi-pieni" href="#varaa">Varaa aika</a>
+    {% if varaus %}<a class="nappi nappi-pieni" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika</a>
+    {% elif tel %}<a class="nappi nappi-pieni" href="tel:{{ tel }}">Varaa aika</a>
+    {% else %}<a class="nappi nappi-pieni" href="#varaa">Varaa aika</a>{% endif %}
   </div>
 </header>
 
@@ -94,9 +98,10 @@
       <div class="kehys varaa-sisa">
         <div class="varaa-teksti">
           <h2 id="varaa-otsikko">Varaa aika</h2>
-          <p>{% if tel %}Soittakaa, niin etsitään teille sopiva aika.{% else %}Kysykää vapaita aikoja.{% endif %}</p>
+          <p>{% if varaus %}Varatkaa aika verkossa{% if tel %} tai soittakaa{% endif %}.{% elif tel %}Soittakaa, niin etsitään teille sopiva aika.{% else %}Kysykää vapaita aikoja.{% endif %}</p>
           <div class="napit">
-            {% if tel %}<a class="nappi nappi-vaalea" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
+            {% if varaus %}<a class="nappi nappi-vaalea" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika verkossa</a>{% endif %}
+            {% if tel %}<a class="nappi {{ 'nappi-reuna' if varaus else 'nappi-vaalea' }}" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
             {% if business.maps_url %}<a class="nappi nappi-reuna" href="{{ business.maps_url }}" rel="noopener noreferrer">Avaa kartalla</a>{% endif %}
           </div>
         </div>
@@ -123,7 +128,7 @@
     {% if tel %}
     <nav class="palkki" aria-label="Soita tai varaa aika">
       <a class="nappi nappi-toissijainen" href="tel:{{ tel }}">Soita</a>
-      <a class="nappi" href="#varaa">Varaa aika</a>
+      <a class="nappi" href="{{ varaus or '#varaa' }}"{% if varaus %} rel="noopener noreferrer"{% endif %}>Varaa aika</a>
     </nav>
     {% endif %}
   </div>
