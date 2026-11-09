@@ -753,3 +753,28 @@ def test_book_button_without_booking_url_is_phone_link(template: str) -> None:
     assert re.search(r'href="tel:\+358500000000">(Varaa aika|Soita 050 000 0000)</a>', html)
     if template == "salon":
         assert '<a class="nappi nappi-pieni" href="tel:+358500000000">Varaa aika</a>' in html
+
+
+def test_price_note_with_booking_platform_says_online() -> None:
+    assert price_note_for("salon", has_booking=True) == "Hinnat ja ajanvaraus verkossa."
+    assert price_note_for("salon") == "Hinnat ja ajanvaraus puhelimitse."
+    # Vain hinnaton oletusteksti vaihtuu; kahvilan ja hinnallinen teksti ennallaan
+    assert price_note_for("salon", has_prices=True, has_booking=True) == price_note_for("salon", has_prices=True)
+    assert price_note_for("cafe", has_booking=True) == price_note_for("cafe")
+
+
+def test_booking_lead_demo_gets_online_price_note_and_follows_template(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
+) -> None:
+    lead = make_lead(
+        name="Kampaamo Lumo", phone="040 000 0000", primary_type="hair_salon", website="https://timma.fi/lumo",
+        website_status="NO WEBSITE", website_issue="booking platform only",
+    )
+    fake_openai.reply = json.dumps(VALID)
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "salon"}).json()
+    assert demo["content"]["price_note"] == "Hinnat ja ajanvaraus verkossa."
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "cafe"}).json()
+    assert res["content"]["price_note"] == price_note_for("cafe")
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "barber"}).json()
+    assert res["content"]["price_note"] == "Hinnat ja ajanvaraus verkossa."
+

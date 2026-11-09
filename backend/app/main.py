@@ -2102,6 +2102,10 @@ def demo_booking_url(lead: Lead) -> Optional[str]:
     return _safe_web_url(url if "://" in url else f"https://{url}")
 
 
+def has_demo_booking(lead: Lead, template: str) -> bool:
+    return demo_booking_url(lead) is not None and template in DEMO_BOOKING_TEMPLATES
+
+
 def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lead: Lead, profile: SenderProfile) -> str:
     return render_demo_html(
         template=demo_template,
@@ -2316,7 +2320,7 @@ async def generate_demo(
     stored = DemoStoredContent(
         **content.model_dump(exclude={"price_note", "services"}),
         services=services,
-        price_note=price_note_for(template, has_prices),
+        price_note=price_note_for(template, has_prices, has_demo_booking(lead, template)),
         site_based=bool(site_facts and site_facts.has_content),
         opening_hours=hours.descriptions if hours else [],
         opening_periods=hours.periods if hours else [],
@@ -2400,7 +2404,9 @@ def update_demo(
     if is_default_price_note(demo.template, stored.price_note):
         # Pohjan oletusteksti seuraa pohjaa ja hintoja (kahvilassa ei "ajanvarausta",
         # hintojen kanssa ei "hinnat puhelimitse"); käyttäjän oma teksti säilyy
-        stored = stored.model_copy(update={"price_note": price_note_for(template, has_prices)})
+        stored = stored.model_copy(
+            update={"price_note": price_note_for(template, has_prices, has_demo_booking(lead, template))}
+        )
     # Hero-vaihto, tai pohjan vaihto: tunnelmakuvien säännöt ovat pohjakohtaisia (kahvilassa tumma viimeinen)
     if req.hero_image_id is not None or template != demo.template:
         images = stored.images

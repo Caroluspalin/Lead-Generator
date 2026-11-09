@@ -39,6 +39,8 @@ PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
 PLACE_DETAILS_FIELD_MASK = "regularOpeningHours"
 
 DEFAULT_PRICE_NOTE = "Hinnat ja ajanvaraus puhelimitse."
+# Kun Varaa aika -nappi vie yrityksen ajanvarausalustalle (DemoBusiness.booking_url)
+DEFAULT_PRICE_NOTE_BOOKING = "Hinnat ja ajanvaraus verkossa."
 # Kun hinnat ovat yrityksen omalta sivulta, huomautus ei puhu hinnoista (ne näkyvät palveluissa)
 DEFAULT_PRICE_NOTE_SITE = "Ajanvaraus puhelimitse."
 SITE_PRICES_NOTE = "Hinnat nykyiseltä sivultanne."
@@ -204,13 +206,17 @@ def templates_catalog() -> list[dict[str, object]]:
     ]
 
 
-def price_note_for(template: str, has_prices: bool = False) -> str:
+def price_note_for(template: str, has_prices: bool = False, has_booking: bool = False) -> str:
     tpl = TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
-    return tpl.price_note_site if has_prices else tpl.price_note
+    note = tpl.price_note_site if has_prices else tpl.price_note
+    return DEFAULT_PRICE_NOTE_BOOKING if has_booking and note == DEFAULT_PRICE_NOTE else note
 
 
 def is_default_price_note(template: str, note: str) -> bool:
-    return note in (price_note_for(template), price_note_for(template, has_prices=True))
+    return note in (
+        price_note_for(template), price_note_for(template, has_prices=True),
+        price_note_for(template, has_booking=True),
+    )
 
 
 # --- Sisältöskeema ---
