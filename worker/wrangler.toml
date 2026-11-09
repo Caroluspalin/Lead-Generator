@@ -1,11 +1,11 @@
 # Cloudflare Worker, joka palvelee julkaistut demosivut R2-bucketista.
-# Osoite: https://<name>.<tilisi-alidomain>.workers.dev/<token>
-# Oma domain (demo.<domain>.fi) lisätään myöhemmin Cloudflaren hallintapaneelista
-# (Workers & Pages -> tämä Worker -> Settings -> Domains & Routes), ei koodimuutoksia.
+# Osoite: https://demo.palinweb.fi/<polku> (custom domain, zone palinweb.fi samalla tilillä).
+# workers.dev pysyy päällä, jotta jo lähetetyt vanhat linkit toimivat edelleen.
 name = "agency-hunter-demos"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
+routes = [{ pattern = "demo.palinweb.fi", custom_domain = true }]
 
 [[r2_buckets]]
 binding = "DEMOS"

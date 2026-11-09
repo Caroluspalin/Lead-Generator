@@ -153,6 +153,16 @@ test('format 2 demo gets CSP that allows own files but no inline code', async ()
   assert.doesNotMatch(csp, /unsafe-inline/);
 });
 
+test('format 2 demo on custom domain is noindex and keeps the demo banner unchanged', async () => {
+  const bucket = new FakeBucket();
+  const html = '<!doctype html><p class="demo-bar">Tämä on luonnos – ei yrityksen virallinen sivu.</p>';
+  bucket.objects.set(`demos/${SLUG}.html`, { body: html, customMetadata: { format: '2' } });
+  const res = await handleRequest(new Request(`https://demo.palinweb.fi/${SLUG}`), env(bucket), NOW);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
+  assert.equal(await res.text(), html);
+});
+
 test('old demo without format keeps inline-only CSP', async () => {
   const bucket = new FakeBucket();
   bucket.objects.set(`demos/${SLUG}.html`, { body: 'x' });
