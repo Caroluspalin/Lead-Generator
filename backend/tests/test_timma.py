@@ -1,5 +1,6 @@
 import json
 import asyncio
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -254,3 +255,173 @@ def test_ensure_timma_fetches_once(session: Session, fake_get: FakeTimma) -> Non
     # Website vaihtui: vanhan sivun dataa ei käytetä
     lead.website = "https://example.fi"
     assert lead_timma(lead) is None
+
+
+# --- Demo Timma-tiedoilla ---
+
+from app.demo_site import (  # noqa: E402
+    IMAGE_NOTE_EXAMPLE,
+    IMAGE_NOTE_TIMMA,
+    TIMMA_PRICES_NOTE,
+    DemoImages,
+    format_duration,
+    format_price,
+)
+from app.utils.unsplash import DemoPhoto  # noqa: E402
+from tests.conftest import FakeOpenAI  # noqa: E402
+from tests.test_demo_site import VALID  # noqa: E402
+
+BOOKING = "https://timma.fi/yritys/scissor-room-matinkyla"
+EXTRA_IMAGE = "https://scaled-images.timma.fi/timma/image/upload/w_1080,c_limit,q_auto/v1/c/kolmas.jpg"
+
+
+def _payload_with_images(n: int) -> bytes:
+    payload = rmak_payload()
+    images = payload["images"][:n]
+    while len(images) < n:
+        images.append({"url": EXTRA_IMAGE.replace("kolmas", f"kuva{len(images)}"), "alt": ""})
+    payload["images"] = images
+    return json.dumps(payload).encode()
+
+
+def _unsplash_photo() -> DemoPhoto:
+    return DemoPhoto(
+        id="u1", raw_url="https://images.unsplash.com/photo-u1?ixid=x", photographer_name="Kuvaaja",
+        photographer_url="https://unsplash.com/@k", download_location="https://api.unsplash.com/photos/u1/download",
+    )
+
+
+@pytest.fixture
+def unsplash_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
+
+    async def _find(lead: Any, template: str) -> tuple[DemoImages, int]:
+        calls.append(template)
+        return DemoImages(hero=_unsplash_photo(), mood=[], options=[_unsplash_photo()]), 1
+
+    monkeypatch.setattr("app.main.find_demo_images", _find)
+    monkeypatch.setattr("app.main._track_downloads", lambda photos: None)
+    return calls
+
+
+def _demo_html(client: TestClient, lead_id: int, template: str = "barber") -> tuple[dict[str, Any], str]:
+    demo = client.post(f"/leads/{lead_id}/demo", json={"template": template})
+    assert demo.status_code == 200, demo.text
+    page = client.get(f"/demo/{demo.json()['public_path']}")
+    assert page.status_code == 200
+    assert "scaled-images.timma.fi" in page.headers["content-security-policy"]
+    assert page.headers["x-robots-tag"] == "noindex, nofollow"
+    return demo.json(), page.text
+
+
+def test_format_price_and_duration() -> None:
+    assert format_price(2500) == "25 €"
+    assert format_price(2550, from_price=True) == "alk. 25,50 €"
+    assert [format_duration(m) for m in (15, 60, 75)] == ["15 min", "1 h", "1 h 15 min"]
+
+
+@pytest.mark.parametrize("template", ["barber", "salon"])
+def test_demo_with_timma_uses_prices_booking_rating_and_images(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str], template: str,
+) -> None:
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(3)))
+    lead = make_lead(name="R-Mak parturi", phone="040 0218015", primary_type="barber_shop", website=RMAK_URL,
+                     address="Pyyntitie 1 A, 02230 Espoo, Suomi", website_status="NO WEBSITE")
+    fake_openai.reply = json.dumps(VALID)
+    demo, html = _demo_html(client_a, lead["id"], template)
+
+    assert len(fake_get.calls) == 1
+    assert unsplash_calls == []  # kuvat yhdestä lähteestä: Timma
+    stored = demo["content"]["timma"]
+    assert stored["booking_url"] == BOOKING
+    assert stored["rating_avg"] == 5.0 and stored["rating_count"] == 262
+    assert len(stored["images"]) == 3
+    # Hinnasto kategorioittain, hinnat ja kestot
+    assert "Leikkaukset" in html and "Ihokarvojen poisto" in html
+    assert '<span class="timma-nimi">Parturileikkaus</span><span class="timma-kesto">30 min</span><span class="timma-hinta">25 €</span>' in html
+    assert TIMMA_PRICES_NOTE in html
+    # Kaikki varausnapit samaan Timma-linkkiin
+    booking_links = re.findall(r'<a class="nappi[^"]*" href="([^"]+)"[^>]*>Varaa aika', html)
+    assert booking_links and set(booking_links) == {BOOKING}
+    assert "landingPage" not in html
+    # Tähdet + määrä + linkki Timmaan, ei arvostelutekstejä
+    assert f'<a class="timma-arvio" href="{BOOKING}" rel="noopener noreferrer"><span aria-hidden="true">★</span> 5,0 · 262 arvostelua Timmassa</a>' in html
+    # Osoite Timmasta, kuvat Timmasta, bannerin kuvarivi, ei Unsplash-mainintaa
+    assert "Pyyntitie 1 A" in html
+    assert "scaled-images.timma.fi" in html and "images.unsplash.com" not in html
+    assert f"· {IMAGE_NOTE_TIMMA}" in html and "Unsplash" not in html
+    assert '<meta name="robots" content="noindex, nofollow">' in html
+
+
+def test_timma_with_two_images_uses_unsplash_only(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str],
+) -> None:
+    lead = make_lead(name="R-Mak parturi", primary_type="barber_shop", website=RMAK_URL)
+    fake_openai.reply = json.dumps(VALID)
+    demo, html = _demo_html(client_a, lead["id"])
+    assert unsplash_calls == ["barber"]
+    assert demo["content"]["timma"]["images"] == []
+    assert "scaled-images.timma.fi" not in html and "images.unsplash.com" in html
+    assert f"· {IMAGE_NOTE_EXAMPLE}" in html and IMAGE_NOTE_TIMMA not in html
+    # Hinnasto ja varauslinkki tulevat silti Timmasta
+    assert "timma-hinnasto" in html and BOOKING in html
+
+
+def test_demo_without_timma_is_unchanged(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str],
+) -> None:
+    lead = make_lead(name="Parturi-kampaamo Scissors Room", primary_type="barber_shop",
+                     website="https://timma.fi/pro/book-demo/642fff026759411f4a6cf069")
+    fake_openai.reply = json.dumps(VALID)
+    demo, html = _demo_html(client_a, lead["id"])
+    assert fake_get.calls == []
+    assert demo["content"]["timma"] is None
+    assert "timma-hinnasto" not in html and "timma-arvio" not in html and "Varaa aika" not in html
+    assert VALID["services"][0]["name"] in html
+    assert f"· {IMAGE_NOTE_EXAMPLE}" in html
+
+
+def test_timma_disabled_ignores_cached_data(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = make_lead(name="R-Mak parturi", primary_type="barber_shop", website=RMAK_URL)
+    assert client_a.post(f"/leads/{lead['id']}/timma/refresh").status_code == 200
+    monkeypatch.setattr("app.main.TIMMA_IMPORT_ENABLED", False)
+    fake_openai.reply = json.dumps(VALID)
+    demo, html = _demo_html(client_a, lead["id"])
+    assert demo["content"]["timma"] is None and "timma-hinnasto" not in html
+    assert len(fake_get.calls) == 1
+
+
+def test_hidden_prices_not_shown(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str],
+) -> None:
+    payload = rmak_payload()
+    payload["publicSettings"]["showPrices"] = False
+    fake_get.queue.append(FakeResponse(body=json.dumps(payload).encode()))
+    lead = make_lead(name="R-Mak parturi", primary_type="barber_shop", website=RMAK_URL)
+    fake_openai.reply = json.dumps(VALID)
+    _, html = _demo_html(client_a, lead["id"])
+    assert "timma-hinnasto" in html and "timma-hinta" not in html and TIMMA_PRICES_NOTE not in html
+
+
+def test_text_edit_keeps_timma(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str],
+) -> None:
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(3)))
+    lead = make_lead(name="R-Mak parturi", primary_type="barber_shop", website=RMAK_URL)
+    fake_openai.reply = json.dumps(VALID)
+    demo, _ = _demo_html(client_a, lead["id"])
+    editable = {k: demo["content"][k] for k in ("hero_title", "hero_subtitle", "about_title", "about", "services", "price_note")}
+    editable["hero_subtitle"] = "Uusi alaotsikko parturille Matinkylässä."
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"content": editable})
+    assert res.status_code == 200, res.text
+    assert res.json()["content"]["timma"] == demo["content"]["timma"]
+    page = client_a.get(f"/demo/{demo['public_path']}").text
+    assert "timma-hinnasto" in page and "Uusi alaotsikko" in page

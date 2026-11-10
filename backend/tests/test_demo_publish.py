@@ -155,7 +155,7 @@ def test_other_user_cannot_publish(client_b: TestClient, demo: dict[str, Any], s
 
 def test_edit_of_published_demo_updates_same_url(client_a: TestClient, demo: dict[str, Any], store: FakeStore) -> None:
     published = _publish(client_a, demo)
-    edited = {k: v for k, v in published["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based")}
+    edited = {k: v for k, v in published["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
     edited["hero_subtitle"] = "Uusi alaotsikko joka päivittyy julkaistuun versioon."
     res = client_a.patch(f"/leads/{demo['lead_id']}/demo", json={"content": edited}).json()
     assert res["public_url"] == published["public_url"]

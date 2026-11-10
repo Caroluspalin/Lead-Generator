@@ -439,7 +439,7 @@ def test_site_is_scanned_once_per_lead(
 
 
 def test_patch_can_remove_price_but_not_invent_one(client_a: TestClient, site_demo: dict[str, Any]) -> None:
-    content = {k: v for k, v in site_demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based")}
+    content = {k: v for k, v in site_demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
     removed = {**content, "services": [{**s, "price": None} for s in content["services"]]}
     res = client_a.patch(f"/leads/{site_demo['lead_id']}/demo", json={"content": removed})
     assert res.status_code == 200

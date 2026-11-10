@@ -15,7 +15,7 @@
 {% if aukiolo %}<script defer src="{{ asset('yhteinen', 'aukiolo.js').url }}"></script>{% endif %}
 </head>
 <body>
-<p class="demo-bar" role="note"><span class="long">{{ banner }}</span><span class="short">Luonnos – ei virallinen sivu · {{ sender.name }}</span>{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %}<span class="long"> · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a></span>{% endif %}</p>
+<p class="demo-bar" role="note"><span class="long">{{ banner }}</span><span class="short">Luonnos – ei virallinen sivu · {{ sender.name }}</span>{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %}<span class="long"> · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a></span>{% endif %}{% if image_note %} · {{ image_note }}{% endif %}</p>
 <a class="ohitus" href="#sisalto">Siirry sisältöön</a>
 {% if aukiolo %}
 {# Koneluettavat ajat aukiolo.js:lle (data-ma … data-su), puuttuva päivä = suljettu #}

@@ -60,6 +60,9 @@ from .demo_site import (
     is_v2_template,
     attach_site_prices,
     BOOKING_TEMPLATES,
+    demo_timma,
+    shows_prices,
+    timma_prompt_facts,
     is_default_price_note,
     price_note_for,
     site_prices_allowed,
@@ -2256,6 +2259,9 @@ async def ensure_timma(session: Session, lead: Lead, *, refresh: bool = False) -
     except TimmaFetchError as e:
         logger.warning(f"Timma-haku epäonnistui (liidi {lead.id}, {slug}): {e}")
         return None
+    except Exception as e:  # Timma ei saa kaataa demoa: ilman sitä demo tehdään kuten ennen
+        logger.warning(f"Timma-haku epäonnistui odottamatta (liidi {lead.id}, {slug}): {e.__class__.__name__}: {e}")
+        return None
     lead.timma_data, lead.timma_fetched_at = snapshot.model_dump_json(), utc_now()
     session.add(lead)
     session.commit()
@@ -2372,15 +2378,18 @@ async def generate_demo(
     except ValueError as e:
         raise HTTPException(422, str(e))
 
+    timma = await ensure_timma(session, lead)
     site_facts, scan_results = await ensure_site_facts(session, lead)
+    # Timman palveluiden nimet AI:lle lähteeksi, jos omaa sivua ei ole (hinnasto tulee koodista, ei mallilta)
+    prompt_facts = site_facts if site_facts and site_facts.has_content else (timma_prompt_facts(timma) if timma else site_facts)
     try:
-        content, results = await generate_demo_content(lead, template, site_facts)
+        content, results = await generate_demo_content(lead, template, prompt_facts)
     except DemoGenerationError as e:
         raise HTTPException(502, f"Demo content failed validation: {e}")
     results = scan_results + results
     # Hinnat vain yrityksen omalta sivulta, palvelun nimen mukaan (ks. attach_site_prices)
     services = attach_site_prices(content.services, site_facts)
-    has_prices = any(s.price for s in services)
+    stored_timma = demo_timma(timma) if timma else None
 
     # Aukioloajat vasta nyt, yksi Place Details -kutsu (ei tallenneta erikseen, vain osana demoa)
     hours = None
@@ -2388,16 +2397,23 @@ async def generate_demo(
     if _can_fetch_place_details(lead) and lead.google_place_id:
         place_calls = 1
         hours = await asyncio.to_thread(fetch_opening_hours, lead.google_place_id, GOOGLE_API_KEY)
-    images, searches = await find_demo_images(lead, template)
+    # Kuvat yhdestä lähteestä: Timman omat kuvat (vähintään TIMMA_MIN_IMAGES) tai Unsplash, ei sekoitusta
+    if stored_timma and stored_timma.images:
+        images, searches = DemoImages(), 0
+    else:
+        images, searches = await find_demo_images(lead, template)
     stored = DemoStoredContent(
         **content.model_dump(exclude={"price_note", "services"}),
         services=services,
-        price_note=price_note_for(template, has_prices, has_demo_booking(lead, template)),
-        site_based=bool(site_facts and site_facts.has_content),
+        site_based=bool(site_facts and site_facts.has_content) or stored_timma is not None,
         opening_hours=hours.descriptions if hours else [],
         opening_periods=hours.periods if hours else [],
         images=images,
+        timma=stored_timma,
     )
+    stored = stored.model_copy(update={
+        "price_note": price_note_for(template, shows_prices(stored, template), has_demo_booking(lead, template))
+    })
     used = _used_photos(images)
     if used:
         background_tasks.add_task(_track_downloads, used)
@@ -2471,8 +2487,9 @@ def update_demo(
         stored = DemoStoredContent(
             **req.content.model_dump(), opening_hours=stored.opening_hours,
             opening_periods=stored.opening_periods, images=stored.images, site_based=stored.site_based,
+            timma=stored.timma,
         )
-    has_prices = any(s.price for s in stored.services)
+    has_prices = shows_prices(stored, template)
     if is_default_price_note(demo.template, stored.price_note):
         # Pohjan oletusteksti seuraa pohjaa ja hintoja (kahvilassa ei "ajanvarausta",
         # hintojen kanssa ei "hinnat puhelimitse"); käyttäjän oma teksti säilyy
@@ -2607,7 +2624,7 @@ DEMO_RESPONSE_HEADERS = {
     # Versio 1: staattinen, ei skriptejä, ei ulkoisia resursseja, inline-CSS sallittu
     # Kuvat hotlinkataan Unsplashista (API-ehto), fontit ovat inline data-URI:na
     "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://images.unsplash.com; "
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://images.unsplash.com https://scaled-images.timma.fi; "
         "font-src data:; base-uri 'none'; form-action 'none'"
     ),
     "Referrer-Policy": "no-referrer",
@@ -2619,7 +2636,7 @@ DEMO_V2_RESPONSE_HEADERS = {
     **DEMO_RESPONSE_HEADERS,
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; "
-        "img-src data: https://images.unsplash.com; base-uri 'none'; form-action 'none'"
+        "img-src data: https://images.unsplash.com https://scaled-images.timma.fi; base-uri 'none'; form-action 'none'"
     ),
 }
 

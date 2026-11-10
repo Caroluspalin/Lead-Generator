@@ -18,7 +18,7 @@ import logging
 import re
 import secrets
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
@@ -29,7 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .demo_icons import icon_svg, service_icon_names
 from .text_quality import find_forbidden_words, repeated_phrases
-from .utils.site_content import SiteFacts
+from .utils.site_content import SiteFacts, SiteService
+from .utils.timma import TimmaData
 from .utils.unsplash import DemoPhoto, photo_url, unsplash_home_url, with_utm
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,11 @@ SERVICES_LEAD_BOOKING = "Varatkaa aika verkossa tai puhelimitse."
 # Kun hinnat ovat yrityksen omalta sivulta, huomautus ei puhu hinnoista (ne näkyvät palveluissa)
 DEFAULT_PRICE_NOTE_SITE = "Ajanvaraus puhelimitse."
 SITE_PRICES_NOTE = "Hinnat nykyiseltä sivultanne."
+TIMMA_PRICES_NOTE = "Hinnat Timma-sivultanne."
+# Kuvat yhdestä lähteestä per demo: Timman kuvat vain jos niitä on vähintään näin monta, muuten Unsplash
+TIMMA_MIN_IMAGES = 3
+IMAGE_NOTE_TIMMA = "Kuvat Timma-sivultanne"
+IMAGE_NOTE_EXAMPLE = "Kuvat ovat esimerkkejä"
 TOKEN_BYTES = 32  # secrets.token_urlsafe(32) -> 43 merkkiä, 256 bittiä satunnaisuutta
 
 
@@ -266,6 +272,71 @@ class OpeningPeriod(BaseModel):
     close: str = Field(pattern=r"^(([01]\d|2[0-3]):[0-5]\d|24:00)$")  # 24:00 = keskiyö
 
 
+class PriceItem(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    price: Optional[str] = Field(default=None, max_length=24)
+    duration: Optional[str] = Field(default=None, max_length=24)
+    description: Optional[str] = Field(default=None, max_length=400)
+
+
+class PriceCategory(BaseModel):
+    name: str = Field(max_length=80)
+    items: list[PriceItem] = Field(min_length=1)
+
+
+class DemoTimma(BaseModel):
+    """Yrityksen Timma-sivulta generoinnin hetkellä (app/utils/timma.py). Ei arvostelutekstejä eikä henkilöitä."""
+    booking_url: str = Field(pattern=r"^https://timma\.fi/yritys/[a-z0-9-]+$")
+    address: Optional[str] = Field(default=None, max_length=200)
+    rating_avg: Optional[float] = Field(default=None, ge=0, le=5)
+    rating_count: int = Field(default=0, ge=0)
+    price_list: list[PriceCategory] = Field(default_factory=list)
+    # Vain jos Timmassa on vähintään TIMMA_MIN_IMAGES kuvaa; silloin Unsplashia ei käytetä lainkaan
+    images: list[str] = Field(default_factory=list, max_length=8)
+
+    @property
+    def has_prices(self) -> bool:
+        return any(item.price for cat in self.price_list for item in cat.items)
+
+
+def format_price(cents: int, from_price: bool = False) -> str:
+    euros, rest = divmod(cents, 100)
+    amount = f"{euros} €" if rest == 0 else f"{euros},{rest:02d} €"
+    return f"alk. {amount}" if from_price else amount
+
+
+def format_duration(minutes: int) -> str:
+    hours, mins = divmod(minutes, 60)
+    if not hours:
+        return f"{mins} min"
+    return f"{hours} h" if not mins else f"{hours} h {mins} min"
+
+
+def demo_timma(data: TimmaData) -> DemoTimma:
+    categories: dict[str, list[PriceItem]] = {}
+    for s in data.services:
+        categories.setdefault(s.category, []).append(PriceItem(
+            name=s.name,
+            price=format_price(s.price_cents, s.from_price) if s.price_cents is not None else None,
+            duration=format_duration(s.duration_min) if s.duration_min else None,
+            description=s.description,
+        ))
+    return DemoTimma(
+        booking_url=data.booking_url,
+        address=data.address,
+        rating_avg=data.rating_avg,
+        rating_count=data.rating_count,
+        price_list=[PriceCategory(name=name, items=items) for name, items in categories.items()],
+        images=data.images if len(data.images) >= TIMMA_MIN_IMAGES else [],
+    )
+
+
+def timma_prompt_facts(data: TimmaData) -> SiteFacts:
+    """Timman palveluiden nimet AI:n lähteeksi (ilman hintoja: hinnat tulevat vain koodista)."""
+    names = list(dict.fromkeys(s.name for s in data.services if 2 <= len(s.name) <= 60))
+    return SiteFacts(services=[SiteService(name=n) for n in names[:20]])
+
+
 class DemoStoredContent(DemoContent):
     # Haettu Place Detailsista generoinnin hetkellä; osa demoa, ei erillistä Places-välimuistia
     opening_hours: list[str] = Field(default_factory=list, max_length=7)
@@ -274,6 +345,18 @@ class DemoStoredContent(DemoContent):
     images: DemoImages = Field(default_factory=DemoImages)
     # Sisältö kirjoitettu yrityksen nykyisen sivun tietojen pohjalta (sähköpostin maininta)
     site_based: bool = False
+    timma: Optional[DemoTimma] = None
+
+
+def timma_price_list(content: DemoStoredContent, template: str) -> list[PriceCategory]:
+    """Timman hinnasto näytetään vain pohjissa, joissa on ajanvaraus (muissa AI:n palvelulista)."""
+    return content.timma.price_list if content.timma and template in BOOKING_TEMPLATES else []
+
+
+def shows_prices(content: DemoStoredContent, template: str) -> bool:
+    return any(s.price for s in content.services) or any(
+        item.price for cat in timma_price_list(content, template) for item in cat.items
+    )
 
 
 # Keksityt faktat: arvostelut, palkinnot, historia, sitaatit (label, regex)
@@ -995,8 +1078,28 @@ def longest_segment(name: str) -> int:
     return max(2, min(30, max((len(seg) for seg in parts), default=2)))
 
 
-def site_prices_note(content: DemoContent) -> Optional[str]:
-    return SITE_PRICES_NOTE if any(s.price for s in content.services) else None
+def site_prices_note(content: DemoStoredContent, template: str) -> Optional[str]:
+    if any(s.price for s in content.services):
+        return SITE_PRICES_NOTE
+    return TIMMA_PRICES_NOTE if shows_prices(content, template) else None
+
+
+def image_note(content: DemoStoredContent) -> Optional[str]:
+    if content.timma and content.timma.images:
+        return IMAGE_NOTE_TIMMA
+    return IMAGE_NOTE_EXAMPLE if content.images.hero or content.images.mood else None
+
+
+def _timma_view(url: str) -> ImageView:
+    # Timma antaa yhden 1080 px version; rajaus CSS:llä (object-fit). Ei kuvaajamainintaa: yrityksen omat kuvat
+    return ImageView(src=url, srcset=f"{url} 1080w", credit_name="", credit_url="", unsplash_url="")
+
+
+def _with_timma(business: DemoBusiness, content: DemoStoredContent) -> DemoBusiness:
+    """Timma-sivun varauslinkki (kaikki Varaa aika -napit) ja osoite."""
+    if content.timma is None:
+        return business
+    return replace(business, booking_url=content.timma.booking_url, address=content.timma.address or business.address)
 
 
 def banner_text(business: DemoBusiness, sender: DemoSender) -> str:
@@ -1014,10 +1117,12 @@ def render_demo_html(
 ) -> str:
     template, color_scheme = validate_template_choice(template, color_scheme)
     tpl = TEMPLATES[template]
+    business = _with_timma(business, content)
     if tpl.version >= 2:
         return _render_v2(template, color_scheme, content, business, sender, utm_app)
     icons = service_icon_names([(s.name, s.description) for s in content.services], template)
     images = content.images
+    timma_images = content.timma.images if content.timma else []
     return _env.get_template(f"{template}.html.j2").render(
         template=template,
         services_title=tpl.services_title,
@@ -1027,14 +1132,21 @@ def render_demo_html(
         font_face_css=font_face_css(template),
         content=content,
         services=[(s, icon_svg(name)) for s, name in zip(content.services, icons)],
-        site_prices_note=site_prices_note(content),
+        site_prices_note=site_prices_note(content, template),
         icon=icon_svg,
-        hero_image=_image_view(images.hero, (640, 1080, 1600, 2200), utm_app) if images.hero else None,
-        mood_images=[_image_view(p, (480, 800, 1200), utm_app) for p in images.mood],
+        hero_image=(
+            _timma_view(timma_images[0]) if timma_images
+            else _image_view(images.hero, (640, 1080, 1600, 2200), utm_app) if images.hero else None
+        ),
+        mood_images=(
+            [_timma_view(u) for u in timma_images[1:4]] if timma_images
+            else [_image_view(p, (480, 800, 1200), utm_app) for p in images.mood]
+        ),
         business=business,
         sender=sender,
         tel=phone_to_tel(business.phone),
         banner=banner_text(business, sender),
+        image_note=image_note(content),
     )
 
 
@@ -1073,21 +1185,31 @@ def _render_v2(
     mood_widths, mood_ratio = _V2_MOOD[template]
     images = content.images
     rows = week_rows(content)
-    photos = ([images.hero] if images.hero else []) + list(images.mood)
+    timma_images = content.timma.images if content.timma else []
+    photos = [] if timma_images else ([images.hero] if images.hero else []) + list(images.mood)
+    if timma_images:
+        hero_image: Optional[ImageView] = _timma_view(timma_images[0])
+        mood_images = [_timma_view(u) for u in timma_images[1:5]]
+    else:
+        hero_image = _image_view(images.hero, hero_widths, utm_app, hero_ratio) if images.hero else None
+        mood_images = [_image_view(p, mood_widths, utm_app, mood_ratio) for p in images.mood]
     return _env.get_template(f"{template}.html.j2").render(
         template=template,
         palette=palette,
         theme_color=scheme.theme,
         tpl=tpl,
         content=content,
-        site_prices_note=site_prices_note(content),
+        site_prices_note=site_prices_note(content, template),
+        price_list=timma_price_list(content, template),
+        timma=content.timma,
+        image_note=image_note(content),
         services_lead=(
             SERVICES_LEAD_BOOKING if business.booking_url and template in BOOKING_TEMPLATES else tpl.services_lead
         ),
         about_title=content.about_title or tpl.about_title,
         asset=asset,
-        hero_image=_image_view(images.hero, hero_widths, utm_app, hero_ratio) if images.hero else None,
-        mood_images=[_image_view(p, mood_widths, utm_app, mood_ratio) for p in images.mood],
+        hero_image=hero_image,
+        mood_images=mood_images,
         # Kuvaajat kerran alatunnisteessa (sama kuvaaja voi olla useassa kuvassa)
         credits=list({p.photographer_name: _image_view(p, (640,), utm_app) for p in photos}.values()),
         unsplash_url=unsplash_home_url(utm_app),
@@ -1143,7 +1265,7 @@ def screenshot_demo(html: str) -> bytes:
             else:
                 route.fulfill(status=200, content_type=asset.content_type, body=asset.body)
             return
-        if url.startswith("https://images.unsplash.com/") or url.startswith("data:"):
+        if url.startswith(("https://images.unsplash.com/", "https://scaled-images.timma.fi/", "data:")):
             route.continue_()
             return
         route.abort()

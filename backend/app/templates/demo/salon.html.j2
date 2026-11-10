@@ -11,6 +11,7 @@
 {% if hero_image %}<link rel="preload" as="image" href="{{ hero_image.src }}" imagesrcset="{{ hero_image.srcset }}" imagesizes="(min-width: 64rem) 58vw, 100vw" fetchpriority="high">{% endif %}
 {% endblock %}
 {% block body %}
+{% import "_timma.html.j2" as timma_osat %}
 {# Varaa aika: yrityksen oma ajanvarausalusta jos se on tiedossa, muuten puhelin #}
 {% set varaus = business.booking_url %}
 <header class="yla">
@@ -41,13 +42,14 @@
     </div>
   </section>
 
-  {% if summary or address_lines or business.phone %}
+  {% if summary or address_lines or business.phone or (timma and timma.rating_count) %}
   <section class="tanaan" aria-label="Aukiolo ja osoite">
     <div class="kehys">
       <dl class="tanaan-rivi">
         {% if summary %}<div><dt>Tänään</dt><dd data-tanaan>{{ summary }}</dd></div>{% endif %}
         {% if address_lines %}<div><dt>Osoite</dt><dd>{{ address_lines | join(', ') }}</dd></div>{% endif %}
         {% if business.phone %}<div><dt>Puhelin</dt><dd>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}</dd></div>{% endif %}
+        {{ timma_osat.arviot(timma) }}
       </dl>
     </div>
   </section>
@@ -56,11 +58,15 @@
   <section id="palvelut" class="palvelut-osio" aria-labelledby="palvelut-otsikko">
     <div class="kehys">
       <h2 id="palvelut-otsikko">{{ tpl.services_title }}</h2>
+      {% if price_list %}
+      {{ timma_osat.hinnasto(price_list) }}
+      {% else %}
       <ul class="palvelut n{{ content.services | length }}">
         {% for service in content.services %}
         <li><h3>{{ service.name }}{% if service.price %} <span class="hinta">{{ service.price }}</span>{% endif %}</h3><p>{{ service.description }}</p></li>
         {% endfor %}
       </ul>
+      {% endif %}
       <p class="huom">{{ services_lead }} {{ content.price_note }}{% if site_prices_note %} <span class="hinnat-lahde">{{ site_prices_note }}</span>{% endif %}</p>
     </div>
   </section>

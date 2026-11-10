@@ -31,7 +31,7 @@ test('serves published demo with security headers', async () => {
   assert.equal(await res.text(), '<!doctype html><title>Demo</title>');
   assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8');
   assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
-  assert.match(res.headers.get('content-security-policy') ?? '', /img-src data: https:\/\/images\.unsplash\.com/);
+  assert.match(res.headers.get('content-security-policy') ?? '', /img-src data: https:\/\/images\.unsplash\.com https:\/\/scaled-images\.timma\.fi;/);
   assert.equal(res.headers.get('cache-control'), 'no-store');
   assert.deepEqual(bucket.keys, [`demos/${TOKEN}.html`]);
 });

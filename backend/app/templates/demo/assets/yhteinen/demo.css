@@ -23,3 +23,16 @@
 
 .ohitus { position: absolute; left: 1rem; top: -4rem; z-index: 10; padding: 0.6rem 1rem; background: #111; color: #fff; }
 .ohitus:focus { top: 1rem; }
+
+/* Timma-sivulta tuotu hinnasto ja arvio (salon, barber). Värit ja fontit peritään pohjasta. */
+.timma-hinnasto { display: grid; gap: 1.75rem; margin-top: 1.25rem; }
+@media (min-width: 48rem) { .timma-hinnasto { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 3rem; } }
+.timma-ryhma h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.timma-ryhma ul { margin: 0; padding: 0; list-style: none; }
+.timma-ryhma li { padding: 0.6rem 0; border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
+.timma-rivi { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; margin: 0; }
+.timma-nimi { flex: 1 1 12rem; font-weight: 600; overflow-wrap: anywhere; }
+.timma-kesto { font-size: 0.875em; }
+.timma-hinta { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timma-kuvaus { margin: 0.2rem 0 0; font-size: 0.875em; }
+.timma-arvio { white-space: nowrap; }

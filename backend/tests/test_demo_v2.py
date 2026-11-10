@@ -284,7 +284,7 @@ def test_template_switch_swaps_default_price_note_but_keeps_custom(client_a: Tes
     lead_id = cafe_demo["lead_id"]
     res = client_a.patch(f"/leads/{lead_id}/demo", json={"template": "services"}).json()
     assert res["content"]["price_note"] == price_note_for("services")
-    edited = {k: v for k, v in res["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based")}
+    edited = {k: v for k, v in res["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
     edited["price_note"] = "Kahvi kolme euroa, pulla neljä."
     client_a.patch(f"/leads/{lead_id}/demo", json={"content": edited})
     res = client_a.patch(f"/leads/{lead_id}/demo", json={"template": "cafe"}).json()

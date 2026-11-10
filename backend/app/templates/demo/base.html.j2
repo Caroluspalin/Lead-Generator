@@ -161,7 +161,7 @@ body.has-call{padding-bottom:84px}
 <a class="skip" href="#main">Siirry sisältöön</a>
 
 <div class="demo-bar" role="note">
-  <span class="long">{{ banner }}</span><span class="short">Luonnos – ei virallinen sivu · {{ sender.name }}</span>{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %}<span class="long"> · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a></span>{% endif %}
+  <span class="long">{{ banner }}</span><span class="short">Luonnos – ei virallinen sivu · {{ sender.name }}</span>{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %}<span class="long"> · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a></span>{% endif %}{% if image_note %} · {{ image_note }}{% endif %}
 </div>
 
 <header class="site-header">

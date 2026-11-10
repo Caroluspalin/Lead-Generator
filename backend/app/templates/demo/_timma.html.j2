@@ -1,0 +1,26 @@
+{# Timma-sivulta tuodut osat (salon, barber). Tyylit yhteinen/demo.css: neutraalit, perivät pohjan värit. #}
+
+{% macro hinnasto(price_list) %}
+<div class="timma-hinnasto">
+  {% for cat in price_list %}
+  <div class="timma-ryhma">
+    {% if cat.name %}<h3>{{ cat.name }}</h3>{% endif %}
+    <ul>
+      {% for item in cat.items %}
+      <li>
+        <p class="timma-rivi"><span class="timma-nimi">{{ item.name }}</span>{% if item.duration %}<span class="timma-kesto">{{ item.duration }}</span>{% endif %}{% if item.price %}<span class="timma-hinta">{{ item.price }}</span>{% endif %}</p>
+        {% if item.description %}<p class="timma-kuvaus">{{ item.description }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{# Vain keskiarvo ja määrä; arvostelut luetaan Timmasta #}
+{% macro arviot(timma) %}
+{% if timma and timma.rating_avg is not none and timma.rating_count %}
+<div><dt>Arviot</dt><dd><a class="timma-arvio" href="{{ timma.booking_url }}" rel="noopener noreferrer"><span aria-hidden="true">★</span> {{ '%.1f' | format(timma.rating_avg) | replace('.', ',') }} · {{ timma.rating_count }} {{ 'arvostelu' if timma.rating_count == 1 else 'arvostelua' }} Timmassa</a></dd></div>
+{% endif %}
+{% endmacro %}

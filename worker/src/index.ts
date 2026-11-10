@@ -53,7 +53,7 @@ export function assetKey(path: string, version: string | null): string | null {
 export const SECURITY_HEADERS: Record<string, string> = {
   'X-Robots-Tag': 'noindex, nofollow',
   'Content-Security-Policy':
-    "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://images.unsplash.com; " +
+    "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://images.unsplash.com https://scaled-images.timma.fi; " +
     "font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
@@ -63,7 +63,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
 // Version 2 demo: omat tiedostot samasta osoitteesta, ei inlineä
 export const CSP_V2 =
   "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; " +
-  "img-src data: https://images.unsplash.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "img-src data: https://images.unsplash.com https://scaled-images.timma.fi; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const ASSET_HEADERS: Record<string, string> = {
   'X-Robots-Tag': 'noindex, nofollow',
