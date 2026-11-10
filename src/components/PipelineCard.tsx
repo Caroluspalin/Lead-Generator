@@ -11,6 +11,9 @@ import {
   Ban,
   LayoutTemplate,
   XCircle,
+  Rocket,
+  RefreshCw,
+  Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
@@ -85,7 +88,46 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setEmailWithDemo(true);
     setEmailModalOpen(true);
   };
-  const { findEmail, setDoNotContact } = usePipeline();
+  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma } = usePipeline();
+  const [autodemoRunning, setAutodemoRunning] = useState(false);
+  const [timmaRefreshing, setTimmaRefreshing] = useState(false);
+  // Sama ehto kuin backendin timma_slug(): vain yrityssivu, ei /pro/-markkinointisivuja
+  const hasTimmaPage = /^https:\/\/timma\.fi\/yritys\/[a-z0-9-]+\/?(\?.*)?$/.test(agency.website ?? '');
+
+  // Generoi + julkaisee demon (Timma-tiedoilla jos on). Ei sähköpostia: liidi jää tarkistettavaksi.
+  const handleAutodemo = async () => {
+    if (!window.confirm('Generate and publish a demo now? An existing demo is regenerated and its manual edits are replaced. No email is sent.')) return;
+    setAutodemoRunning(true);
+    try {
+      const demo = await runAutodemo(agency.id);
+      toast.success(`Demo published${demo.public_url ? `: ${demo.public_url}` : ''}. Review it before contacting.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Autodemo failed');
+    } finally {
+      setAutodemoRunning(false);
+    }
+  };
+
+  const handleMarkReviewed = async () => {
+    try {
+      await markReviewed(agency.id);
+      toast.success('Marked as reviewed');
+    } catch {
+      toast.error('Failed to update review status');
+    }
+  };
+
+  const handleRefreshTimma = async () => {
+    setTimmaRefreshing(true);
+    try {
+      await refreshTimma(agency.id);
+      toast.success('Timma details refreshed. Regenerate the demo to use them.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Timma refresh failed');
+    } finally {
+      setTimmaRefreshing(false);
+    }
+  };
 
   const handleToggleDoNotContact = async () => {
     const next = !agency.do_not_contact;
@@ -229,6 +271,18 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           ) : (
             <span className="text-fg-subtle">None</span>
           )}
+          {hasTimmaPage && (
+            <button
+              type="button"
+              onClick={handleRefreshTimma}
+              disabled={timmaRefreshing}
+              title={agency.timma_fetched_at ? `Timma details fetched ${new Date(agency.timma_fetched_at).toLocaleDateString()}` : 'Timma details not fetched yet'}
+              className={`ml-2.5 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg disabled:opacity-60 ${linkClass}`}
+            >
+              <RefreshCw size={11} className={timmaRefreshing ? 'animate-spin' : ''} />
+              {timmaRefreshing ? 'Refreshing…' : 'Refresh Timma'}
+            </button>
+          )}
         </dd>
 
         <dt className="text-fg-subtle">Email</dt>
@@ -316,6 +370,15 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         />
       </div>
 
+      {agency.review_before_contact && (
+        <div className="mt-2.5 flex items-center gap-2 px-2.5 py-1.5 rounded border border-warning/30 bg-warning/10 text-fg text-xs font-medium">
+          <Eye size={13} className="shrink-0 text-warning" />
+          <span className="flex-1">Review demo before contacting</span>
+          <button onClick={handleMarkReviewed} className={`text-2xs text-fg-muted hover:text-fg ${linkClass}`}>
+            Mark reviewed
+          </button>
+        </div>
+      )}
       {/* Outreach: AI Draft + Call script + Demo (estetty jos do not contact) */}
       {agency.do_not_contact && (
         <div className="mt-2.5 flex items-center gap-2 px-2.5 py-1.5 rounded border border-danger/30 bg-danger/10 text-fg text-xs font-medium">
@@ -350,9 +413,20 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           {preparingDemo ? 'Preparing…' : 'Demo'}
         </button>
       </div>
-      {preparingDemo && (
+      <div className="mt-1.5 flex">
+        <button
+          onClick={handleAutodemo}
+          disabled={agency.do_not_contact || autodemoRunning}
+          title={agency.do_not_contact ? 'This lead is marked do not contact' : 'Generate and publish a demo (Timma details if available), no email'}
+          className={actionClass}
+        >
+          {autodemoRunning ? <Loader2 size={13} className="shrink-0 animate-spin" /> : <Rocket size={13} className="shrink-0" />}
+          {autodemoRunning ? 'Publishing demo…' : 'Autodemo'}
+        </button>
+      </div>
+      {(preparingDemo || autodemoRunning) && (
         <p role="status" className="mt-1 text-2xs text-fg-subtle text-center">
-          Preparing demo, can take ~10 s
+          {autodemoRunning ? 'Generating and publishing, can take ~20 s' : 'Preparing demo, can take ~10 s'}
         </p>
       )}
       <button

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import type { Agency, SavedAgency, PipelineStatus } from '../types/agency';
+import type { Agency, Demo, SavedAgency, PipelineStatus } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { useAuth } from './AuthContext';
 
@@ -15,6 +15,9 @@ interface PipelineContextValue {
   dismissFromPipeline: (agency: SavedAgency) => Promise<void>;
   findEmail: (id: number) => Promise<SavedAgency>;
   setDoNotContact: (id: number, value: boolean) => Promise<void>;
+  runAutodemo: (id: number) => Promise<Demo>;
+  markReviewed: (id: number) => Promise<void>;
+  refreshTimma: (id: number) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -140,6 +143,41 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
   };
 
+  // Timma-tiedot (jos on) + demo + julkaisu; backend merkitsee liidin tarkistettavaksi. Ei sähköpostia.
+  const runAutodemo = async (id: number): Promise<Demo> => {
+    const res = await apiFetch(`/leads/${id}/autodemo`, { method: 'POST' });
+    if (!res.ok) {
+      const body: { detail?: string } = await res.json().catch(() => ({}));
+      throw new Error(body.detail ?? `Autodemo failed: ${res.status}`);
+    }
+    const demo: Demo = await res.json();
+    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? { ...a, review_before_contact: true } : a)));
+    return demo;
+  };
+
+  const markReviewed = async (id: number) => {
+    const res = await apiFetch(`/leads/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review_before_contact: false }),
+    });
+    if (!res.ok) {
+      throw new Error(`Update failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  };
+
+  const refreshTimma = async (id: number) => {
+    const res = await apiFetch(`/leads/${id}/timma/refresh`, { method: 'POST' });
+    if (!res.ok) {
+      const body: { detail?: string } = await res.json().catch(() => ({}));
+      throw new Error(body.detail ?? `Timma refresh failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  };
+
   const removeFromPipeline = async (id: number) => {
     const res = await apiFetch(`/leads/${id}`, {
       method: 'DELETE',
@@ -177,6 +215,9 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         dismissFromPipeline,
         findEmail,
         setDoNotContact,
+        runAutodemo,
+        markReviewed,
+        refreshTimma,
         refresh,
       }}
     >

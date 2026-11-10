@@ -425,3 +425,56 @@ def test_text_edit_keeps_timma(
     assert res.json()["content"]["timma"] == demo["content"]["timma"]
     page = client_a.get(f"/demo/{demo['public_path']}").text
     assert "timma-hinnasto" in page and "Uusi alaotsikko" in page
+
+
+# --- Autodemo ---
+
+from tests.test_demo_publish import FakeStore, store  # noqa: E402,F401
+
+
+def test_autodemo_generates_publishes_and_flags(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str], store: FakeStore,
+) -> None:
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(3)))
+    lead = make_lead(name="R-Mak parturi", primary_type="barber_shop", website=RMAK_URL)
+    fake_openai.reply = json.dumps(VALID)
+    res = client_a.post(f"/leads/{lead['id']}/autodemo")
+    assert res.status_code == 200, res.text
+    demo = res.json()
+    assert demo["status"] == "published" and demo["public_url"]
+    assert demo["content"]["timma"]["booking_url"] == BOOKING
+    body, _ = store.objects[f"demos/{demo['public_path']}.html"]
+    assert b"timma-hinnasto" in body and IMAGE_NOTE_TIMMA.encode() in body
+    saved = client_a.get("/leads").json()[0]
+    assert saved["review_before_contact"] is True
+    assert client_a.get(f"/leads/{lead['id']}/drafts").json() == []  # ei sähköpostia
+    # Tarkistettu -> merkintä pois
+    assert client_a.patch(f"/leads/{lead['id']}", json={"review_before_contact": False}).json()["review_before_contact"] is False
+
+
+def test_autodemo_without_timma_and_without_publishing(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str], store: FakeStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lead = make_lead(name="Parturi-kampaamo Scissors Room", primary_type="barber_shop",
+                     website="https://timma.fi/pro/book-demo/642fff026759411f4a6cf069")
+    fake_openai.reply = json.dumps(VALID)
+    res = client_a.post(f"/leads/{lead['id']}/autodemo")
+    assert res.status_code == 200, res.text
+    assert res.json()["content"]["timma"] is None and fake_get.calls == []
+    monkeypatch.setattr("app.main.get_r2_config", lambda: None)
+    calls_before = len(fake_openai.calls)
+    assert client_a.post(f"/leads/{lead['id']}/autodemo").status_code == 503
+    assert len(fake_openai.calls) == calls_before
+
+
+def test_autodemo_respects_do_not_contact_and_tenant(
+    client_a: TestClient, client_b: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI],
+    sender_profile: dict[str, Any], store: FakeStore,
+) -> None:
+    lead = make_lead(name="R-Mak parturi", website=RMAK_URL)
+    assert client_b.post(f"/leads/{lead['id']}/autodemo").status_code == 404
+    client_a.patch(f"/leads/{lead['id']}", json={"do_not_contact": True})
+    assert client_a.post(f"/leads/{lead['id']}/autodemo").status_code == 409
+    assert fake_openai.calls == []

@@ -1,13 +1,30 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-09)
+## Mihin jäätiin (päivitetty 2026-11-10)
 
-Viimeisin valmis vaihe: **Phase 17** (Uudet liidit -haku + nykyisen sivun sisältö demoon), commitit
+**Phase 18: Timma-tuonti + autodemo (2026-11-10)**, commitit `e438016` (fetcher + välimuisti), `ddbbbb8` (demo),
+autodemo-commit. Testit: pytest 811 passed, worker `npm test` ok, `npm run lint && npm run build` ok, laatuportti ok.
+Tuotantokantaan ajettu `alembic upgrade head` (migraatio `0d6e4f41c99b`), `alembic check` puhdas.
+
+- Live-ajo (autodemo, oikea OpenAI/Unsplash/R2): R-Mak `https://demo.palinweb.fi/r-mak-parturi-38kut` (Timma: 12
+  palvelua, 5,0 / 262, varauslinkki; Timmassa vain 2 kuvaa → Unsplash + "Kuvat ovat esimerkkejä") ja Scissors Room
+  `https://demo.palinweb.fi/scissors-room-3a5n5` (ilman Timmaa: Googlen linkki on /pro/-markkinointisivu; vanha
+  julkaistu demo generoitiin uudelleen samaan osoitteeseen). Molemmat `review_before_contact = true`. Curlilla: 200,
+  noindex, banneri; v2-CSS `a/...?v=` → 200 `immutable` (ensimmäiset v2-demot livenä).
+- **Worker deployaamatta**: CSP:n `img-src` sallii nyt `https://scaled-images.timma.fi` (koodi + testit), mutta
+  `cd worker && npx wrangler deploy` on ajamatta. Ennen sitä demot, joissa on Timma-kuvat (≥ 3), näyttävät julkaistuna
+  ilman kuvia. R-Mak ja Scissors Room eivät käytä Timma-kuvia.
+- R-Makin Timma-slug `scissor-room-matinkyla` on vanha nimi samalle tilille: Timman nimi "R-Mak Barbershop",
+  osoite (Pyyntitie 1 A) ja puhelin täsmäävät R-Makiin. Scissors Room on eri liike (Sokerilinnantie 2, 02600, 040 0560816).
+- Unsplash-ohjeet tarkistettu: hotlink `urls.raw` (+ ixid), kuvaaja + Unsplash utm-linkein alatunnisteessa, download
+  endpoint kutsutaan käyttöönotossa. Huom: versio 2 mainitsee kuvaajat kerran alatunnisteessa, ei jokaisen kuvan kohdalla.
+
+Edellinen vaihe: **Phase 17** (Uudet liidit -haku + nykyisen sivun sisältö demoon), commitit
 `f8c3403`, `4ce53b7`, `73d3f53` ja SSRF-suoja `c92b677`. Testit: pytest 730 passed, `alembic check` puhdas,
 `npm run lint && npm run build` ok, demojen laatuportti (`scripts/demo_check.py`) ok Chromium + WebKit 320–1440 px.
 
 Ennen käyttöä: `cd backend && alembic upgrade head` (migraatiot `cd994575ba52` PlaceStatus + backfill,
-`abdec4f1ad33` Lead.website_facts).
+`abdec4f1ad33` Lead.website_facts, `0d6e4f41c99b` Lead.timma_data/timma_fetched_at/review_before_contact).
 
 **Oma domain (2026-11-09):** demot osoitteessa `https://demo.palinweb.fi` (Worker `agency-hunter-demos`,
 `routes = [{ pattern = "demo.palinweb.fi", custom_domain = true }]` wrangler.tomlissa, zone palinweb.fi samalla
@@ -78,6 +95,9 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | scraped_at | datetime? | Deep Scan: milloin verkkosivun teksti haettiin |
 | website_facts | str? (JSON) | Laajennettu Deep Scan (`SiteFacts`): palvelut, hinnat ja esittely yrityksen omalta sivulta, tarkistettu sivujen tekstiä vasten. Tyhjä JSON = skannattu ilman käyttökelpoista sisältöä (ei skannata uudelleen) |
 | website_facts_at | datetime? | Milloin laajennettu Deep Scan tehtiin |
+| timma_data | str? (JSON) | `TimmaSnapshot`: status ok / not_found / hidden, slug, data (palvelut, osoite, arvio, kuvat, varauslinkki). Haetaan kerran, uudelleen vain Refreshistä. Käytetään vain jos slug = nykyisen websiten slug |
+| timma_fetched_at | datetime? | Timma-haun päivämäärä |
+| review_before_contact | bool | Oletus false (server_default). Autodemo asettaa true: tarkista demo ennen yhteydenottoa. PATCH false = tarkistettu |
 | email | str? | Vain yrityksen sivustolta oikeasti löytynyt osoite (ei arvailua) tai käsin PATCHilla asetettu |
 | email_source | str? | Mistä löytyi, esim. "mailto on /yhteystiedot", "obfuscated on /" |
 | do_not_contact | bool | Oletus false (server_default). true estää draftin, puhelinskriptin ja lähetyksen (409) |
@@ -173,6 +193,8 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 | DELETE | `/places/{place_id}/dismiss` | Palauta hylätty (rivi poistetaan → näkyy taas uutena). 404 jos ei hylätty (myös toisen käyttäjän) |
 | GET | `/places/dismissed` | Hylätyt: `place_id`, `maps_url` (Google Maps place_id-linkki), `dismissed_at` |
 | POST | `/leads` | Tallenna liidi kantaan (Places-kentät mukaan, `lead_score` lasketaan serverissä). Jos sivu toimii (WEBSITE OK / NOT MOBILE / INSECURE), sähköpostihaku käynnistyy taustalla vastauksen jälkeen |
+| POST | `/leads/{lead_id}/timma/refresh` | Hae Timma-tiedot uudelleen. 422 jos website ei ole `https://timma.fi/yritys/{slug}`, 503 jos `TIMMA_IMPORT_ENABLED=false`, 502 jos haku epäonnistui (ei tallennu) |
+| POST | `/leads/{lead_id}/autodemo` | Timma-tiedot (jos on) + `generate_demo` + `publish_demo` (samat funktiot kuin endpointeissa), sitten `review_before_contact = true`. Ei sähköpostia. 503 ennen AI-kutsua jos R2 puuttuu, 409 DNC, 428 profiili |
 | POST | `/leads/{lead_id}/find-email` | Hae sähköposti heti liidin sivustolta (422 jos sivu ei toimi). Palauttaa päivitetyn liidin; `email` null = ei löytynyt |
 | GET | `/leads` | Hae kaikki tallennetut liidit |
 | GET | `/leads/export?ids=1,2,3` | CSV-export valituille liideille |
@@ -252,12 +274,15 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 - **Bulk Actions**: Leijuva toolbar — Move Stage, AI Drafts, CSV Export, Delete valituille liideille (erissä, 5 kerrallaan)
 - **Deep Scan**: Verkkosivun leipätekstin scraping (requests + BeautifulSoup, 5s timeout) → teksti cachetetaan Lead.website_context -kenttään → OpenAI käyttää sitä personoitujen jäänmurtajien generointiin sähköposteihin. Vikasietoinen: jos scraping epäonnistuu, meili generoidaan ilman personointia. Osittain toimiville sivuille (alla) käytetään laajennettua skannausta, joka täyttää myös website_contextin
 - **Laajennettu Deep Scan** (`app/utils/site_content.py`, BROKEN WEBSITE joka vastaa silti HTML:llä, INSECURE, NOT MOBILE; ei parkkisivuja eikä DNS-virheitä): etusivu + enintään 3 alasivua samalta sivustolta, yksi per luokka (hinnasto, palvelut, meistä; avainsanat polusta tai linkkitekstistä). **robots.txt** (`AgencyHunter`): estetty sivu jätetään hakematta, estetty etusivu = ei skannausta; robots.txt 401/403/5xx/ei vastausta = ei hakuja, 404 = kaikki sallittu. **Viive** 1 s pyyntöjen välillä (tai Crawl-delay, max 5 s). Kuvia ei poimita (img/picture/source/figure poistetaan ennen tekstiä). Yksi AI-kutsu (`SITE_FACTS_SYSTEM_PROMPT`, EMAIL_MODEL) → `{services: [{name, price}], about}`, jonka `verify_site_facts` tarkistaa: palvelun nimi löytyy sivujen tekstistä, hinnan luvut ja valuutta samalla sivulla enintään 160 merkin päässä nimestä, esittelyn sanoista ≥ 75 % sivuilta. Tallennus `Lead.website_facts` kerran per liidi (demo ja sähköposti käyttävät samaa)
+- **Timma-tuonti** (`app/utils/timma.py`): liidin website `https://timma.fi/yritys/{slug}` (täsmälleen https + host timma.fi, ei www, ei /pro/-sivuja, slug `[a-z0-9-]`) → yksi `GET https://timma.fi/api/customers/withservicesandusers/gslug/{slug}/public/v3?lang=fi&country=FI` (sama julkinen JSON, jonka Timman React-sivu hakee; ei kirjautumista). Kiinteä osoite, `allow_redirects=False` (3xx = virhe), timeout 5+10 s, max 512 kt, Content-Type `application/json`, UA `AgencyHunter/1.0 (+https://palinweb.fi)`. robots.txt tyhjä (2026-11-10). Käyttöehdot (timma.fi/terms) eivät kiellä automaattista hakua erikseen, mutta rajaavat käytön palvelun tarkoitukseen; käyttäjä päätti jatkaa (pieni määrä, välimuisti). Poimitaan: palvelut (`forSaleWeb` false pois; nimi, kuvaus, hinta senteissä, `isFromPrice`, kesto, kategoria), osoite, `rating` = [keskiarvo × 10, määrä] (tarkistettu Timman sivulta "5 (262)"), kuvat vain `scaled-images.timma.fi`, kanoninen varauslinkki `gslug`ista. EI: `users` (työntekijät, kuvat), sähköposti, Y-tunnus, arvostelut (`/ratings/`-endpointia ei kutsuta). `hideFromMarketplace` / `noOnlineBookingIndexing` → status hidden, dataa ei tallenneta; `showPrices` false → ei hintoja. Rakenteen muutos tai virhevastaus → `TimmaFetchError`, ei tallenneta, demo tehdään ilman Timmaa (`ensure_timma` nielee kaikki virheet). `TIMMA_IMPORT_ENABLED=false` = ei hakuja eikä tallennetun datan käyttöä. Testit: `tests/test_timma.py`, fixture `tests/fixtures/timma_rmak.json` (henkilötiedot poistettu)
+- **Timma demossa** (`DemoStoredContent.timma` = `DemoTimma`, generoinnin hetkellä): salon ja barber näyttävät AI-palvelulistan sijaan Timman hinnaston kategorioittain (`_timma.html.j2`, tyylit `yhteinen/demo.css`; hinta "25 €" / "alk. 25,50 €", kesto "45 min" / "1 h 15 min", kuvaus) ja huomautuksen "Hinnat Timma-sivultanne.", Tänään-rivissä "★ 5,0 · 262 arvostelua Timmassa" linkkinä Timmaan, osoite Timmasta, kaikki Varaa aika -napit kanoniseen Timma-osoitteeseen (`_with_timma`). Muut pohjat: AI-palvelut (Timman nimet promptissa lähteenä, `timma_prompt_facts`, ilman hintoja). Kuvat yhdestä lähteestä: ≥ 3 Timma-kuvaa (`TIMMA_MIN_IMAGES`) → vain ne, ei Unsplash-hakua, banneriin "· Kuvat Timma-sivultanne"; muuten Unsplash ja "· Kuvat ovat esimerkkejä". Aukioloajat edelleen Googlesta (Timmassa ei ole). PATCH-tekstimuokkaus säilyttää `timma`-osion. CSP `img-src` + `https://scaled-images.timma.fi` (backend v1/v2, Worker), esikatselukuvakaappaus sallii Timman kuvat
+- **Autodemo (UI)**: PipelineCardin "Autodemo" (vahvistus: julkaisee, korvaa muokkaukset, ei sähköpostia) → `POST /leads/{id}/autodemo`; kortissa "Review demo before contacting" + "Mark reviewed"; Website-rivillä "Refresh Timma" vain Timma-yrityssivuille
 - **Hinnat demossa**: malli ei koskaan kirjoita hintoja (`DemoAIService` ilman hintakenttää, `extra=forbid`, € ja numerot hylätään). Promptissa palvelut nimillä ilman hintoja, ja `attach_site_prices` liittää hinnan koodissa vain samalle nimelle (tai yksiselitteinen osittainen osuma). Kun hinta näkyy: merkintä "Hinnat nykyiseltä sivultanne." huomautusrivillä, price_note pohjan `price_note_site` ("Ajanvaraus puhelimitse." / "Kysykää myös muista palveluista." / kahvila "…tuotteista."). Modaalissa hinnan voi poistaa, ei kirjoittaa: PATCH hyväksyy vain `website_facts`issa olevat hinnat (422). `DemoStoredContent.site_based` → demosähköpostin linkkikappale "Tein luonnoksen nykyisten tietojenne pohjalta, …" (`DEMO_LINK_PARAGRAPH_SITE`)
 - **Auth**: Supabase Auth + JWT. Frontend käyttää `@supabase/supabase-js`, session tallentuu selaimeen, access_token lisätään automaattisesti `apiFetch`-helperillä Authorization-headeriin. Backend verifioi JWT:n (`backend/app/auth.py`, `verify_token`-dependency) tukien sekä uusia ES256/RS256-tokeneita JWKS-endpointista (`PyJWKClient`, `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, avainten cache, macOS-venvissä certifi-SSL-context) että legacy-HS256-tokeneita `SUPABASE_JWT_SECRET`-salaisuudella. Algoritmi tunnistetaan tokenin headerista. `AUTH_DISABLED=true` ohittaa verifioinnin dev-kehityksessä. SidebarNav näyttää kirjautuneen käyttäjän emailin ja sign-out-napin
 - **Multi-tenancy**: Lead, EmailDraft ja SearchHistoryEntry sisältävät `user_id`-kentän (Supabase UUID, indexed). Kaikki endpointit suodattavat `user_id == current_user.id`: GET-listat `.where(user_id)`, PATCH/DELETE/single-GET palauttavat 404:n (ei 403:a) jos toisen käyttäjän resurssia yritetään käyttää — ei paljasta resurssien olemassaoloa. POST-operaatiot asettavat `user_id` serverissä `AuthUser.id`:stä (ei clientin syötteestä). `Lead.google_place_id` ei ole enää globaalisti unique — `UniqueConstraint("google_place_id", "user_id")` sallii saman yrityksen useammalle käyttäjälle.
 - **Aikaleimat**: Kaikki datetime-kentät luodaan aikavyöhykkeellisinä (`models.utc_now()` = `datetime.now(timezone.utc)`). Uudet SQLModel-versiot hylkäävät naive-datetimet. Älä käytä `datetime.utcnow()`:ia
 - **Käynnistys**: FastAPI:n `lifespan`-handler kutsuu `create_db_and_tables()`, joka ajaa `create_all`:n vain dev-SQLitessä
-- **Migraatiot (Alembic)**: `backend/alembic.ini` + `backend/migrations/` (`render_as_batch=True` SQLiteä varten, URL `app.database.engine`:stä eli `DATABASE_URL`:sta). Postgresissa skeema vain `alembic upgrade head`:lla. Ketju: `5c3252fb0873` alkuskeema → `a37cda0e085d` ScannedPlace pois → `ab965e378f8b` Lead Places-kentät + lead_score → `b128a7a9e0bd` datetime-sarakkeet TIMESTAMPTZ:ksi (vain Postgres, vain naiivit sarakkeet; SQLite no-op) → `11b71478b845` Lead.website_issue → `af5c0e76b864` Lead.email, email_source, do_not_contact (server_default false olemassa oleville riveille) → `e0c769279b9e` SenderProfile-taulu → `2390d5681096` Demo-taulu → `9148408efe32` Demo.public_slug → `3d717a6775b2` SenderProfile.brand_name. `tests/test_migrations.py` ajaa upgrade + `alembic check` + downgrade/upgrade-kierroksen, joten unohtunut migraatio kaataa CI:n
+- **Migraatiot (Alembic)**: `backend/alembic.ini` + `backend/migrations/` (`render_as_batch=True` SQLiteä varten, URL `app.database.engine`:stä eli `DATABASE_URL`:sta). Postgresissa skeema vain `alembic upgrade head`:lla. Ketju: `5c3252fb0873` alkuskeema → `a37cda0e085d` ScannedPlace pois → `ab965e378f8b` Lead Places-kentät + lead_score → `b128a7a9e0bd` datetime-sarakkeet TIMESTAMPTZ:ksi (vain Postgres, vain naiivit sarakkeet; SQLite no-op) → `11b71478b845` Lead.website_issue → `af5c0e76b864` Lead.email, email_source, do_not_contact (server_default false olemassa oleville riveille) → `e0c769279b9e` SenderProfile-taulu → `2390d5681096` Demo-taulu → `9148408efe32` Demo.public_slug → `3d717a6775b2` SenderProfile.brand_name → `cd994575ba52` PlaceStatus → `abdec4f1ad33` Lead.website_facts → `0d6e4f41c99b` Lead.timma_data, timma_fetched_at, review_before_contact (server_default false). `tests/test_migrations.py` ajaa upgrade + `alembic check` + downgrade/upgrade-kierroksen, joten unohtunut migraatio kaataa CI:n
 - **Olemassa oleva Supabase-kanta** (luotu `create_all`:lla ennen Alembicia): aja kerran `alembic stamp 5c3252fb0873`, sitten `alembic upgrade head`, sitten `alembic check`. Vanhat taulut luotiin `timestamp without time zone` -sarakkeilla; migraatio `b128a7a9e0bd` muuntaa ne `timestamptz`:ksi (`USING col AT TIME ZONE 'UTC'`, arvot olivat naiiveja UTC-aikoja). Migraatio tarkistaa `information_schema`:sta ja muuntaa vain naiivit sarakkeet, koska jo-tz-sarakkeille sama USING siirtäisi arvoja session aikavyöhykkeen verran. Downgrade palauttaa `timestamp without time zone`
 - **Postgres-ajuri**: psycopg (v3). `normalize_database_url()` muuttaa `postgres://` ja `postgresql://` muotoon `postgresql+psycopg://`. `engine_options()` antaa Postgresille `connect_args={"prepare_threshold": None}`: Supabasen transaction pooler (portti 6543) ei tue prepared statementeja, joita psycopg3 muuten alkaa käyttää 5. toistetun kyselyn jälkeen
 - **Postgres-migraatiotestit**: `TEST_POSTGRES_URL=postgresql://... pytest tests/test_migrations.py` ajaa legacy-kanta-simulaation (naiivit sarakkeet, session TZ Europe/Helsinki) ja tuoreen kannan tarkistuksen. Ilman muuttujaa testit ohitetaan (CI). **Testit tyhjentävät `public`-skeeman — älä koskaan osoita niitä Supabaseen**, vain paikalliseen kertakäyttökantaan (esim. `docker run --rm -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:15`)
@@ -329,6 +354,7 @@ R2_BUCKET=agency-hunter-demos
 DEMO_TTL_DAYS=30
 UNSPLASH_ACCESS_KEY=           # demosivujen kuvat, tyhjä = gradientti
 UNSPLASH_APP_NAME=agency_hunter   # attribuutiolinkkien utm_source
+TIMMA_IMPORT_ENABLED=true      # Timma-tuonti demoihin; false = ei hakuja eikä tallennetun datan käyttöä
 SMTP_HOST=         # esim. smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=
@@ -382,6 +408,8 @@ backend/app/utils/scraper.py   — Deep Scan: verkkosivun leipätekstin scraping
 backend/app/utils/site_content.py — Laajennettu Deep Scan: robots.txt, viive, max 3 alasivua, SiteFacts + tarkistus
 backend/app/utils/website_check.py — Sivuanalyysi: analyze_website() -> WebsiteCheck(status, issue); fetch_page() yhteinen sivunhaku
 backend/app/utils/contact_finder.py — Yhteystietohaku: find_contact_email() -> ContactEmail(email, source)
+backend/app/utils/timma.py     — Timma-tuonti: timma_slug(), fetch_timma(), parse_timma() -> TimmaSnapshot
+backend/app/templates/demo/_timma.html.j2 — Timman hinnasto- ja arvio-makrot (salon, barber)
 backend/tests/conftest.py      — Testifixturet: in-memory SQLite, auth-override (client_a/client_b), verkkoesto
 backend/tests/test_*.py        — Leads CRUD, tenant-isolaatio, haku + AI-email, Places API (field mask, sivutus, mukautuva ruudukko, kutsuraja), sivuanalyysi, pisteytys, migraatiot, DB-URL
 .github/workflows/ci.yml       — CI: pytest + npm lint + build

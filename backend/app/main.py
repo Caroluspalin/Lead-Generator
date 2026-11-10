@@ -2585,6 +2585,30 @@ def publish_demo(
     return _demo_out(demo, request)
 
 
+@app.post("/leads/{lead_id}/autodemo", response_model=DemoOut)
+async def autodemo(
+    lead_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    """Demo + julkaisu yhdellä napilla: Timma-tiedot (jos liidillä on Timma-sivu), generointi ja julkaisu
+    olemassa olevilla endpointeilla. Liidi merkitään tarkistettavaksi ennen yhteydenottoa. Ei sähköpostia."""
+    lead = _get_contactable_lead(session, lead_id, user)
+    if get_r2_config() is None:
+        # Ennen AI-kutsua: muuten demo generoitaisiin turhaan ja julkaisu kaatuisi
+        raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
+    await generate_demo(lead_id, request, background_tasks, DemoGenerateRequest(), session, user)
+    published = await asyncio.to_thread(publish_demo, lead_id, request, session, user)
+    session.refresh(lead)
+    lead.review_before_contact, lead.updated_at = True, utc_now()
+    session.add(lead)
+    session.commit()
+    logger.info(f"Autodemo julkaistu (liidi {lead_id}), merkitty tarkistettavaksi ennen yhteydenottoa")
+    return published
+
+
 @app.post("/leads/{lead_id}/demo/unpublish", response_model=DemoOut)
 def unpublish_demo(
     lead_id: int,

@@ -207,6 +207,9 @@ export interface SavedAgency {
   email?: string | null;
   email_source?: string | null;
   do_not_contact: boolean;
+  // Autodemo julkaisi demon: tarkista ennen yhteydenottoa
+  review_before_contact: boolean;
+  timma_fetched_at?: string | null;
   rating?: number | null;
   review_count?: number | null;
   business_status?: BusinessStatus | null;
