@@ -122,6 +122,11 @@ class Lead(SQLModel, table=True):
     # Tyhjä JSON = skannattu ilman käyttökelpoista sisältöä (ei skannata uudelleen joka demolla)
     website_facts: Optional[str] = None
     website_facts_at: Optional[datetime] = None
+    # Timma-tuonti (app/utils/timma.py): TimmaSnapshot JSONina + hakupäivä. Haetaan kerran, uudelleen vain Refreshistä
+    timma_data: Optional[str] = None
+    timma_fetched_at: Optional[datetime] = None
+    # Autodemo julkaisi demon automaattisesti: tarkista demo ennen yhteydenottoa
+    review_before_contact: bool = Field(default=False)
 
     # Yhteystiedot: vain sivustolta oikeasti löytynyt osoite (app/utils/contact_finder.py)
     email: Optional[str] = None
@@ -167,3 +172,4 @@ class LeadUpdate(SQLModel):
     email: Optional[str] = None
     do_not_contact: Optional[bool] = None
     website: Optional[str] = None
+    review_before_contact: Optional[bool] = None

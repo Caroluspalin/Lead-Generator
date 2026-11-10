@@ -1,0 +1,366 @@
+{
+ "businessName": "VIP Haircut Oy",
+ "name": "R-Mak Barbershop",
+ "phone": "+358 40 021 8015",
+ "address": "Pyyntitie 1 A ",
+ "postalCode": "02230",
+ "city": "Espoo",
+ "district": "Matinkylä",
+ "locationInfoForLangs": {
+  "fi": "Matinkylän metro aseman vastapäätä."
+ },
+ "lat": 60.1585608,
+ "lon": 24.7356292,
+ "webpage": null,
+ "facebookPage": null,
+ "instagramPage": "",
+ "tiktokPage": null,
+ "forceMarketplacePrePayment": false,
+ "id": "65e8717ef55f6c1ded666584",
+ "slug": "r-markbarbershop",
+ "gslug": "scissor-room-matinkyla",
+ "rating": [
+  50,
+  262
+ ],
+ "cancellationTermsForLangs": {
+  "fi": "Peruutuksen on tapahduttava viimeistään 24h ennen varattua aikaa. Saman vuorokauden aikana peruutetuista sekä peruuttamattomista ajoista yrityksellä on oikeus periä 50% palvelun hinnasta."
+ },
+ "country": "FI",
+ "customerGroupName": null,
+ "customerGroupId": null,
+ "requireWebReservationAddress": null,
+ "requireWebReservationSSN": null,
+ "hasWebReservationPayment": false,
+ "hasGiftCardShop": false,
+ "giftCardShopValueOptions": [
+  5000,
+  7500,
+  10000,
+  15000,
+  20000
+ ],
+ "giftCardShopAllowCustomAmount": true,
+ "hideFromMarketplace": false,
+ "logoUrl": "https://scaled-images.timma.fi/timma/image/upload/v1744579719/i/db2d1348-5cb7-42a3-a854-4b57a25d02b2-jpeg-43fe49c0-18ae-11f0-ae9f-9563fa9b56e0-customer-logo.jpg",
+ "cancellationPaymentPercent": 0,
+ "hideRatingComments": false,
+ "userPriceInWebReservation": false,
+ "orderNumber": 100,
+ "analyticsTrackingCode": null,
+ "pixelTrackingCode": null,
+ "hasMultiBooking": true,
+ "groupSalonGiftCards": false,
+ "requireWebPayment": false,
+ "webCancellationCloses": 24,
+ "gtmTrackingCode": null,
+ "GA4TrackingCode": null,
+ "discardSalonClosedNotification": false,
+ "allowNonConnectMarketplacePrePayment": null,
+ "noOnlineBookingIndexing": false,
+ "redirectOldOnlineBookingUrlToNew": false,
+ "fallbackMarketplacePrepayments": false,
+ "waitlistInUse": true,
+ "reservationTextForLangs": {},
+ "byAgreementPriceInfoForLangs": {
+  "fi": "\"Sopimuksen mukaan\" tarkoittaa, että sovimme hinnasta ennen palvelun tarjoamista. Lopullinen hinta voi vaihdella materiaalien, tekniikan tai tarvittavan ajan mukaan."
+ },
+ "defaultLanguage": "fi",
+ "publicSettings": {
+  "showImages": false,
+  "showPrices": true,
+  "showRealImages": true,
+  "maxTimeInterval": 15,
+  "customCategories": {
+   "1050": {
+    "icon": "1050",
+    "nameDa": "Hænder/negle",
+    "nameEn": "Hands/nails",
+    "nameEs": "Manos/Uñas",
+    "nameEt": "Käed/küüned",
+    "nameFi": "Kädet/kynnet",
+    "nameLv": "Rokas un nagi",
+    "nameNo": "Hender/negler",
+    "nameRu": "Руки/Ноги",
+    "nameSe": "Händer/naglar",
+    "subCategoryId": 1050
+   },
+   "9500": {
+    "icon": "100",
+    "nameDa": "Brugerdefineret kategori 7",
+    "nameEn": "Custom Category 7",
+    "nameEs": "Categoría propia 7",
+    "nameEt": "Kohandatud Kategooria 7",
+    "nameFi": "Combo",
+    "nameLv": "Pasūtījuma kategorija 7",
+    "nameNo": "Egen kategori 7",
+    "nameRu": "Пользовательская категория 7",
+    "nameSe": "Egen kategori 7",
+    "subCategoryId": 9500
+   }
+  },
+  "reservationColor": "#492b4f",
+  "showAdditionalServicePrices": true
+ },
+ "missingTranslationsForServices": false,
+ "suggestions": null,
+ "description": null,
+ "subCategories": [
+  {
+   "name": "Leikkaukset",
+   "services": [
+    {
+     "name": "Mallinmuutosleikkaus",
+     "description": "Hiusten leikkaus uuteen malliin tarkoittaen, että hiuksiin tehdään merkittävä muutos. Esimerkiksi pitkät hiukset leikataan lyhyeksi polkaksi.",
+     "clientDuration": 45,
+     "duration": 45,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 100,
+     "orderNumber": 3,
+     "price": 3000,
+     "serviceId": 103,
+     "subCategoryId": 100
+    },
+    {
+     "name": "Parturileikkaus",
+     "description": "Lyhyiden hiusten leikkaus tai siistiminen. ",
+     "clientDuration": 30,
+     "duration": 30,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 100,
+     "orderNumber": 4,
+     "price": 2500,
+     "serviceId": 104,
+     "subCategoryId": 100
+    },
+    {
+     "name": "Lasten hiustenleikkaus",
+     "description": "Lasten hiustenleikkaus. Alle 11 vuotiaille.",
+     "clientDuration": 30,
+     "duration": 30,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 100,
+     "orderNumber": 5,
+     "price": 2000,
+     "serviceId": 105,
+     "subCategoryId": 100
+    },
+    {
+     "name": "Koneajo",
+     "description": "Hiusten ajo koneella, koko pää samalla pituudella.",
+     "clientDuration": 15,
+     "duration": 15,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 100,
+     "orderNumber": 6,
+     "price": 2000,
+     "serviceId": 106,
+     "subCategoryId": 100
+    }
+   ],
+   "additionalServices": []
+  },
+  {
+   "name": "Parta",
+   "services": [
+    {
+     "name": "Parran muotoilu",
+     "description": "Parran muotoilu saksilla ja veitsellä. Sisältää rajojen siistimisen veitsellä.",
+     "clientDuration": 30,
+     "duration": 30,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 500,
+     "orderNumber": 2,
+     "price": 2000,
+     "serviceId": 502,
+     "subCategoryId": 500
+    },
+    {
+     "name": "Parran koneajo",
+     "description": "Parranajo koneella, koko parta samalla pituudella.",
+     "clientDuration": 15,
+     "duration": 15,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 500,
+     "orderNumber": 4,
+     "price": 1500,
+     "serviceId": 506,
+     "subCategoryId": 500
+    }
+   ],
+   "additionalServices": []
+  },
+  {
+   "name": "Muut hiuspalvelut",
+   "services": [
+    {
+     "name": "Hiustenpesu",
+     "description": null,
+     "clientDuration": 15,
+     "duration": 15,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 600,
+     "orderNumber": 1,
+     "price": 500,
+     "serviceId": 601,
+     "subCategoryId": 600
+    }
+   ],
+   "additionalServices": []
+  },
+  {
+   "name": "Ihokarvojen poisto",
+   "services": [
+    {
+     "name": "Ihokarvojen poisto vahalla",
+     "description": "Kulmakarvat, nenäkarvat, korvakarvat",
+     "clientDuration": 15,
+     "duration": 15,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 1200,
+     "orderNumber": 1,
+     "price": 1000,
+     "serviceId": 1217,
+     "subCategoryId": 1200
+    },
+    {
+     "name": "Kulmakarvojen poisto lankatekniikalla",
+     "description": "Sisältää kulmat, ylähuuli ja kasvot.",
+     "clientDuration": 30,
+     "duration": 30,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 1200,
+     "orderNumber": 2,
+     "price": 2000,
+     "serviceId": 1218,
+     "subCategoryId": 1200
+    }
+   ],
+   "additionalServices": []
+  },
+  {
+   "name": "Combo",
+   "services": [
+    {
+     "name": "Hiustenleikkaus ja parran muotoilu (lyhyt parta)",
+     "description": "Hiustenleikkaus ja parran muotoilu (lyhyt parta)",
+     "clientDuration": 45,
+     "duration": 45,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 9500,
+     "orderNumber": 1,
+     "price": 3500,
+     "serviceId": 9501,
+     "subCategoryId": 9500
+    },
+    {
+     "name": "Hiustenleikkaus ja parran muotoilu (pitkä parta)",
+     "description": "Hiustenleikkaus ja parran muotoilu (pitkä parta)",
+     "clientDuration": 45,
+     "duration": 45,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 9500,
+     "orderNumber": 2,
+     "price": 4000,
+     "serviceId": 9502,
+     "subCategoryId": 9500
+    },
+    {
+     "name": "Hiustenleikkaus ja parran koneajo",
+     "description": "Hiustenleikkaus ja parran koneajo",
+     "clientDuration": 30,
+     "duration": 30,
+     "forSaleWeb": true,
+     "isFromPrice": false,
+     "isLastMinute": false,
+     "isOffPeak": false,
+     "lastMinutePrice": null,
+     "nextFreeTime": "2026-11-11T09:00:00+00:00",
+     "offPeakPrice": null,
+     "orderCategoryId": 9500,
+     "orderNumber": 3,
+     "price": 3000,
+     "serviceId": 9503,
+     "subCategoryId": 9500
+    }
+   ],
+   "additionalServices": []
+  }
+ ],
+ "images": [
+  {
+   "url": "https://scaled-images.timma.fi/timma/image/upload/w_1080,c_limit,q_auto/v1744579708/c/r-mak-barbershop-3d66aa80-18ae-11f0-bc96-63853b1364bb.jpg",
+   "alt": "R-Mak Barbershop"
+  },
+  {
+   "url": "https://scaled-images.timma.fi/timma/image/upload/w_1080,c_limit,q_auto/v1744579729/c/r-mak-barbershop-49c2ba80-18ae-11f0-9f77-430b7bf145e4.jpg",
+   "alt": "R-Mak Barbershop"
+  }
+ ]
+}

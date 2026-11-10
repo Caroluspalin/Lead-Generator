@@ -83,6 +83,7 @@ from .utils.site_content import (
     verify_site_facts,
 )
 from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_booking_url, is_business_booking_page, is_social_media_url
+from .utils.timma import TimmaData, TimmaFetchError, TimmaSnapshot, fetch_timma, timma_slug
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
@@ -156,6 +157,8 @@ logger = logging.getLogger(__name__)
 # Julkaistujen demojen elinaika ja vanhenemisajon väli
 DEMO_TTL_DAYS = int(os.getenv("DEMO_TTL_DAYS", "30"))
 DEMO_EXPIRY_INTERVAL_SECONDS = int(os.getenv("DEMO_EXPIRY_INTERVAL_SECONDS", str(6 * 3600)))
+# Timma-tuonti päälle/pois ilman koodimuutoksia (false: ei hakuja, tallennettua dataa ei käytetä)
+TIMMA_IMPORT_ENABLED = os.getenv("TIMMA_IMPORT_ENABLED", "true").strip().lower() != "false"
 
 
 async def _demo_expiry_loop() -> None:
@@ -1086,6 +1089,27 @@ def update_lead(
     session.add(db_lead)
     session.commit()
     session.refresh(db_lead)
+    return db_lead
+
+
+@app.post("/leads/{lead_id}/timma/refresh", response_model=Lead)
+async def refresh_timma(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    """Hakee liidin Timma-sivun tiedot uudelleen (muuten haetaan vain kerran, demon generoinnissa)."""
+    db_lead = session.get(Lead, lead_id)
+    if not db_lead or db_lead.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not TIMMA_IMPORT_ENABLED:
+        raise HTTPException(503, "Timma import is disabled (TIMMA_IMPORT_ENABLED)")
+    if timma_slug(db_lead.website) is None:
+        raise HTTPException(422, "Lead website is not a Timma business page (https://timma.fi/yritys/...)")
+    before = db_lead.timma_fetched_at
+    await ensure_timma(session, db_lead, refresh=True)
+    if db_lead.timma_fetched_at == before:
+        raise HTTPException(502, "Timma fetch failed, try again later")
     return db_lead
 
 # 5. POISTA LIIDI
@@ -2197,6 +2221,51 @@ async def ensure_site_facts(session: Session, lead: Lead) -> tuple[Optional[Site
         f"esittely {'kyllä' if facts.about else 'ei'}"
     )
     return facts, results
+
+
+def lead_timma(lead: Lead) -> Optional[TimmaData]:
+    """Käyttökelpoinen tallennettu Timma-data, tai None (pois päältä, ei haettu, piilotettu, ei löytynyt)."""
+    if not TIMMA_IMPORT_ENABLED or not lead.timma_data:
+        return None
+    try:
+        snapshot = TimmaSnapshot.model_validate_json(lead.timma_data)
+    except ValueError:
+        logger.warning(f"Liidin {lead.id} timma_data ei ole kelvollinen, ohitetaan")
+        return None
+    # Website on voinut vaihtua haun jälkeen: vanhan sivun dataa ei käytetä
+    return snapshot.data if snapshot.status == "ok" and snapshot.slug == timma_slug(lead.website) else None
+
+
+async def ensure_timma(session: Session, lead: Lead, *, refresh: bool = False) -> Optional[TimmaData]:
+    """Timma-sivun tiedot kerran per liidi (välimuisti Lead.timma_data). refresh=True hakee uudelleen.
+
+    Verkko- tai muotovirhettä ei tallenneta (seuraava kerta yrittää uudelleen); not_found ja hidden
+    tallennetaan, jotta niitä ei haeta joka demolla.
+    """
+    slug = timma_slug(lead.website)
+    if not TIMMA_IMPORT_ENABLED or slug is None:
+        return None
+    if lead.timma_data and not refresh:
+        try:
+            if TimmaSnapshot.model_validate_json(lead.timma_data).slug == slug:
+                return lead_timma(lead)
+        except ValueError:
+            pass
+    try:
+        snapshot = await asyncio.to_thread(fetch_timma, slug)
+    except TimmaFetchError as e:
+        logger.warning(f"Timma-haku epäonnistui (liidi {lead.id}, {slug}): {e}")
+        return None
+    lead.timma_data, lead.timma_fetched_at = snapshot.model_dump_json(), utc_now()
+    session.add(lead)
+    session.commit()
+    session.refresh(lead)
+    data = snapshot.data
+    logger.info(
+        f"Timma (liidi {lead.id}, {slug}): {snapshot.status}"
+        + (f", {len(data.services)} palvelua, {len(data.images)} kuvaa, arvio {data.rating_avg}/{data.rating_count}" if data else "")
+    )
+    return data
 
 
 async def generate_demo_content(
