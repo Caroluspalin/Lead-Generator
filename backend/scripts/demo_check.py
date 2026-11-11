@@ -607,6 +607,11 @@ def premium_hero_checks(base: str, samples: list[Sample]) -> int:
                         problems.append("yläpalkin nimi katkeaa")
                     if width < 768 and state["vali"] > 40:
                         problems.append(f"tyhjä väli nappien ja tietojen välissä {state['vali']:.0f} px")
+                    if width < 768:
+                        # Yläpalkin nappi piilossa niin kauan kuin heron nappi näkyy
+                        shown = page.evaluate("() => getComputedStyle(document.querySelector('.yla .nappi-pieni')).visibility")
+                        if shown != "hidden":
+                            problems.append("yläpalkin nappi näkyy heron napin kanssa")
                     ratios: list[float] = []
                     before = page.evaluate(_FRAME_SIG_JS)
                     for fraction in (0, 0.2, 0.4, 0.6):

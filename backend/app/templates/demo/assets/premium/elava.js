@@ -1,6 +1,6 @@
 // Premium-pohjan elävöitys. Sivu toimii kokonaan ilman tätä: tämä ajoittaa puhelimen varauspalkin,
 // korostaa hinnaston aktiivisen kategorian ja piirtää heron ruutusarjan (kamera liikkuu vierityksen mukana).
-// Tyylit tyylit.css:ssä: html.js, html.on-vieritetty, .hero.on-ohi, .tausta.on-elokuva, .palkki.on-esilla, a[aria-current].
+// Tyylit tyylit.css:ssä: html.js, html.on-vieritetty, html.napit-poissa, .hero.on-ohi, .tausta.on-elokuva, .palkki.on-esilla, a[aria-current].
 (function () {
   var hero = document.querySelector(".hero");
   if (!hero || !("IntersectionObserver" in window)) return;
@@ -15,6 +15,15 @@
     hero.classList.toggle("on-ohi", ohi);
     if (palkki) palkki.classList.toggle("on-esilla", ohi);
   }, { rootMargin: "-33% 0px 0px 0px" }).observe(hero);
+
+  // Puhelimen yläpalkin Varaa aika / Soita näkyy vasta, kun heron oma nappi on poissa ruudulta
+  // (ei kahta samaa nappia yhtä aikaa). Ilman tätä skriptiä molemmat näkyvät.
+  var heronNapit = hero.querySelector(".napit");
+  if (heronNapit) {
+    new IntersectionObserver(function (osumat) {
+      juuri.classList.toggle("napit-poissa", !osumat[osumat.length - 1].isIntersecting);
+    }).observe(heronNapit);
+  }
 
   // Ison näytön yläpalkki on läpinäkyvä vain sivun alussa: vierittäessä kuva liikkuu sen alla, joten
   // palkki saa taustan heti

@@ -1028,7 +1028,10 @@ def test_premium_script_is_progressive_enhancement() -> None:
     assert 'document.createElement("canvas")' in js and 'addEventListener("load", aloita)' in js
     assert "saveData" in js and "data-ruudut-l" in js and "data-ruudut-p" in js
     # Yläpalkki: ilman skriptiä tausta aina, skriptillä läpinäkyvä vain sivun alussa
-    assert ".js:not(.on-vieritetty) .yla::before { opacity: 0; }" in PREMIUM_CSS and '"on-vieritetty"' in js
+    assert ".js:not(.on-vieritetty) .yla::before { opacity: 0; }" in PREMIUM_CSS
+    # Puhelimen yläpalkin nappi vasta, kun heron nappi on poissa; ilman skriptiä (ei .js) molemmat näkyvät
+    assert "@media (max-width: 63.99rem) { .js:not(.napit-poissa) .yla .nappi-pieni { visibility: hidden; } }" in PREMIUM_CSS
+    assert '"napit-poissa"' in js and 'hero.querySelector(".napit")' in js and '"on-vieritetty"' in js
     assert '.tausta.on-elokuva .still { visibility: hidden; }' in PREMIUM_CSS
 
 
