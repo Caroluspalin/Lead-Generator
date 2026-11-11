@@ -1,6 +1,46 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-10)
+## Mihin jäätiin (päivitetty 2026-11-11)
+
+**Premium-parturipohjan videohero (2026-11-11), haara `premium-pohja-video`** (haarautettu `premium-pohja`sta, ei
+mergetty, ei julkaistu). Testit: pytest 849 passed, worker `npm test` ok, `npm run lint && npm run build` ok,
+laatuportti ok (Chromium + WebKit 320–1440 px), Lighthouse mobiili suorituskyky 99–100, saavutettavuus 100.
+
+- **Pohja `premium` ("Barber Premium", valitaan käsin, paletit messinki / pullo)**: sama data kuin `barber`-pohjassa
+  (Timma-hinnasto kategorioittain välilehdillä, arvio, varauslinkki, aukiolo). Rakenne: hero → hinnasto vaalealla
+  pinnalla → kuvanauha → esittely → yhteystiedot, puhelimella tarttuva varauspalkki. Fontit Instrument Serif / Sans.
+- **Hero**: koko ruudun makrokuva partaveitsestä tummalla kivellä. HTML:ssä vain still (`<picture>`, AVIF + WebP,
+  esiladattu). `elava.js` piirtää stillin päälle ruutusarjan canvasille: alkuliike itsestään (25 % liikkeestä,
+  1,6 s), loput vierityksen mukaan kahden ruudun ristihäivytyksellä; kuva liikkuu sisältöä hitaammin ja himmenee,
+  kun hinnasto tulee päälle. Ruudut ladataan vasta `load`-tapahtuman jälkeen, joka neljäs ensin. Still jää
+  näkyviin ilman JavaScriptiä, `prefers-reduced-motion`-tilassa, Save-Datalla ja alle 2 Gt:n laitteilla.
+- **Ei videotiedostoa eikä CSP-muutoksia**: ruudut ovat WebP-kuvia omasta osoitteesta (`img-src 'self'`), ei
+  `fetch()`ia. Backendin ja Workerin tiedostotyypit ja CSP ovat ennallaan (`media-src` puuttuu edelleen).
+- **Puhelin (< 64 rem)**: kuva heron yläosassa (780 × 724) ja pitkä liukuväri tummaan, jonka päällä teksti on.
+  Hero on sisältönsä korkuinen, tiedot heti nappien alla. Varaa aika / Soita näkyy 390 × 844 -ruudulla.
+  **Iso näyttö**: kuva koko heron taustana, teksti vasemmalla tumman liukuvärin päällä. Tekstin vieressä ollut
+  kuvalaatikko poistui: Unsplashin / Timman hero-kuva on kuvanauhan ensimmäinen kuva kaikilla leveyksillä.
+- **Yläpalkki**: läpinäkyvä heron kuvan päällä (body on ruudukko, palkki ja sisältö samassa solussa). Isolla
+  näytöllä tarttuu ylös ja saa taustan heti vierittäessä (ilman JavaScriptiä aina). Pitkä nimi rivittyy, ei
+  kolmea pistettä (yli 24 merkkiä: pienempi koko, `logo-pitka`).
+- **Tiedostot** (`templates/demo/assets/premium/`): `hero-l-01…40.webp` (1280 × 720, yhteensä 613 kt),
+  `hero-p-01…24.webp` (780 × 724, 315 kt), stillit `hero-l.avif` 12,8 kt / `.webp` 21,7 kt ja `hero-p.avif`
+  9,1 kt / `.webp` 13,8 kt. `rappaus.avif/.webp` poistettu. Ruutujen määrä luetaan kansiosta
+  (`demo_site.asset_series`), osoitteet `data-ruudut-l` / `data-ruudut-p` -attribuuteissa.
+- **Videon vaihto**: `python scripts/demo_frames.py <video.mp4>` kirjoittaa ruudut ja stillit samoilla nimillä,
+  pohjaa ei muuteta. Parametrit: `--tyopoyta-rajaus` / `--puhelin-rajaus` (ffmpegin crop), `--tyopoyta-osuus` /
+  `--puhelin-osuus` (mikä osa liikkeestä), ruutumäärät ja laadut. Nykyinen sarja:
+  `--tyopoyta-osuus 0:0.75 --puhelin-rajaus 1200:1076:700:0 --puhelin-osuus 0:0.85`. Aja sen jälkeen
+  `scripts/demo_check.py`: se mittaa tekstin kontrastin uusien ruutujen päällä (nyt vähintään 6,3:1).
+- **Videon lähde**: `backend/scripts/demo_lahteet/premium/veitsi-still.png` (Higgsfield, GPT Image 2.6) ja
+  `veitsi.mp4` (Higgsfield, Kling 3.0 Turbo, 1080p, 3 s, lähtökuvana still; ääniraita poistettu). Generoitu
+  2026-11-11, krediittejä kului 6,5. **Kaupallisen käytön ehdot ovat tarkistamatta** (Higgsfieldin tilaus ja
+  mallien ehdot): tarkista ennen kuin premium-demo lähetetään asiakkaalle.
+- **Tekemättä**: (1) merge `premium-pohja-video` → `premium-pohja` / `main`, (2) `cd worker && npx wrangler deploy`
+  (edelleen ajamatta Phase 18:sta; premium tarvitsee `img-src 'self'` -version Workerista), (3) premium-demoa ei
+  ole julkaistu: ensimmäinen julkaisu lataa R2:een noin 70 tiedostoa (1 Mt) kerran, (4) käsin puhelimella:
+  liikkeen sujuvuus iOS Safarissa ja nappien näkyvyys osoitepalkin kanssa, (5) `image_note` sanoo "Kuvat
+  Timma-sivultanne", kun Timmassa on vähintään 3 kuvaa, vaikka heron veitsi on pohjan oma kuva.
 
 **Phase 18: Timma-tuonti + autodemo (2026-11-10)**, commitit `e438016` (fetcher + välimuisti), `ddbbbb8` (demo),
 autodemo-commit. Testit: pytest 811 passed, worker `npm test` ok, `npm run lint && npm run build` ok, laatuportti ok.
@@ -395,8 +435,10 @@ backend/app/models.py          — Lead, LeadCreate, LeadUpdate, SearchHistoryEn
 backend/app/scoring.py         — lead_score(): liidin pisteytys 0-100, painot vakioina
 backend/app/text_quality.py    — Kielletyt sanat (FORBIDDEN_PATTERNS), PRICE_RE, word_count — sähköpostit, skriptit, demot
 backend/app/demo_site.py       — Demosivut: sisältöskeema + validointi, pohjat/värit, Place Details -aukioloajat, renderöinti
-backend/app/templates/demo/    — Jinja2-pohjat: base_v2.html.j2 + cafe/salon/barber, assets/ (CSS, aukiolo.js, fontit + OFL); Classic: base.html.j2 + beauty/restaurant/services, fonts/
-backend/scripts/demo_check.py  — Demopohjien laatuportti: 6 mock-demoa, Chromium + WebKit 320–1440 px, ilman JS:ää, kuva-arkki (--serve Lighthousea varten)
+backend/app/templates/demo/    — Jinja2-pohjat: base_v2.html.j2 + cafe/salon/barber/premium, assets/ (CSS, aukiolo.js, fontit + OFL, premiumin elava.js ja heron ruudut); Classic: base.html.j2 + beauty/restaurant/services, fonts/
+backend/scripts/demo_check.py  — Demopohjien laatuportti: 9 mock-demoa, Chromium + WebKit 320–1440 px, ilman JS:ää, premium-hero liike päällä (nappi, nimi, ruudun vaihto, kontrasti), kuva-arkki (--serve Lighthousea varten)
+backend/scripts/demo_frames.py — Premium-heron ruutusarja videosta: mp4 sisään, työpöytä- ja puhelinruudut + stillit ulos (ffmpeg, cwebp)
+backend/scripts/demo_lahteet/  — Heron videon lähdetiedostot (ei julkaistavia): premium/veitsi.mp4, veitsi-still.png
 backend/app/demo_icons.py      — Palveluiden SVG-ikonit ja avainsanasäännöt
 backend/app/utils/unsplash.py  — Unsplash-haku, kuvien valinta, attribuutio, download tracking
 backend/app/demo_publish.py    — R2-julkaisu (boto3 S3 API): publish/unpublish, konfiguraatio
