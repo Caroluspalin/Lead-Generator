@@ -261,6 +261,8 @@ def test_ensure_timma_fetches_once(session: Session, fake_get: FakeTimma) -> Non
 
 from app.demo_site import (  # noqa: E402
     IMAGE_NOTE_EXAMPLE,
+    IMAGE_NOTE_PREMIUM_EXAMPLE,
+    IMAGE_NOTE_PREMIUM_TIMMA,
     IMAGE_NOTE_TIMMA,
     TIMMA_PRICES_NOTE,
     DemoImages,
@@ -378,8 +380,19 @@ def test_premium_demo_with_timma_uses_same_data_in_its_own_markup(
     assert f'<a class="arvio" href="{BOOKING}" rel="noopener noreferrer"><span class="arvio-luku">5,0</span> 262 arvostelua Timmassa</a>' in html
     assert "Pyyntitie 1 A" in html
     assert "scaled-images.timma.fi" in html and "images.unsplash.com" not in html
-    assert f"· {IMAGE_NOTE_TIMMA}" in html and "Unsplash" not in html
+    assert f"· {IMAGE_NOTE_PREMIUM_TIMMA}" in html and "Unsplash" not in html
     assert '<meta name="robots" content="noindex, nofollow">' in html
+
+
+def test_premium_banner_says_hero_is_illustration_in_every_case() -> None:
+    from app.demo_site import DemoImages, DemoStoredContent, image_note
+    base = DemoStoredContent(**VALID, price_note="Hinnat puhelimitse.")
+    assert IMAGE_NOTE_PREMIUM_EXAMPLE == "Alun kuva on kuvitusta. Muut kuvat ovat esimerkkejä"
+    assert IMAGE_NOTE_PREMIUM_TIMMA == "Alun kuva on kuvitusta. Muut kuvat Timma-sivultanne"
+    # Ilman muita kuvia alun kuva on silti pohjan kuvitus
+    assert image_note(base, "premium") == "Alun kuva on kuvitusta"
+    # Muut pohjat ennallaan
+    assert image_note(base, "barber") is None and image_note(base) is None
 
 
 def test_timma_with_two_images_uses_unsplash_only(

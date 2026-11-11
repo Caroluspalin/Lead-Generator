@@ -52,6 +52,10 @@ TIMMA_PRICES_NOTE = "Hinnat Timma-sivultanne."
 TIMMA_MIN_IMAGES = 3
 IMAGE_NOTE_TIMMA = "Kuvat Timma-sivultanne"
 IMAGE_NOTE_EXAMPLE = "Kuvat ovat esimerkkejä"
+# Premiumin heron veitsi on pohjan oma kuvitus, ei yrityksen kuva: maininta kuuluu kaikkiin premium-demoihin
+IMAGE_NOTE_PREMIUM_LEAD = "Alun kuva on kuvitusta"
+IMAGE_NOTE_PREMIUM_TIMMA = f"{IMAGE_NOTE_PREMIUM_LEAD}. Muut kuvat Timma-sivultanne"
+IMAGE_NOTE_PREMIUM_EXAMPLE = f"{IMAGE_NOTE_PREMIUM_LEAD}. Muut kuvat ovat esimerkkejä"
 TOKEN_BYTES = 32  # secrets.token_urlsafe(32) -> 43 merkkiä, 256 bittiä satunnaisuutta
 
 
@@ -1108,10 +1112,16 @@ def site_prices_note(content: DemoStoredContent, template: str) -> Optional[str]
     return TIMMA_PRICES_NOTE if shows_prices(content, template) else None
 
 
-def image_note(content: DemoStoredContent) -> Optional[str]:
-    if content.timma and content.timma.images:
+def image_note(content: DemoStoredContent, template: str = "") -> Optional[str]:
+    from_timma = bool(content.timma and content.timma.images)
+    has_photos = from_timma or bool(content.images.hero or content.images.mood)
+    if template == "premium":
+        if not has_photos:
+            return IMAGE_NOTE_PREMIUM_LEAD
+        return IMAGE_NOTE_PREMIUM_TIMMA if from_timma else IMAGE_NOTE_PREMIUM_EXAMPLE
+    if from_timma:
         return IMAGE_NOTE_TIMMA
-    return IMAGE_NOTE_EXAMPLE if content.images.hero or content.images.mood else None
+    return IMAGE_NOTE_EXAMPLE if has_photos else None
 
 
 def _timma_view(url: str) -> ImageView:
@@ -1228,7 +1238,7 @@ def _render_v2(
         site_prices_note=site_prices_note(content, template),
         price_list=timma_price_list(content, template),
         timma=content.timma,
-        image_note=image_note(content),
+        image_note=image_note(content, template),
         services_lead=(
             SERVICES_LEAD_BOOKING if business.booking_url and template in BOOKING_TEMPLATES else tpl.services_lead
         ),
