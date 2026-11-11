@@ -36,12 +36,14 @@ const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-[abcdefghjkmnpqrstuvwxyz2
 export const isDemoPath = (path: string): boolean => TOKEN_RE.test(path) || SLUG_RE.test(path);
 
 // Sama kuin backendin demo_site: ryhmä = pohjan tunniste tai "yhteinen", tiiviste = SHA-256:n 10 ensimmäistä heksaa
-const ASSET_PATH_RE = /^a\/([a-z]{2,20})\/([a-z0-9-]+\.(css|js|woff2))$/;
+const ASSET_PATH_RE = /^a\/([a-z]{2,20})\/([a-z0-9-]+\.(css|js|woff2|webp|avif))$/;
 const ASSET_DIGEST_RE = /^[0-9a-f]{10}$/;
 const ASSET_TYPES: Record<string, string> = {
   css: 'text/css; charset=utf-8',
   js: 'text/javascript; charset=utf-8',
   woff2: 'font/woff2',
+  webp: 'image/webp',
+  avif: 'image/avif',
 };
 
 export function assetKey(path: string, version: string | null): string | null {
@@ -60,10 +62,10 @@ export const SECURITY_HEADERS: Record<string, string> = {
   'Cache-Control': 'no-store',
 };
 
-// Version 2 demo: omat tiedostot samasta osoitteesta, ei inlineä
+// Version 2 demo: omat tiedostot (myös pohjan kuvat) samasta osoitteesta, ei inlineä
 export const CSP_V2 =
   "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; " +
-  "img-src data: https://images.unsplash.com https://scaled-images.timma.fi; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "img-src 'self' data: https://images.unsplash.com https://scaled-images.timma.fi; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const ASSET_HEADERS: Record<string, string> = {
   'X-Robots-Tag': 'noindex, nofollow',

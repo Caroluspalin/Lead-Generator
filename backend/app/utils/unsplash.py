@@ -51,7 +51,7 @@ _DETAIL_RE = re.compile(
 )
 # Hiuspohjissa (salon, barber) eläinkuvat ym. eivät kuulu aiheeseen, vaikka haku tuo ne ("animal fur")
 _OFF_TOPIC_RE = re.compile(r"\b(animals?|fur|dogs?|cats?|pets?|puppy|kitten|horses?|sheep|wool|yarn|feathers?)\b", re.IGNORECASE)
-OFF_TOPIC_TEMPLATES = {"salon", "barber"}
+OFF_TOPIC_TEMPLATES = {"salon", "barber", "premium"}
 # Kampaamon kuviin lopputulos (kiiltävät, laitetut, värjätyt hiukset, kampaus takaa), ei pörröä
 _SALON_AVOID_RE = re.compile(r"\b(frizz\w*|static|messy|tangl\w*|unkempt|flyaways?|electric\w*|bed ?head|wild)\b",
                              re.IGNORECASE)
@@ -165,6 +165,9 @@ _TEMPLATE_QUERIES: dict[str, list[tuple[Optional[tuple[str, ...]], list[str]]]] 
     "barber": [
         (None, ["barbershop interior", "barber tools"]),
     ],
+    "premium": [
+        (None, ["barbershop interior", "barber tools"]),
+    ],
 }
 
 
@@ -250,7 +253,7 @@ def search_photos(query: str, access_key: str, per_page: int = SEARCH_PER_PAGE) 
 
 # Pohjat, joissa hero ja osioiden kuvat tarvitsevat eri aiheen (kahvila: yläkulmasta kuvattu kuppi
 # pyöreään heroon, leivonnaiset ja kahvila osioihin). Molemmat haut aina, tulokset vuorotellen.
-MIXED_QUERY_TEMPLATES = {"cafe", "salon", "barber"}
+MIXED_QUERY_TEMPLATES = {"cafe", "salon", "barber", "premium"}
 
 
 def uses_both_queries(template: str) -> bool:

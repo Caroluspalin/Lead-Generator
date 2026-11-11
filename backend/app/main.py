@@ -2655,12 +2655,12 @@ DEMO_RESPONSE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store",
 }
-# Versio 2: omat CSS/JS/fontit samasta osoitteesta, ei inline-tyylejä eikä -skriptejä (sama kuin Workerissa)
+# Versio 2: omat CSS/JS/fontit/kuvat samasta osoitteesta, ei inline-tyylejä eikä -skriptejä (sama kuin Workerissa)
 DEMO_V2_RESPONSE_HEADERS = {
     **DEMO_RESPONSE_HEADERS,
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; "
-        "img-src data: https://images.unsplash.com https://scaled-images.timma.fi; base-uri 'none'; form-action 'none'"
+        "img-src 'self' data: https://images.unsplash.com https://scaled-images.timma.fi; base-uri 'none'; form-action 'none'"
     ),
 }
 

@@ -149,6 +149,9 @@ test('format 2 demo gets CSP that allows own files but no inline code', async ()
   assert.match(csp, /style-src 'self';/);
   assert.match(csp, /script-src 'self';/);
   assert.match(csp, /font-src 'self';/);
+  // Pohjan omat kuvat (/a/...) samasta osoitteesta; ei media-src:ää
+  assert.match(csp, /img-src 'self' data: https:\/\/images\.unsplash\.com https:\/\/scaled-images\.timma\.fi;/);
+  assert.doesNotMatch(csp, /media-src/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.doesNotMatch(csp, /unsafe-inline/);
 });
@@ -197,6 +200,20 @@ test('asset content type comes from extension', async () => {
   );
 });
 
+test('template images are served as webp and avif', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set('assets/premium/abcdef0123/rappaus.avif', { body: 'avif' });
+  bucket.objects.set('assets/premium/abcdef0123/rappaus.webp', { body: 'webp' });
+  const avif = await handleRequest(get('/a/premium/rappaus.avif?v=abcdef0123'), env(bucket), NOW);
+  assert.equal(avif.status, 200);
+  assert.equal(avif.headers.get('content-type'), 'image/avif');
+  assert.equal(avif.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.equal(
+    (await handleRequest(get('/a/premium/rappaus.webp?v=abcdef0123'), env(bucket), NOW)).headers.get('content-type'),
+    'image/webp',
+  );
+});
+
 test('malformed asset paths and missing version are 404 without touching R2', async () => {
   const bucket = new FakeBucket();
   for (const path of [
@@ -207,6 +224,9 @@ test('malformed asset paths and missing version are 404 without touching R2', as
     '/a/cafe/sub/tyylit.css?v=0123456789',
     '/a/Cafe/tyylit.css?v=0123456789',
     '/a/cafe/OFL.txt?v=0123456789',
+    '/a/barber_premium/tyylit.css?v=0123456789',
+    '/a/premium/rappaus.png?v=0123456789',
+    '/a/premium/video.mp4?v=0123456789',
   ]) {
     assert.equal((await handleRequest(get(path), env(bucket), NOW)).status, 404, path);
   }

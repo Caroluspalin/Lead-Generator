@@ -354,6 +354,34 @@ def test_demo_with_timma_uses_prices_booking_rating_and_images(
     assert '<meta name="robots" content="noindex, nofollow">' in html
 
 
+def test_premium_demo_with_timma_uses_same_data_in_its_own_markup(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
+    fake_get: FakeTimma, unsplash_calls: list[str],
+) -> None:
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(3)))
+    lead = make_lead(name="R-Mak parturi", phone="040 0218015", primary_type="barber_shop", website=RMAK_URL,
+                     address="Pyyntitie 1 A, 02230 Espoo, Suomi", website_status="NO WEBSITE")
+    fake_openai.reply = json.dumps(VALID)
+    demo, html = _demo_html(client_a, lead["id"], "premium")
+
+    assert demo["template"] == "premium" and demo["color_scheme"] == "messinki"
+    assert unsplash_calls == []  # kuvat yhdestä lähteestä: Timma
+    # Timman hinnat näkyvät, joten huomautus ei puhu hinnoista (sama kuin barber-pohjassa)
+    assert demo["content"]["price_note"] == "Kysykää myös muista palveluista."
+    # Hinnasto kategorioittain pohjan omalla merkkauksella, rivit vievät ajanvaraukseen
+    assert "<h3>Leikkaukset</h3>" in html and "<h3>Ihokarvojen poisto</h3>" in html
+    assert '<span class="rivi-nimi">Parturileikkaus</span>' in html and '<span class="rivi-hinta">25 €</span>' in html
+    assert f'<a class="rivi" href="{BOOKING}" rel="noopener noreferrer">' in html
+    assert TIMMA_PRICES_NOTE in html
+    booking_links = re.findall(r'<a class="nappi[^"]*" href="([^"]+)"[^>]*>Varaa aika', html)
+    assert booking_links and set(booking_links) == {BOOKING}
+    assert f'<a class="arvio" href="{BOOKING}" rel="noopener noreferrer"><span class="arvio-luku">5,0</span> 262 arvostelua Timmassa</a>' in html
+    assert "Pyyntitie 1 A" in html
+    assert "scaled-images.timma.fi" in html and "images.unsplash.com" not in html
+    assert f"· {IMAGE_NOTE_TIMMA}" in html and "Unsplash" not in html
+    assert '<meta name="robots" content="noindex, nofollow">' in html
+
+
 def test_timma_with_two_images_uses_unsplash_only(
     client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
     fake_get: FakeTimma, unsplash_calls: list[str],

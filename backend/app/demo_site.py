@@ -41,7 +41,7 @@ PLACE_DETAILS_FIELD_MASK = "regularOpeningHours"
 
 DEFAULT_PRICE_NOTE = "Hinnat ja ajanvaraus puhelimitse."
 # Kun Varaa aika -nappi vie yrityksen ajanvarausalustalle (DemoBusiness.booking_url, vain BOOKING_TEMPLATES)
-BOOKING_TEMPLATES = ("salon", "barber")
+BOOKING_TEMPLATES = ("salon", "barber", "premium")
 DEFAULT_PRICE_NOTE_BOOKING = "Hinnat näette ajanvarauksesta."
 SERVICES_LEAD_BOOKING = "Varatkaa aika verkossa tai puhelimitse."
 # Kun hinnat ovat yrityksen omalta sivulta, huomautus ei puhu hinnoista (ne näkyvät palveluissa)
@@ -130,6 +130,19 @@ TEMPLATES: dict[str, DemoTemplate] = {
         schemes={
             "kyltti": Palette("Sign yellow", "#F2F1EC"),
             "emali": Palette("Enamel green", "#F0F1EC"),
+        },
+    ),
+    # Valitaan käsin (template_for_primary_type ei palauta tätä). Sama data kuin barber-pohjassa
+    "premium": DemoTemplate(
+        label="Barber Premium",
+        services_title="Palvelut",
+        services_lead="Varatkaa aika puhelimitse.",
+        price_note_site="Kysykää myös muista palveluista.",
+        about_title="Meistä",
+        version=2,
+        schemes={
+            "messinki": Palette("Brass", "#131110"),
+            "pullo": Palette("Bottle green", "#10211C"),
         },
     ),
     "beauty": DemoTemplate(
@@ -841,10 +854,13 @@ def _image_view(photo: DemoPhoto, widths: tuple[int, ...], utm_app: str, ratio: 
 
 ASSET_DIR = _TEMPLATE_DIR / "assets"
 SHARED_ASSET_GROUP = "yhteinen"
-ASSET_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
-ASSET_NAME_RE = re.compile(r"^[a-z0-9-]+\.(css|js|woff2)$")
+ASSET_TYPES = {
+    ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2",
+    ".webp": "image/webp", ".avif": "image/avif",
+}
+ASSET_NAME_RE = re.compile(r"^[a-z0-9-]+\.(css|js|woff2|webp|avif)$")
 ASSET_DIGEST_LEN = 10
-_CSS_FONT_URL_RE = re.compile(r'url\("([a-z0-9-]+\.woff2)"\)')
+_CSS_URL_RE = re.compile(r'url\("([a-z0-9-]+\.(?:woff2|webp|avif))"\)')
 
 
 @dataclass(frozen=True)
@@ -865,8 +881,8 @@ _asset_cache: dict[tuple[str, str], tuple[int, DemoAsset]] = {}
 
 
 def demo_asset(group: str, name: str) -> Optional[DemoAsset]:
-    """Tiedosto paketista, tai None. CSS:n fonttiviittauksiin lisätään fontin ?v=, joten CSS:n tiiviste
-    muuttuu myös fontin muuttuessa. Välimuisti tiedoston mtimen mukaan (dev: muokkaus näkyy heti)."""
+    """Tiedosto paketista, tai None. CSS:n fontti- ja kuvaviittauksiin lisätään tiedoston ?v=, joten CSS:n
+    tiiviste muuttuu myös niiden muuttuessa. Välimuisti tiedoston mtimen mukaan (dev: muokkaus näkyy heti)."""
     if not re.fullmatch(r"[a-z]{2,20}", group) or not ASSET_NAME_RE.fullmatch(name):
         return None
     path = ASSET_DIR / group / name
@@ -879,9 +895,9 @@ def demo_asset(group: str, name: str) -> Optional[DemoAsset]:
     body = path.read_bytes()
     if path.suffix == ".css":
         def versioned(match: re.Match[str]) -> str:
-            font = demo_asset(group, match.group(1))
-            return f'url("{match.group(1)}?v={font.digest}")' if font else match.group(0)
-        body = _CSS_FONT_URL_RE.sub(versioned, body.decode("utf-8")).encode("utf-8")
+            linked = demo_asset(group, match.group(1))
+            return f'url("{match.group(1)}?v={linked.digest}")' if linked else match.group(0)
+        body = _CSS_URL_RE.sub(versioned, body.decode("utf-8")).encode("utf-8")
     asset = DemoAsset(
         group=group, name=name, body=body,
         digest=hashlib.sha256(body).hexdigest()[:ASSET_DIGEST_LEN],
@@ -1155,11 +1171,13 @@ _V2_HERO: dict[str, tuple[tuple[int, ...], Optional[float]]] = {
     "cafe": ((640, 960, 1280), 1.0),  # pyöreä allas
     "salon": ((640, 960, 1280), 1.0),  # kaislikko: sama neliökuva seitsemänä suikaleena
     "barber": ((640, 960, 1280), 1.0),  # kulmakyltin kuva
+    "premium": ((640, 960, 1280), 1.25),  # 4:5 kehys heron oikeassa reunassa (iso näyttö) ja kuvanauhassa
 }
 _V2_MOOD: dict[str, tuple[tuple[int, ...], Optional[float]]] = {
     "cafe": ((640, 960, 1280), 1.25),  # 4:5 pystykuvat
     "salon": ((480, 800, 1200), 1.5),  # 2:3 esittely, 3:5 kapeat (CSS rajaa)
     "barber": ((640, 960, 1280), 1.25),  # esittely 3:2/1:1 ja yhteystiedot 4:5 (CSS rajaa)
+    "premium": ((640, 960, 1280), 1.25),  # kuvanauhan 4:5 pystykuvat
 }
 
 

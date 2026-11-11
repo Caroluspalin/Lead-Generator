@@ -126,7 +126,7 @@ def test_v1_templates_have_no_assets() -> None:
 
 
 def test_worker_asset_regexes_match_backend() -> None:
-    assert r"const ASSET_PATH_RE = /^a\/([a-z]{2,20})\/([a-z0-9-]+\.(css|js|woff2))$/;" in WORKER
+    assert r"const ASSET_PATH_RE = /^a\/([a-z]{2,20})\/([a-z0-9-]+\.(css|js|woff2|webp|avif))$/;" in WORKER
     assert "const ASSET_DIGEST_RE = /^[0-9a-f]{10}$/;" in WORKER
 
 
@@ -169,6 +169,12 @@ CONTRAST_PAIRS: dict[str, list[tuple[str, str]]] = {
     "barber": [
         ("musta", "liitu"), ("harmaa", "liitu"), ("musta", "betoni"), ("harmaa-betoni", "betoni"),
         ("liitu", "musta"), ("harmaa-musta", "musta"), ("kyltti-teksti", "kyltti"), ("kyltti-musta", "musta"),
+    ],
+    # valossa = heron kirkkain kohta (rappaus + valot): sen päällä on vain kerman ja himmeän väristä tekstiä
+    "premium": [
+        ("kerma", "pohja"), ("himmea", "pohja"), ("korostus", "pohja"), ("korostus-teksti", "korostus"),
+        ("kerma", "valossa"), ("himmea", "valossa"), ("pohja", "kerma"),
+        ("muste", "paperi"), ("muste-himmea", "paperi"), ("korostus-tumma", "paperi"), ("paperi", "muste"),
     ],
 }
 
@@ -219,7 +225,10 @@ def test_v2_page_has_no_inline_styles_or_scripts(template: str) -> None:
     assert "<style" not in html
     assert " style=" not in html
     scripts = re.findall(r"<script[^>]*>", html)
-    assert len(scripts) == 1 and re.fullmatch(r'<script defer src="a/yhteinen/aukiolo\.js\?v=[0-9a-f]{10}">', scripts[0])
+    # Premium-pohjalla on lisäksi oma progressiivinen skripti (sivu toimii ilman sitä)
+    assert len(scripts) == (2 if template == "premium" else 1)
+    assert re.fullmatch(r'<script defer src="a/yhteinen/aukiolo\.js\?v=[0-9a-f]{10}">', scripts[0])
+    assert all(re.fullmatch(r'<script defer src="a/[a-z]+/[a-z]+\.js\?v=[0-9a-f]{10}">', s) for s in scripts)
 
 
 @pytest.mark.parametrize("template", V2_TEMPLATES)
@@ -739,14 +748,14 @@ def _render_with_booking(template: str, booking_url: Optional[str]) -> str:
                             content=content, business=business, sender=SENDER)
 
 
-@pytest.mark.parametrize("template", ["salon", "barber"])
+@pytest.mark.parametrize("template", ["salon", "barber", "premium"])
 def test_book_button_links_to_booking_platform(template: str) -> None:
     html = _render_with_booking(template, "https://timma.fi/salonki-lumo")
     assert re.search(r'<a class="nappi[^"]*" href="https://timma\.fi/salonki-lumo" rel="noopener noreferrer">Varaa aika</a>', html)
     assert "<iframe" not in html
 
 
-@pytest.mark.parametrize("template", ["salon", "barber"])
+@pytest.mark.parametrize("template", ["salon", "barber", "premium"])
 def test_book_button_without_booking_url_is_phone_link(template: str) -> None:
     html = _render_with_booking(template, None)
     assert "timma" not in html and "verkossa" not in html
@@ -779,7 +788,7 @@ def test_booking_lead_demo_gets_online_price_note_and_follows_template(
     assert res["content"]["price_note"] == "Hinnat näette ajanvarauksesta."
 
 
-@pytest.mark.parametrize("template", ["salon", "barber"])
+@pytest.mark.parametrize("template", ["salon", "barber", "premium"])
 def test_services_line_with_booking_platform(template: str) -> None:
     business = DemoBusiness(
         name="Salonki Lumo", city="Espoo", address="Esimerkkikatu 4, 02100 Espoo, Suomi",
@@ -792,7 +801,7 @@ def test_services_line_with_booking_platform(template: str) -> None:
     assert "Varatkaa aika puhelimitse." not in html
 
 
-@pytest.mark.parametrize("template", ["salon", "barber"])
+@pytest.mark.parametrize("template", ["salon", "barber", "premium"])
 def test_services_line_without_booking_is_unchanged(template: str) -> None:
     html = _render_with_booking(template, None)
     assert '<p class="huom">Varatkaa aika puhelimitse. Hinnat ja ajanvaraus puhelimitse.</p>' in html
@@ -817,3 +826,156 @@ def test_demo_booking_url_only_for_business_pages(website: str, expected: Option
     from app.main import demo_booking_url
     from app.models import Lead
     assert demo_booking_url(Lead(name="X", website=website)) == expected
+
+
+# --- Premium-parturi (valitaan käsin): omat kuvatiedostot, Timma pohjan omalla merkkauksella, elävöitys ---
+
+from app.demo_site import DemoTimma, PriceCategory, PriceItem, template_for_primary_type  # noqa: E402
+
+PREMIUM_CSS = (ASSET_DIR / "premium" / "tyylit.css").read_text()
+
+
+def _premium(name: str = "Terä", timma: Optional[DemoTimma] = None, periods: Optional[list[OpeningPeriod]] = None,
+             images: Any = None, phone: Optional[str] = "050 000 0000") -> str:
+    business = DemoBusiness(name=name, city="Oulu", address="Esimerkkikatu 15, 90100 Oulu, Suomi",
+                            phone=phone, maps_url="https://maps.google.com/?cid=1")
+    content = DemoStoredContent(**VALID, timma=timma, opening_periods=periods or [],
+                                **({"images": images} if images else {}))
+    return render_demo_html(template="premium", color_scheme="messinki", business=business, sender=SENDER,
+                            content=content)
+
+
+def _timma(categories: int = 3) -> DemoTimma:
+    names = ["Leikkaukset", "Parta", "Combo", "Muut"][:categories]
+    return DemoTimma(
+        booking_url="https://timma.fi/yritys/esimerkki", rating_avg=4.9, rating_count=187,
+        price_list=[
+            PriceCategory(name=n, items=[PriceItem(name=f"{n} palvelu", price="25 €", duration="30 min",
+                                                   description="Kuvaus palvelusta.")])
+            for n in names
+        ],
+    )
+
+
+def test_premium_is_never_chosen_automatically_and_uses_barber_images() -> None:
+    assert template_for_primary_type("barber_shop") == "barber"
+    assert unsplash.image_queries("barber_shop", "premium") == unsplash.image_queries("barber_shop", "barber")
+    assert unsplash.uses_both_queries("premium")
+    assert TEMPLATES["premium"].label == "Barber Premium"
+
+
+def test_image_assets_are_served_with_image_types_and_versioned() -> None:
+    avif, webp = demo_asset("premium", "rappaus.avif"), demo_asset("premium", "rappaus.webp")
+    assert avif is not None and webp is not None
+    assert (avif.content_type, webp.content_type) == ("image/avif", "image/webp")
+    html = _premium()
+    assert f'<source srcset="{avif.url}" type="image/avif">' in html
+    assert f'src="{webp.url}"' in html
+    # Pinta ladataan heti, eikä se paina liikaa (mobiili ensin)
+    assert len(avif.body) < 60_000 and len(webp.body) < 80_000
+    assert {a.name for a in template_assets("premium")} >= {"rappaus.avif", "rappaus.webp", "elava.js", "tyylit.css"}
+
+
+def test_v2_csp_allows_own_images_in_backend_and_worker(client_a: TestClient, cafe_demo: dict[str, Any]) -> None:
+    csp = client_a.get(f"/demo/{cafe_demo['public_path']}").headers["content-security-policy"]
+    expected = "img-src 'self' data: https://images.unsplash.com https://scaled-images.timma.fi;"
+    assert expected in csp and "media-src" not in csp
+    assert expected in WORKER.split("export const CSP_V2")[1].split(";\n")[0]
+    # Versio 1 ennallaan: ei omia tiedostoja
+    assert "img-src data: https://images.unsplash.com" in WORKER.split("export const SECURITY_HEADERS")[1].split("};")[0]
+    asset = client_a.get(f"/demo/{demo_asset('premium', 'rappaus.avif').url}")  # type: ignore[union-attr]
+    assert asset.status_code == 200 and asset.headers["content-type"] == "image/avif"
+
+
+def test_premium_fonts_are_self_hosted_with_licenses() -> None:
+    for font in ("instrument-serif.woff2", "instrument-serif-italic.woff2", "instrument-sans.woff2"):
+        assert demo_asset("premium", font) is not None
+        assert f'url("{font}")' in PREMIUM_CSS
+    for license_file in ("OFL-instrument-serif.txt", "OFL-instrument-sans.txt"):
+        assert "SIL Open Font License" in (ASSET_DIR / "premium" / license_file).read_text()
+    assert "http" not in re.sub(r"data:image/svg\+xml,[^\"]+", "", PREMIUM_CSS)
+
+
+def test_premium_timma_price_list_rating_and_category_tabs() -> None:
+    html = _premium(timma=_timma(3))
+    # Kategoriat välilehtinä ja ankkureina
+    assert html.count('<li><a href="#ryhma-') == 3
+    assert '<div class="ryhma" id="ryhma-2">' in html and "<h3>Parta</h3>" in html
+    # Rivi vie ajanvaraukseen; hinta ja kesto näkyvät, ei yhteisen Timma-makron luokkia
+    assert '<a class="rivi" href="https://timma.fi/yritys/esimerkki" rel="noopener noreferrer">' in html
+    assert '<span class="rivi-hinta">25 €</span>' in html and '<span class="rivi-kesto">30 min</span>' in html
+    assert "timma-hinnasto" not in html
+    assert "Hinnat Timma-sivultanne." in html
+    # Vain keskiarvo ja määrä
+    assert '<span class="arvio-luku">4,9</span> 187 arvostelua Timmassa</a>' in html
+    links = re.findall(r'<a class="nappi[^"]*" href="([^"]+)"[^>]*>Varaa aika', html)
+    assert len(links) >= 3 and set(links) == {"https://timma.fi/yritys/esimerkki"}
+
+
+def test_premium_single_category_and_ai_services_have_no_tabs() -> None:
+    assert "valilehdet" not in _premium(timma=_timma(1))
+    html = _premium()
+    assert "valilehdet" not in html and "ryhma-" not in html
+    # AI-palvelut samoina riveinä, ilman varauslinkkiä ja hintaa
+    assert html.count('<div class="rivi">') == len(VALID["services"])
+    assert "rivi-hinta" not in html and "arvio" not in html
+
+
+@pytest.mark.parametrize("name,size", [
+    ("Terä", "xs"), ("R-Mak parturi", "m"), ("Herrasmiesten", "m"), ("Ässä Parturi", "s"),
+    ("Parturi-Kampaamo Kauniaisten Hiuspiste", "l"),
+])
+def test_premium_name_size_follows_length(name: str, size: str) -> None:
+    html = _premium(name=name)
+    assert f'<p class="nimi nimi-{size}" data-pisin="{longest_segment(name)}" aria-hidden="true">' in html
+    assert f".nimi-{size} {{ --nimi-koko:" in PREMIUM_CSS
+    assert f'<a class="logo" href="#sisalto">{name}</a>' in html  # luettava nimi yläpalkissa
+
+
+def test_premium_data_pisin_values_have_css_rules() -> None:
+    assert all(f'[data-pisin="{n}"] {{ --pisin: {n}; }}' in PREMIUM_CSS for n in range(2, 31))
+
+
+def test_premium_images_hero_only_on_wide_screens_and_strip_has_all() -> None:
+    from app.demo_site import DemoImages
+    pool = [_alt(f"p{i}", "barbershop chairs and mirrors") for i in range(5)]
+    hero, mood, options = unsplash.choose_images(pool, "premium")
+    html = _premium(images=DemoImages(hero=hero, mood=mood, options=options))
+    assert len(mood) == 3
+    assert html.count('<li class="kuva') == 4 and html.count('<li class="kuva kuva-hero">') == 1
+    assert 'data-kuvia="3"' in html
+    # Heron kuva on vain ison näytön kehyksessä: lazy, ja preload rajattu leveään näyttöön
+    assert re.search(r'<div class="hero-kuva kuva">\s*<img [^>]*loading="lazy"', html)
+    assert 'media="(min-width: 64rem)">' in html
+    assert "Kuvat: " in html and "Unsplash" in html
+    # Ilman kuvia osio jää pois
+    assert 'class="kuvat' not in _premium() and "hero-kuva" not in _premium()
+
+
+def test_premium_without_phone_or_booking_has_no_bar() -> None:
+    html = _premium(phone=None)
+    assert 'class="palkki"' not in html and "nappi-pieni" not in html
+    assert '<a class="nappi" href="#palvelut">Palvelut</a>' in html
+
+
+def test_premium_motion_is_transform_and_opacity_only_and_off_when_reduced() -> None:
+    frames = re.findall(r"@keyframes [a-z-]+ \{(.*)\}\n", PREMIUM_CSS)
+    assert len(frames) >= 8
+    for body in frames:
+        assert set(re.findall(r"([a-z-]+):", body)) <= {"transform", "opacity"}
+    assert set(re.findall(r"transition: ([a-z]+)", PREMIUM_CSS)) <= {"transform", "opacity", "none"}
+    # Liike vain kun käyttäjä ei ole pyytänyt vähentämään sitä
+    motion = PREMIUM_CSS.split("@media (prefers-reduced-motion: no-preference) {")[1]
+    before = PREMIUM_CSS.split("@media (prefers-reduced-motion: no-preference) {")[0]
+    assert not re.search(r"(?<![a-z-])(animation|scroll-behavior):", before)
+    assert "@supports (animation-timeline: view())" in motion
+    assert "@media (prefers-reduced-motion: reduce) {\n  *, *::before, *::after { animation: none !important; transition: none !important; }" in PREMIUM_CSS
+
+
+def test_premium_script_is_progressive_enhancement() -> None:
+    js = (ASSET_DIR / "premium" / "elava.js").read_text()
+    # Palkin piilotus riippuu html.js-luokasta: ilman skriptiä palkki näkyy heron jälkeen (position: sticky)
+    assert 'document.documentElement.classList.add("js")' in js
+    assert ".js .palkki {" in PREMIUM_CSS and "position: sticky; bottom: 0" in PREMIUM_CSS
+    assert "prefers-reduced-motion: reduce" in js
+    assert "innerHTML" not in js and "eval(" not in js and "fetch(" not in js

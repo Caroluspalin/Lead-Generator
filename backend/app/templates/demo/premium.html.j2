@@ -1,0 +1,192 @@
+{% extends "base_v2.html.j2" %}
+{#
+  Parturi, premium: "Messinki". Tumma rappauspinta, jolla valo liikkuu hitaasti, nimi isona serifinä ja
+  hinnasto menukorttina vaalealla pinnalla. Messinki vain pieninä korostuksina (viivat, numerot, pilleri).
+  Valitaan käsin DemoModalissa, sama data kuin barber-pohjassa. Timman hinnasto ja arvio ovat pohjan omaa
+  merkkausta (ei _timma.html.j2: sen luokat saavat yhteiset neutraalit tyylit demo.css:stä).
+  Toimii ilman JavaScriptiä: elava.js lisää varauspalkin ajoituksen, aktiivisen kategorian ja osoitinvalon.
+  Heron pinta (rappaus.avif/.webp) on generoitu kerran Higgsfieldillä, ei demon generoinnissa.
+#}
+{% block preload %}
+<link rel="preload" href="{{ asset('premium', 'instrument-serif.woff2').url }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ asset('premium', 'instrument-serif-italic.woff2').url }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ asset('premium', 'instrument-sans.woff2').url }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ asset('premium', 'rappaus.avif').url }}" as="image" type="image/avif" fetchpriority="high">
+{% if hero_image %}<link rel="preload" as="image" href="{{ hero_image.src }}" imagesrcset="{{ hero_image.srcset }}" imagesizes="36vw" media="(min-width: 64rem)">{% endif %}
+{% endblock %}
+{% block body %}
+{% set varaus = business.booking_url %}
+{% set nimen_pituus = business.name | length %}
+{% set nimi_koko = 'xs' if nimen_pituus <= 6 else ('s' if nimen_pituus <= 12 else ('m' if nimen_pituus <= 22 else 'l')) %}
+{% set ryhmat = price_list | selectattr('name') | list %}
+{% set kuvat = ([hero_image] if hero_image else []) + mood_images %}
+{% set arvio = timma and timma.rating_avg is not none and timma.rating_count %}
+
+{# Hinnaston rivi: varauslinkki, kun yrityksellä on ajanvaraussivu (koko rivi vie sinne) #}
+{% macro rivi(nimi, hinta, kesto, kuvaus, linkki) %}
+<li>
+  {% if linkki %}<a class="rivi" href="{{ linkki }}" rel="noopener noreferrer">{% else %}<div class="rivi">{% endif %}
+    <span class="rivi-nimi">{{ nimi }}</span><span class="rivi-viiva" aria-hidden="true"></span>{% if hinta %}<span class="rivi-hinta">{{ hinta }}</span>{% endif %}
+    {% if kesto %}<span class="rivi-kesto">{{ kesto }}</span>{% endif %}
+    {% if kuvaus %}<span class="rivi-kuvaus">{{ kuvaus }}</span>{% endif %}
+    {% if linkki %}<span class="piilo">Varaa aika</span>{% endif %}
+  {% if linkki %}</a>{% else %}</div>{% endif %}
+</li>
+{% endmacro %}
+
+<header class="yla">
+  <div class="kehys yla-sisa">
+    <a class="logo" href="#sisalto">{{ business.name }}</a>
+    <nav class="yla-linkit" aria-label="Sivun osiot">
+      <a href="#palvelut">{{ tpl.services_title }}</a>
+      <a href="#meista">Meistä</a>
+      <a href="#yhteys">Yhteystiedot</a>
+    </nav>
+    {# Varaa aika vain yrityksen omaan ajanvarausalustaan; ilman sitä puhelin on varausnappi #}
+    {% if varaus %}<a class="nappi nappi-pieni" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika</a>
+    {% elif tel %}<a class="nappi nappi-pieni" href="tel:{{ tel }}">Soita</a>{% endif %}
+  </div>
+</header>
+
+<main id="sisalto">
+  <section class="hero">
+    <div class="tausta" aria-hidden="true">
+      <picture>
+        <source srcset="{{ asset('premium', 'rappaus.avif').url }}" type="image/avif">
+        <img class="pinta" src="{{ asset('premium', 'rappaus.webp').url }}" alt="" width="1600" height="1600" fetchpriority="high" decoding="async">
+      </picture>
+      <span class="valo"></span>
+      <span class="valo-osoitin"></span>
+      <span class="rae"></span>
+    </div>
+    <div class="kehys hero-sisa{% if not hero_image %} ilman-kuvaa{% endif %}">
+      <div class="hero-teksti">
+        {% if summary %}<p class="tila"><span>Tänään</span> <span data-tanaan>{{ summary }}</span></p>{% endif %}
+        {# Luettava nimi on yläpalkin logossa; tämä on sama nimi isona #}
+        <p class="nimi nimi-{{ nimi_koko }}" data-pisin="{{ nimi_pisin }}" aria-hidden="true"><span>{{ business.name }}</span></p>
+        <h1 data-pisin="{{ pisin(content.hero_title) }}">{{ content.hero_title }}</h1>
+        <p class="hero-lause">{{ content.hero_subtitle }}</p>
+        <div class="napit">
+          {% if varaus %}<a class="nappi" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika</a>{% endif %}
+          {% if tel %}<a class="nappi{% if varaus %} nappi-toissijainen{% endif %}" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
+          {% if not varaus and not tel %}<a class="nappi" href="#palvelut">{{ tpl.services_title }}</a>{% endif %}
+        </div>
+      </div>
+      {% if hero_image %}
+      {# Vain isolla näytöllä (puhelimella sama kuva on kuvanauhan ensimmäinen): lazy, ettei piilotettu kuva lataudu #}
+      <div class="hero-kuva kuva">
+        <img src="{{ hero_image.src }}" srcset="{{ hero_image.srcset }}" sizes="36vw" width="1024" height="1280" alt="" loading="lazy" decoding="async">
+      </div>
+      {% endif %}
+      {% if address_lines or arvio or business.phone %}
+      <dl class="tiedot">
+        {% if address_lines %}<div><dt>Osoite</dt><dd>{{ address_lines | join(', ') }}</dd></div>{% endif %}
+        {% if business.phone %}<div{% if tel %} class="vain-iso"{% endif %}><dt>Puhelin</dt><dd>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}</dd></div>{% endif %}
+        {# Vain keskiarvo ja määrä; arvostelut luetaan Timmasta #}
+        {% if arvio %}<div><dt>Arviot</dt><dd><a class="arvio" href="{{ timma.booking_url }}" rel="noopener noreferrer"><span class="arvio-luku">{{ '%.1f' | format(timma.rating_avg) | replace('.', ',') }}</span> {{ timma.rating_count }} {{ 'arvostelu' if timma.rating_count == 1 else 'arvostelua' }} Timmassa</a></dd></div>{% endif %}
+      </dl>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="jatko">
+    <section id="palvelut" class="hinnasto vaalea" aria-labelledby="palvelut-otsikko">
+      <div class="kehys hinnasto-sisa">
+        <div class="hinnasto-paa">
+          <h2 id="palvelut-otsikko">{{ tpl.services_title }}</h2>
+          <p class="huom">{{ services_lead }} {{ content.price_note }}{% if site_prices_note %} <span class="hinnat-lahde">{{ site_prices_note }}</span>{% endif %}</p>
+        </div>
+        <div class="hinnasto-nav{% if ryhmat | length < 2 %} ei-valilehtia{% endif %}">
+          {% if ryhmat | length > 1 %}
+          <nav class="valilehdet" aria-label="Palveluryhmät">
+            <ul>
+              {% for cat in price_list %}{% if cat.name %}<li><a href="#ryhma-{{ loop.index }}">{{ cat.name }}</a></li>{% endif %}{% endfor %}
+            </ul>
+          </nav>
+          {% endif %}
+          {% if varaus %}<a class="nappi nappi-sivu" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika</a>
+          {% elif tel %}<a class="nappi nappi-sivu" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
+        </div>
+        <div class="lista">
+          {% if price_list %}
+          {% for cat in price_list %}
+          <div class="ryhma" id="ryhma-{{ loop.index }}">
+            {% if cat.name %}<h3>{{ cat.name }}</h3>{% endif %}
+            <ul class="rivit">
+              {% for item in cat.items %}{{ rivi(item.name, item.price, item.duration, item.description, varaus) }}{% endfor %}
+            </ul>
+          </div>
+          {% endfor %}
+          {% else %}
+          <ul class="rivit">
+            {% for service in content.services %}{{ rivi(service.name, service.price, none, service.description, varaus) }}{% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <div class="tumma">
+      {% if kuvat %}
+      <section class="kuvat{% if not mood_images %} vain-hero{% endif %}" aria-label="Kuvia">
+        <ul class="kuvanauha" data-kuvia="{{ mood_images | length }}" tabindex="0">
+          {% for img in kuvat %}
+          <li class="kuva{% if hero_image and loop.first %} kuva-hero{% endif %}"><img src="{{ img.src }}" srcset="{{ img.srcset }}" sizes="(min-width: 64rem) 30vw, 76vw" width="1024" height="1280" alt="" loading="lazy" decoding="async"></li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
+      <section id="meista" class="meista" aria-labelledby="meista-otsikko">
+        <div class="kehys meista-sisa">
+          <h2 id="meista-otsikko" data-pisin="{{ pisin(about_title) }}">{{ about_title }}</h2>
+          <p class="esittely">{{ content.about }}</p>
+        </div>
+      </section>
+    </div>
+
+    <section id="yhteys" class="yhteys vaalea" aria-labelledby="yhteys-otsikko">
+      <div class="kehys yhteys-sisa">
+        <div class="yhteys-teksti">
+          <h2 id="yhteys-otsikko" data-pisin="{{ pisin(street or 'Yhteystiedot') }}">{{ street or "Yhteystiedot" }}</h2>
+          {% if address_lines %}<p class="osoite">{% for line in address_lines %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+          <p class="yhteys-linkit">
+            {% if business.phone %}{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}{% endif %}
+            {% if business.maps_url %}{% if business.phone %}<br>{% endif %}<a href="{{ business.maps_url }}" rel="noopener noreferrer">Avaa kartalla</a>{% endif %}
+          </p>
+          {% if varaus %}<a class="nappi" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika</a>{% endif %}
+        </div>
+        <div class="yhteys-ajat">
+          {% if week %}
+          <dl class="ajat">
+            {% for row in week %}
+            <div data-paiva="{{ row.paiva }}"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
+            {% endfor %}
+          </dl>
+          {% else %}
+          <p class="ei-aikoja">Kysykää aukioloajat puhelimitse.</p>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {# Puhelimen varauspalkki: tarttuu alareunaan heron jälkeen (pelkkä CSS, position: sticky).
+       elava.js piilottaa sen, kunnes heron napit ovat poissa ruudulta. #}
+    {% if varaus or tel %}
+    <nav class="palkki" aria-label="{{ 'Varaa aika tai soita' if varaus else 'Soita' }}">
+      {% if varaus %}<a class="nappi" href="{{ varaus }}" rel="noopener noreferrer">Varaa aika</a>{% if tel %}<a class="nappi nappi-toissijainen" href="tel:{{ tel }}">Soita</a>{% endif %}
+      {% else %}<a class="nappi" href="tel:{{ tel }}">Soita {{ business.phone }}</a>{% endif %}
+    </nav>
+    {% endif %}
+  </div>
+</main>
+
+<footer class="ala">
+  <p class="sanamerkki" aria-hidden="true">{{ business.name }}</p>
+  <div class="kehys ala-sisa">
+    <p>© {{ business.name }}{% if business.city %}, {{ business.city }}{% endif %}</p>
+    {% if credits %}<p class="kiitos">Kuvat: {% for img in credits %}<a href="{{ img.credit_url }}" rel="noopener noreferrer">{{ img.credit_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %} / <a href="{{ unsplash_url }}" rel="noopener noreferrer">Unsplash</a></p>{% endif %}
+  </div>
+</footer>
+<script defer src="{{ asset('premium', 'elava.js').url }}"></script>
+{% endblock %}

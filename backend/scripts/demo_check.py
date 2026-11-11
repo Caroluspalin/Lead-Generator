@@ -34,7 +34,10 @@ from app.demo_site import (  # noqa: E402
     DemoImages,
     DemoSender,
     DemoStoredContent,
+    DemoTimma,
     OpeningPeriod,
+    PriceCategory,
+    PriceItem,
     TEMPLATES,
     content_violations,
     demo_asset,
@@ -46,7 +49,8 @@ from app.utils import unsplash  # noqa: E402
 
 CSP_V2 = (
     "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; "
-    "img-src data: https://images.unsplash.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "img-src 'self' data: https://images.unsplash.com https://scaled-images.timma.fi; "
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 WIDTHS = [320, 360, 375, 390, 414, 768, 1024, 1280, 1440]
 # Kiinteä testihetki: tiistai klo 12 (aukiolo.js lukee ?aika=)
@@ -73,6 +77,14 @@ class Sample:
     content: dict[str, Any]
     periods: list[OpeningPeriod]
     hero_index: int = 0  # eri hero samalle pohjalle, jotta kaksi demoa eivät näytä samalta
+    timma: Optional[DemoTimma] = None  # Timma-sivun hinnasto, arvio ja varauslinkki (kuvat silti Unsplashista)
+
+
+def _hinnasto(spec: dict[str, list[tuple[str, str, str, Optional[str]]]]) -> list[PriceCategory]:
+    return [
+        PriceCategory(name=name, items=[PriceItem(name=n, price=p, duration=d, description=k) for n, p, d, k in items])
+        for name, items in spec.items()
+    ]
 
 
 SAMPLES: list[Sample] = [
@@ -184,6 +196,88 @@ SAMPLES: list[Sample] = [
         periods=[],
         hero_index=1,
     ),
+    # Premium: lyhyt nimi + Timma (12 palvelua, arvio, varauslinkki), pitkä nimi ilman aukioloja ja
+    # hinnat omalta sivulta, sekä keskipitkä nimi ilman hintoja (kuusi AI-palvelua)
+    Sample(
+        slug="tera-v6w7x", template="premium", palette="messinki", name="Terä", city="Kuopio",
+        address="Esimerkkikatu 7, 70100 Kuopio, Suomi", phone="040 000 0000", primary_type="barber_shop",
+        content={
+            "hero_title": "Hiukset ja parta kuntoon",
+            "hero_subtitle": "Hiustenleikkaukset, koneajot ja partatyöt.",
+            "about_title": "Parturi Kuopiossa",
+            "about": "Kertokaa toiveenne, niin leikkaus tehdään niiden mukaan. Ajan voi varata verkossa tai soittamalla.",
+            "services": [
+                {"name": "Hiustenleikkaus", "description": "Leikkaus saksilla tai koneella."},
+                {"name": "Koneajo", "description": "Tasainen koneajo tai häivytys."},
+                {"name": "Parran muotoilu", "description": "Parran siistiminen ja ääriviivat."},
+                {"name": "Lasten leikkaus", "description": "Leikkaukset myös lapsille."},
+            ],
+        },
+        periods=_periods({**{d: [("10:00", "19:00")] for d in WEEKDAYS}, 6: [("10:00", "15:00")]}),
+        timma=DemoTimma(
+            booking_url="https://timma.fi/yritys/esimerkki-parturi", rating_avg=4.9, rating_count=187,
+            price_list=_hinnasto({
+                "Leikkaukset": [
+                    ("Mallinmuutosleikkaus", "30 €", "45 min", "Hiusten leikkaus uuteen malliin tarkoittaen, että hiuksiin tehdään merkittävä muutos. Esimerkiksi pitkät hiukset leikataan lyhyeksi."),
+                    ("Parturileikkaus", "25 €", "30 min", "Lyhyiden hiusten leikkaus tai siistiminen."),
+                    ("Lasten hiustenleikkaus", "20 €", "30 min", None),
+                    ("Koneajo", "20 €", "15 min", "Hiusten ajo koneella, koko pää samalla pituudella."),
+                ],
+                "Parta": [
+                    ("Parran muotoilu", "20 €", "30 min", "Parran muotoilu saksilla ja veitsellä."),
+                    ("Parran koneajo", "15 €", "15 min", None),
+                ],
+                "Muut hiuspalvelut": [("Hiustenpesu", "5 €", "15 min", None)],
+                "Ihokarvojen poisto": [
+                    ("Ihokarvojen poisto vahalla", "alk. 10 €", "15 min", "Kulmakarvat, nenäkarvat, korvakarvat"),
+                    ("Kulmakarvojen poisto lankatekniikalla", "20 €", "30 min", None),
+                ],
+                "Combo": [
+                    ("Hiustenleikkaus ja parran muotoilu (lyhyt parta)", "35 €", "45 min", None),
+                    ("Hiustenleikkaus ja parran muotoilu (pitkä parta)", "40 €", "1 h", None),
+                    ("Hiustenleikkaus ja parran koneajo", "30 €", "30 min", None),
+                ],
+            }),
+        ),
+    ),
+    Sample(
+        slug="kauniaisten-y8z9a", template="premium", palette="pullo", name="Parturi-Kampaamo Kauniaisten Hiuspiste",
+        city="Kauniainen", address="Esimerkkikatu 15, 02700 Kauniainen, Suomi", phone="050 000 0000",
+        primary_type="barber_shop",
+        content={
+            "hero_title": "Leikkaukset ja parranajot Kauniaisissa",
+            "hero_subtitle": "Leikkaus, parta ja kuumapyyhe samalla käynnillä.",
+            "about_title": "Parturi- ja kampaamopalvelut",
+            "about": "Hiukset leikataan toiveiden mukaan, ja partaan saa muotoilun tai ajon. Kysykää vapaita aikoja puhelimitse.",
+            "services": [
+                {"name": "Hiustenleikkaus", "description": "Saksi- ja koneleikkaukset.", "price": "32 €"},
+                {"name": "Parranajo", "description": "Parranajo kuumapyyhkeellä.", "price": "alk. 25 €"},
+                {"name": "Parran muotoilu", "description": "Ääriviivat ja tasaus koneella."},
+            ],
+        },
+        periods=[],
+        hero_index=1,
+    ),
+    Sample(
+        slug="herrasmiesten-b2c3d", template="premium", palette="messinki", name="Herrasmiesten Parturi",
+        city="Oulu", address="Esimerkkikatu 15, 90100 Oulu, Suomi", phone="050 000 0000", primary_type="barber_shop",
+        content={
+            "hero_title": "Leikkaukset ja parranajot Oulussa",
+            "hero_subtitle": "Leikkaus, parta ja kuumapyyhe samalla käynnillä.",
+            "about_title": "Parturi Oulussa",
+            "about": "Hiukset leikataan toiveiden mukaan, ja partaan saa muotoilun tai ajon. Kysykää vapaita aikoja puhelimitse.",
+            "services": [
+                {"name": "Hiustenleikkaus", "description": "Saksi- ja koneleikkaukset."},
+                {"name": "Koneajo", "description": "Tasainen koneajo tai häivytys."},
+                {"name": "Parranajo", "description": "Parranajo kuumapyyhkeellä."},
+                {"name": "Parran muotoilu", "description": "Ääriviivat ja tasaus koneella."},
+                {"name": "Kulmat ja korvat", "description": "Siistiminen leikkauksen yhteydessä."},
+                {"name": "Lasten leikkaus", "description": "Leikkaukset myös lapsille."},
+            ],
+        },
+        periods=_periods({**{d: [("09:00", "17:00")] for d in WEEKDAYS}}),
+        hero_index=2,
+    ),
 ]
 
 
@@ -222,7 +316,7 @@ def render(sample: Sample, images: DemoImages) -> str:
     has_prices = any(s.get("price") for s in sample.content["services"])
     stored = DemoStoredContent(
         **sample.content, price_note=price_note_for(sample.template, has_prices),
-        opening_periods=sample.periods, images=images,
+        opening_periods=sample.periods, images=images, timma=sample.timma,
     )
     return render_demo_html(
         template=sample.template, color_scheme=sample.palette, content=stored,
