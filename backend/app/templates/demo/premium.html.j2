@@ -26,7 +26,8 @@
 {% macro rivi(nimi, hinta, kesto, kuvaus, linkki) %}
 <li>
   {% if linkki %}<a class="rivi" href="{{ linkki }}" rel="noopener noreferrer">{% else %}<div class="rivi">{% endif %}
-    <span class="rivi-nimi">{{ nimi }}</span><span class="rivi-viiva" aria-hidden="true"></span>{% if hinta %}<span class="rivi-hinta">{{ hinta }}</span>{% endif %}
+    {# Pisteviiva vie hintaan: ilman hintaa sitä ei piirretä #}
+    <span class="rivi-nimi">{{ nimi }}</span>{% if hinta %}<span class="rivi-viiva" aria-hidden="true"></span><span class="rivi-hinta">{{ hinta }}</span>{% endif %}
     {% if kesto %}<span class="rivi-kesto">{{ kesto }}</span>{% endif %}
     {% if kuvaus %}<span class="rivi-kuvaus">{{ kuvaus }}</span>{% endif %}
     {% if linkki %}<span class="piilo">Varaa aika</span>{% endif %}
