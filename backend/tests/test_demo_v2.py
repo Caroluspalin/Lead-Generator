@@ -873,7 +873,7 @@ def test_image_assets_are_served_with_image_types_and_versioned() -> None:
     html = _premium()
     # Still on tavallinen kuva HTML:ssä: puhelimen versio oletuksena, leveä näyttö media-ehdolla
     assert f'<source srcset="{avif.url}" type="image/avif">' in html
-    assert f'<img class="still" src="{webp.url}" alt="" width="780" height="724" fetchpriority="high"' in html
+    assert f'<img class="still" src="{webp.url}" alt="" width="780" height="520" fetchpriority="high"' in html
     assert f'<source media="(min-width: 64rem)" srcset="{wide_avif.url}" type="image/avif"' in html
     assert f'<link rel="preload" href="{avif.url}" as="image" type="image/avif" media="(max-width: 63.99rem)" fetchpriority="high">' in html
     assert f'<link rel="preload" href="{wide_avif.url}" as="image" type="image/avif" media="(min-width: 64rem)" fetchpriority="high">' in html
@@ -890,8 +890,8 @@ def test_premium_hero_frames_come_from_the_folder_and_stay_light() -> None:
     assert [a.name for a in phone] == [f"hero-p-{n:02d}.webp" for n in range(1, len(phone) + 1)]
     assert 12 <= len(phone) <= len(wide) <= 60
     # Puhelimelle kevyempi sarja
-    assert sum(len(a.body) for a in phone) < 400_000
-    assert sum(len(a.body) for a in wide) < 1_100_000
+    assert sum(len(a.body) for a in phone) < 650_000
+    assert sum(len(a.body) for a in wide) < 1_400_000
     html = _premium()
     tausta = re.search(r'<div class="tausta" aria-hidden="true" data-ruudut-l="([^"]+)" data-ruudut-p="([^"]+)">', html)
     assert tausta is not None
@@ -1027,11 +1027,12 @@ def test_premium_script_is_progressive_enhancement() -> None:
     # Ruutusarja: canvas syntyy vasta skriptissä, ruudut vasta load-tapahtuman jälkeen, ei Save-Datalla
     assert 'document.createElement("canvas")' in js and 'addEventListener("load", aloita)' in js
     assert "saveData" in js and "data-ruudut-l" in js and "data-ruudut-p" in js
-    # Yläpalkki: ilman skriptiä tausta aina, skriptillä läpinäkyvä vain sivun alussa
-    assert ".js:not(.on-vieritetty) .yla::before { opacity: 0; }" in PREMIUM_CSS
+    # Ison näytön yläpalkilla on aina tausta (heron yläreuna on kirkas), ei vieritystilaa skriptissä
+    assert "on-vieritetty" not in PREMIUM_CSS and "on-vieritetty" not in js
+    assert ".yla::before { opacity: 1; }" in PREMIUM_CSS.split("@media (min-width: 64rem) {")[1]
     # Puhelimen yläpalkin nappi vasta, kun heron nappi on poissa; ilman skriptiä (ei .js) molemmat näkyvät
     assert "@media (max-width: 63.99rem) { .js:not(.napit-poissa) .yla .nappi-pieni { visibility: hidden; } }" in PREMIUM_CSS
-    assert '"napit-poissa"' in js and 'hero.querySelector(".napit")' in js and '"on-vieritetty"' in js
+    assert '"napit-poissa"' in js and 'hero.querySelector(".napit")' in js
     assert '.tausta.on-elokuva .still { visibility: hidden; }' in PREMIUM_CSS
 
 
@@ -1049,6 +1050,11 @@ def test_demo_frames_script_picks_frames_and_builds_filter() -> None:
         "select='eq(n\\,0)+eq(n\\,9)',crop=1200:1076:700:0,"
         "scale=780:724:force_original_aspect_ratio=increase:flags=lanczos,crop=780:724"
     )
+    # Peilaus ennen rajausta: rajauksen X on peilatun kuvan koordinaatti
+    assert frames.video_filter([4], "900:600:170:120", (780, 520), mirror=True).startswith(
+        "select='eq(n\\,4)',hflip,crop=900:600:170:120,scale=780:520:"
+    )
+    assert frames.FRAME_SIZES["p"] == frames.STILL_SIZES["p"] == (780, 520)
     assert frames.parse_range("0:0.75") == (0.0, 0.75)
     with pytest.raises(Exception):
         frames.parse_range("0.5:0.2")

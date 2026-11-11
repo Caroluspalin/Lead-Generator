@@ -37,7 +37,7 @@
 :root {
   /* Messinki: noki, kerma, messinki */
   --pohja: #131110;
-  --valossa: #535150;        /* yläraja heron kirkkaimmalle kohdalle tekstin alla; scripts/demo_check.py mittaa (nyt #433D39) */
+  --valossa: #535150;        /* yläraja heron kirkkaimmalle kohdalle tekstin alla; scripts/demo_check.py mittaa (nyt #4C4947) */
   --kerma: #EDE6DA;
   --himmea: #CFC6B8;
   --korostus: #D2AE70;       /* viivat, numerot, pilleri */
@@ -147,9 +147,9 @@ main { grid-area: 2 / 1; min-width: 0; }
 .yla-linkit { display: none; }
 
 /* Hero: kuva (still tai canvas), paletin sävy, himmennys tekstin taakse ja rae omina kerroksinaan.
-   Puhelimella kuva on heron yläosassa (--kuva-k korkea) ja häipyy pitkällä liukuvärillä tummaan, jonka
-   päällä teksti on. Himmennys pysyy paikallaan tekstin suhteen, vaikka kuva liikkuu sen alla. */
-.hero { --kuva-k: min(92.82vw, 70vh); position: relative; isolation: isolate; overflow: hidden; }
+   Puhelimella kuva on heron yläosassa (--kuva-k korkea, ruutujen suhde 3:2) ja häipyy alaosastaan tummaan,
+   jonka päällä teksti on. Himmennys pysyy paikallaan tekstin suhteen, vaikka kuva liikkuu sen alla. */
+.hero { --kuva-k: min(66.67vw, 50vh); position: relative; isolation: isolate; overflow: hidden; }
 .tausta { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: var(--pohja); }
 .still, .elokuva { position: absolute; left: 0; top: 0; width: 100%; height: var(--kuva-k); max-width: none; object-fit: cover; object-position: 50% 40%; }
 .elokuva { z-index: 1; }
@@ -158,22 +158,22 @@ main { grid-area: 2 / 1; min-width: 0; }
 .himmennys {
   position: absolute; inset: 0; z-index: 3;
   background:
-    linear-gradient(to bottom, color-mix(in srgb, var(--pohja) 62%, transparent), transparent 6.5rem),
+    linear-gradient(to bottom, color-mix(in srgb, var(--pohja) 86%, transparent), color-mix(in srgb, var(--pohja) 80%, transparent) 2.75rem, transparent 5.75rem),
     linear-gradient(to bottom,
-      transparent calc(var(--kuva-k) * 0.3),
-      color-mix(in srgb, var(--pohja) 12%, transparent) calc(var(--kuva-k) * 0.4),
-      color-mix(in srgb, var(--pohja) 34%, transparent) calc(var(--kuva-k) * 0.5),
-      color-mix(in srgb, var(--pohja) 62%, transparent) calc(var(--kuva-k) * 0.6),
-      color-mix(in srgb, var(--pohja) 84%, transparent) calc(var(--kuva-k) * 0.72),
-      color-mix(in srgb, var(--pohja) 96%, transparent) calc(var(--kuva-k) * 0.86),
+      transparent calc(var(--kuva-k) * 0.45),
+      color-mix(in srgb, var(--pohja) 20%, transparent) calc(var(--kuva-k) * 0.58),
+      color-mix(in srgb, var(--pohja) 55%, transparent) calc(var(--kuva-k) * 0.7),
+      color-mix(in srgb, var(--pohja) 82%, transparent) calc(var(--kuva-k) * 0.82),
+      color-mix(in srgb, var(--pohja) 94%, transparent) calc(var(--kuva-k) * 0.92),
       var(--pohja) var(--kuva-k));
 }
 .rae { position: absolute; inset: 0; z-index: 4; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: 0.09; }
 
-/* Puhelimella hero on sisältönsä korkuinen: teksti alkaa kuvan häivytyksen kohdalta ja tiedot heti nappien alta */
-.hero-sisa { padding-block: calc(var(--kuva-k) * 0.66) 1.25rem; }
+/* Puhelimella hero on sisältönsä korkuinen: teksti alkaa kuvan alareunasta ja tiedot heti nappien alta.
+   Tekstin alku ratkaisee, näkyykö Varaa aika Safarin palkkien kanssa (scripts/demo_check.py: enintään 640 px). */
+.hero-sisa { padding-block: calc(var(--kuva-k) * 0.92) 1.25rem; }
 .hero-teksti { container-type: inline-size; }
-.tila { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; margin: 0 0 1.1rem; font-size: 0.875rem; color: var(--himmea); }
+.tila { display: flex; flex-wrap: wrap; width: fit-content; gap: 0.2rem 0.6rem; margin: 0 0 1.1rem; font-size: 0.875rem; color: var(--himmea); }
 .tila [data-tanaan] { color: var(--kerma); }
 [data-tanaan].on-auki::before { content: ""; display: inline-block; width: 0.5em; height: 0.5em; margin-right: 0.5em; border-radius: 50%; background: var(--auki); vertical-align: 0.1em; }
 
@@ -295,27 +295,27 @@ a.rivi:hover .rivi-nimi { transform: translateX(0.35rem); }
   .yhteys-sisa { grid-template-columns: 1fr 1fr; column-gap: 3rem; align-items: start; }
 }
 @media (min-width: 64rem) {
-  /* Ilman JavaScriptiä palkilla on aina tausta; elava.js (html.js) pitää sen läpinäkyvänä sivun alussa */
+  /* Palkilla on aina tausta: heron yläreuna on kuvan kirkkain kohta, eikä sitä tummenneta linkkien takia */
   .yla { position: sticky; top: 0; }
-  .yla::before { opacity: 1; transition: opacity 0.3s; }
-  .js:not(.on-vieritetty) .yla::before { opacity: 0; }
+  .yla::before { opacity: 1; }
   .yla-sisa { min-height: 4.5rem; gap: 2.5rem; }
   .logo { flex: 0 1 auto; max-width: 26rem; margin-right: auto; }
   .yla-linkit { display: flex; gap: 2rem; font-size: 0.9375rem; }
   .yla-linkit a { color: var(--himmea); text-decoration: none; }
   .yla-linkit a:hover { color: var(--kerma); }
 
-  /* Koko ruudun kuva: teksti vasemmalla tumman liukuvärin päällä, esine oikealla. Kuva on heroa korkeampi,
-     jotta se riittää, kun elava.js liikuttaa sitä hitaammin kuin sisältöä. */
-  .still, .elokuva { top: -3%; height: 106%; object-position: 100% 50%; }
+  /* Koko ruudun kuva: terä kulkee vinottain vasemmalta ylhäältä oikealle alas, teksti vasemmassa alakulmassa
+     tumman kiven päällä. Himmennys nousee alhaalta (tietorivi) ja vasemmasta alakulmasta (teksti), terä ja
+     yläosan valo jäävät kirkkaiksi. Kuva on heroa korkeampi, jotta se riittää, kun elava.js liikuttaa sitä
+     hitaammin kuin sisältöä. */
+  .still, .elokuva { top: -3%; height: 106%; object-position: 0% 50%; }
   .himmennys {
     background:
-      linear-gradient(to bottom, color-mix(in srgb, var(--pohja) 70%, transparent), transparent 9rem),
-      linear-gradient(to right, var(--pohja), color-mix(in srgb, var(--pohja) 90%, transparent) 24%, color-mix(in srgb, var(--pohja) 62%, transparent) 40%, color-mix(in srgb, var(--pohja) 24%, transparent) 54%, transparent 66%),
-      linear-gradient(to top, var(--pohja), color-mix(in srgb, var(--pohja) 78%, transparent) 14%, color-mix(in srgb, var(--pohja) 30%, transparent) 30%, transparent 44%);
+      linear-gradient(to top, var(--pohja), color-mix(in srgb, var(--pohja) 88%, transparent) 9%, color-mix(in srgb, var(--pohja) 82%, transparent) 16%, color-mix(in srgb, var(--pohja) 40%, transparent) 25%, transparent 34%),
+      radial-gradient(ellipse 75% 110% at 0% 100%, color-mix(in srgb, var(--pohja) 78%, transparent) 50%, color-mix(in srgb, var(--pohja) 70%, transparent) 68%, color-mix(in srgb, var(--pohja) 40%, transparent) 84%, transparent);
   }
   .hero-sisa { display: grid; grid-template-rows: 1fr auto; min-height: calc(100vh - 1.8rem); min-height: calc(100svh - 1.8rem); padding-block: 6.5rem 2rem; }
-  .hero-teksti { align-self: center; max-width: 34rem; }
+  .hero-teksti { align-self: end; max-width: 34rem; }
   .hero-lause { font-size: 1.1875rem; }
   .tiedot { grid-auto-flow: column; grid-auto-columns: 1fr; column-gap: 3rem; margin: 0; padding-top: 2.5rem; }
   .tiedot div, .tiedot .vain-iso { display: grid; justify-content: start; gap: 0.3rem; padding: 1.1rem 0 0; }

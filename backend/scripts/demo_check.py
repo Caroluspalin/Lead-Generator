@@ -14,7 +14,8 @@ vaakavieritys, katkenneet sanat otsikoissa, konsolivirheet (myös CSP), toiminta
 ja prefers-reduced-motion. Lopuksi out/arkki.png: kuvakaappaukset rinnakkain.
 
 Premium-pohjan hero tarkistetaan lisäksi liike päällä (390 ja 1440 px): ruutusarja piirtyy ja vaihtuu
-vierittäessä, Varaa aika / Soita näkyy ilman vieritystä, yläpalkin nimi ei katkea, nappien ja tietorivin
+vierittäessä, Varaa aika / Soita näkyy ilman vieritystä (puhelimella ensimmäisen napin alareuna enintään
+640 px:ssä, jotta se näkyy myös Safarin palkkien kanssa), yläpalkin nimi ei katkea, nappien ja tietorivin
 väliin ei jää tyhjää, ja tekstin kontrasti mitataan kuvakaappauksesta kuvan päältä (AA 4,5:1). Tuloste kertoo
 kirkkaimman taustan tekstin alla: se on tyylit.css:n --valossa.
 """
@@ -61,6 +62,8 @@ CSP_V2 = (
 WIDTHS = [320, 360, 375, 390, 414, 768, 1024, 1280, 1440]
 # Kiinteä testihetki: tiistai klo 12 (aukiolo.js lukee ?aika=)
 TEST_TIME = "2026-11-10T12:00"
+# 390 × 844 -puhelimella Safarin palkit vievät ruudusta noin 180 px: heron ensimmäisen napin pitää mahtua tähän
+PHONE_CTA_MAX = 640
 
 
 def _periods(spec: dict[int, list[tuple[str, str]]]) -> list[OpeningPeriod]:
@@ -443,7 +446,7 @@ def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
                             scrollTo(0, y); await new Promise(r => setTimeout(r, 60));
                           }
                           scrollTo(0, 0);
-                          // Vieritystapahtuma ehtii perille ennen kuvakaappausta (premiumin yläpalkin tila)
+                          // Vieritystapahtuma ehtii perille ennen kuvakaappausta (premiumin heron ruutu)
                           await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
                         }""")
                         settle(page)
@@ -487,7 +490,7 @@ _HERO_STATE_JS = """() => {
   const logo = document.querySelector('.logo'), tyyli = getComputedStyle(logo);
   return {
     canvas: !!document.querySelector('.tausta.on-elokuva .elokuva'),
-    cta: Math.max(...napit), korkeus: innerHeight,
+    cta: Math.max(...napit), ensimmainen: napit[0], korkeus: innerHeight,
     vali: t ? t.getBoundingClientRect().top - n.getBoundingClientRect().bottom : 0,
     katkeaa: tyyli.textOverflow === 'ellipsis' || tyyli.whiteSpace === 'nowrap'
       || logo.scrollWidth > logo.clientWidth + 1 || logo.scrollHeight > logo.clientHeight + 1,
@@ -605,6 +608,8 @@ def premium_hero_checks(base: str, samples: list[Sample]) -> int:
                         problems.append(f"nappi vaatii vierityksen ({state['cta']:.0f} > {state['korkeus']})")
                     if state["katkeaa"]:
                         problems.append("yläpalkin nimi katkeaa")
+                    if width < 768 and state["ensimmainen"] > PHONE_CTA_MAX:
+                        problems.append(f"ensimmäinen nappi liian alhaalla ({state['ensimmainen']:.0f} > {PHONE_CTA_MAX})")
                     if width < 768 and state["vali"] > 40:
                         problems.append(f"tyhjä väli nappien ja tietojen välissä {state['vali']:.0f} px")
                     if width < 768:
