@@ -1,6 +1,6 @@
 // Premium-pohjan elävöitys. Sivu toimii kokonaan ilman tätä: tämä ajoittaa puhelimen varauspalkin,
 // korostaa hinnaston aktiivisen kategorian ja piirtää heron ruutusarjan (kamera liikkuu vierityksen mukana).
-// Tyylit tyylit.css:ssä: html.js, html.napit-poissa, .hero.on-ohi, .tausta.on-elokuva, .palkki.on-esilla, a[aria-current].
+// Tyylit tyylit.css:ssä: html.js, html.on-vieritetty, html.napit-poissa, .hero.on-ohi, .tausta.on-elokuva, .palkki.on-esilla, a[aria-current].
 (function () {
   var hero = document.querySelector(".hero");
   if (!hero || !("IntersectionObserver" in window)) return;
@@ -24,6 +24,12 @@
       juuri.classList.toggle("napit-poissa", !osumat[osumat.length - 1].isIntersecting);
     }).observe(heronNapit);
   }
+
+  // Ison näytön yläpalkki on läpinäkyvä vain sivun alussa: vierittäessä kuva liikkuu sen alla, joten
+  // palkki saa taustan heti
+  var vieritetty = function () { juuri.classList.toggle("on-vieritetty", window.scrollY > 24); };
+  window.addEventListener("scroll", vieritetty, { passive: true });
+  vieritetty();
 
   // Aktiivinen kategoria: ylin ryhmä, joka osuu ruudun yläosan kaistaan
   var linkit = Array.prototype.slice.call(document.querySelectorAll(".valilehdet a"));
@@ -73,7 +79,7 @@
     canvas.className = "elokuva";
 
     var ruudut = new Array(maara);
-    var kohta = 0, piirretty = -1, ruutu = -1, alkuHetki = 0, kaynnissa = false, muuttui = false;
+    var kohta = 0, piirretty = -1, alkuHetki = 0, kaynnissa = false, muuttui = false;
 
     // Lähin ladattu ruutu annetusta kohdasta annettuun suuntaan
     function ladattu(i, suunta) {
@@ -94,14 +100,18 @@
       if (Math.abs(tavoite - kohta) < 0.0005) kohta = tavoite;
 
       if (muuttui || Math.abs(kohta - piirretty) > 0.0004) {
-        // Lähin ladattu ruutu sellaisenaan: kahden ruudun häivytys näyttäisi putoavan hiuksen kahtena
-        var lahin = Math.round(kohta * (maara - 1));
-        var ala = ladattu(lahin, -1);
-        var yla = ladattu(lahin, 1);
-        var uusi = ala < 0 || yla >= 0 && yla - lahin < lahin - ala ? yla : ala;
-        if (uusi >= 0 && uusi !== ruutu) {
-          piirto.drawImage(ruudut[uusi], 0, 0, canvas.width, canvas.height);
-          ruutu = uusi;
+        // Kahden ladatun ruudun ristihäivytys: liike on tasaista, vaikka ruutuja on vähän
+        var paikka = kohta * (maara - 1);
+        var ala = ladattu(Math.floor(paikka), -1);
+        var yla = ladattu(Math.ceil(paikka), 1);
+        if (ala < 0) ala = yla;
+        if (ala >= 0) {
+          piirto.globalAlpha = 1;
+          piirto.drawImage(ruudut[ala], 0, 0, canvas.width, canvas.height);
+          if (yla > ala) {
+            piirto.globalAlpha = (paikka - ala) / (yla - ala);
+            piirto.drawImage(ruudut[yla], 0, 0, canvas.width, canvas.height);
+          }
         }
         // Kuva liikkuu hitaammin kuin sisältö ja himmenee, kun hinnasto tulee sen päälle
         canvas.style.transform = "translate3d(0," + (window.scrollY * (iso ? 0.15 : 0.2)).toFixed(1) + "px,0)";

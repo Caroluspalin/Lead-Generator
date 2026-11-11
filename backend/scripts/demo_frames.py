@@ -1,11 +1,11 @@
 """Premium-pohjan heron ruutusarja videosta: mp4 sisään, työpöytä- ja puhelinruudut + still ulos.
 
-  python scripts/demo_frames.py scripts/demo_lahteet/premium/tupot-c2.mp4 --peilaa --laatu 50 \\
-      --tyopoyta-osuus 0.034:0.85 --puhelin-rajaus 900:600:170:120 --puhelin-osuus 0.034:0.85 --puhelin-ruutuja 28
+  python scripts/demo_frames.py scripts/demo_lahteet/premium/veitsi.mp4 \\
+      --tyopoyta-osuus 0:0.75 --puhelin-rajaus 1200:1076:700:0 --puhelin-osuus 0:0.85
 
 Kirjoittaa kansioon app/templates/demo/assets/premium/ (--out):
   hero-l-01.webp …  työpöydän ruudut (1280 × 720)
-  hero-p-01.webp …  puhelimen ruudut (780 × 520)
+  hero-p-01.webp …  puhelimen ruudut (780 × 724)
   hero-l.avif/.webp, hero-p.avif/.webp  still = kummankin sarjan ensimmäinen ruutu
 
 Videon vaihto ei vaadi pohjan muutoksia: pohja lukee ruutujen määrän kansiosta (demo_site.asset_series) ja
@@ -15,7 +15,6 @@ Vanhat saman nimiset ruudut poistetaan ensin, joten ruutumäärän pienentämine
 
 Rajaus on ffmpegin crop-muodossa LEVEYS:KORKEUS:X:Y lähdevideon pikseleinä. Jos rajauksen kuvasuhde ei ole
 kohdekoon, reunoilta leikataan tasan. Osuus ALKU:LOPPU (0–1) kertoo, mikä osa videon liikkeestä käytetään.
---peilaa kääntää videon vaakasuunnassa ennen rajausta: rajauksen X on silloin peilatun kuvan koordinaatti.
 
 Vaatii: ffmpeg (libsvtav1 AVIF-stilleihin), ffprobe ja cwebp. Aja scripts/demo_check.py tämän jälkeen:
 se mittaa tekstin kontrastin uusien ruutujen päällä.
@@ -34,8 +33,8 @@ from app.demo_site import ASSET_DIR  # noqa: E402
 
 Size = tuple[int, int]
 
-FRAME_SIZES: dict[str, Size] = {"l": (1280, 720), "p": (780, 520)}
-STILL_SIZES: dict[str, Size] = {"l": (1600, 900), "p": (780, 520)}
+FRAME_SIZES: dict[str, Size] = {"l": (1280, 720), "p": (780, 724)}
+STILL_SIZES: dict[str, Size] = {"l": (1600, 900), "p": (780, 724)}
 
 
 def run(args: list[str]) -> str:
@@ -72,11 +71,9 @@ def pick_frames(total: int, count: int, span: tuple[float, float]) -> list[int]:
     return sorted(set(picked))
 
 
-def video_filter(indices: list[int], crop: Optional[str], size: Size, mirror: bool = False) -> str:
+def video_filter(indices: list[int], crop: Optional[str], size: Size) -> str:
     select = "+".join(f"eq(n\\,{i})" for i in indices)
     steps = [f"select='{select}'"]
-    if mirror:
-        steps.append("hflip")
     if crop:
         steps.append(f"crop={crop}")
     steps.append(f"scale={size[0]}:{size[1]}:force_original_aspect_ratio=increase:flags=lanczos")
@@ -84,9 +81,9 @@ def video_filter(indices: list[int], crop: Optional[str], size: Size, mirror: bo
     return ",".join(steps)
 
 
-def extract(video: Path, indices: list[int], crop: Optional[str], size: Size, work: Path, mirror: bool) -> list[Path]:
+def extract(video: Path, indices: list[int], crop: Optional[str], size: Size, work: Path) -> list[Path]:
     work.mkdir(parents=True)
-    run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-vf", video_filter(indices, crop, size, mirror),
+    run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-vf", video_filter(indices, crop, size),
          "-fps_mode", "passthrough", str(work / "%03d.png")])
     return sorted(work.glob("*.png"))
 
@@ -99,19 +96,19 @@ def remove_old(out: Path, name: str) -> None:
 
 def build(video: Path, out: Path, name: str, crops: dict[str, Optional[str]],
           spans: dict[str, tuple[float, float]], counts: dict[str, int],
-          quality: int, still_quality: int, avif_crf: int, mirror: bool = False) -> list[Path]:
+          quality: int, still_quality: int, avif_crf: int) -> list[Path]:
     total = frame_total(video)
     written: list[Path] = []
     remove_old(out, name)
     with tempfile.TemporaryDirectory() as tmp:
         for key in ("l", "p"):
             indices = pick_frames(total, counts[key], spans[key])
-            pngs = extract(video, indices, crops[key], FRAME_SIZES[key], Path(tmp) / f"ruudut-{key}", mirror)
+            pngs = extract(video, indices, crops[key], FRAME_SIZES[key], Path(tmp) / f"ruudut-{key}")
             for number, png in enumerate(pngs, start=1):
                 target = out / f"{name}-{key}-{number:02d}.webp"
                 run(["cwebp", "-quiet", "-q", str(quality), "-m", "6", str(png), "-o", str(target)])
                 written.append(target)
-            still = extract(video, indices[:1], crops[key], STILL_SIZES[key], Path(tmp) / f"still-{key}", mirror)[0]
+            still = extract(video, indices[:1], crops[key], STILL_SIZES[key], Path(tmp) / f"still-{key}")[0]
             webp, avif = out / f"{name}-{key}.webp", out / f"{name}-{key}.avif"
             run(["cwebp", "-quiet", "-q", str(still_quality), "-m", "6", str(still), "-o", str(webp)])
             run(["ffmpeg", "-v", "error", "-y", "-i", str(still), "-frames:v", "1", "-c:v", "libsvtav1",
@@ -137,7 +134,6 @@ def main() -> int:
     parser.add_argument("--nimi", default="hero", help="tiedostojen alku (pohja odottaa: hero)")
     parser.add_argument("--tyopoyta-rajaus", type=parse_crop, help="oletus: koko kuva")
     parser.add_argument("--puhelin-rajaus", type=parse_crop, help="oletus: kuvan keskeltä")
-    parser.add_argument("--peilaa", action="store_true", help="käännä video vaakasuunnassa ennen rajausta")
     parser.add_argument("--tyopoyta-osuus", type=parse_range, default=(0.0, 1.0))
     parser.add_argument("--puhelin-osuus", type=parse_range, default=(0.0, 1.0))
     parser.add_argument("--tyopoyta-ruutuja", type=int, default=40)
@@ -160,7 +156,7 @@ def main() -> int:
         crops={"l": args.tyopoyta_rajaus, "p": args.puhelin_rajaus},
         spans={"l": args.tyopoyta_osuus, "p": args.puhelin_osuus},
         counts={"l": args.tyopoyta_ruutuja, "p": args.puhelin_ruutuja},
-        quality=args.laatu, still_quality=args.still_laatu, avif_crf=args.avif_crf, mirror=args.peilaa,
+        quality=args.laatu, still_quality=args.still_laatu, avif_crf=args.avif_crf,
     )
     report(written, args.nimi)
     return 0
