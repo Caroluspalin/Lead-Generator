@@ -170,7 +170,8 @@ CONTRAST_PAIRS: dict[str, list[tuple[str, str]]] = {
         ("musta", "liitu"), ("harmaa", "liitu"), ("musta", "betoni"), ("harmaa-betoni", "betoni"),
         ("liitu", "musta"), ("harmaa-musta", "musta"), ("kyltti-teksti", "kyltti"), ("kyltti-musta", "musta"),
     ],
-    # valossa = heron kirkkain kohta (rappaus + valot): sen päällä on vain kerman ja himmeän väristä tekstiä
+    # valossa = heron kirkkain kohta tekstin alla (kuva + himmennys, mitattu scripts/demo_check.py:llä):
+    # sen päällä on vain kerman ja himmeän väristä tekstiä
     "premium": [
         ("kerma", "pohja"), ("himmea", "pohja"), ("korostus", "pohja"), ("korostus-teksti", "korostus"),
         ("kerma", "valossa"), ("himmea", "valossa"), ("pohja", "kerma"),
@@ -830,7 +831,7 @@ def test_demo_booking_url_only_for_business_pages(website: str, expected: Option
 
 # --- Premium-parturi (valitaan käsin): omat kuvatiedostot, Timma pohjan omalla merkkauksella, elävöitys ---
 
-from app.demo_site import DemoTimma, PriceCategory, PriceItem, template_for_primary_type  # noqa: E402
+from app.demo_site import DemoTimma, PriceCategory, PriceItem, asset_series, template_for_primary_type  # noqa: E402
 
 PREMIUM_CSS = (ASSET_DIR / "premium" / "tyylit.css").read_text()
 
@@ -865,15 +866,40 @@ def test_premium_is_never_chosen_automatically_and_uses_barber_images() -> None:
 
 
 def test_image_assets_are_served_with_image_types_and_versioned() -> None:
-    avif, webp = demo_asset("premium", "rappaus.avif"), demo_asset("premium", "rappaus.webp")
-    assert avif is not None and webp is not None
+    avif, webp = demo_asset("premium", "hero-p.avif"), demo_asset("premium", "hero-p.webp")
+    wide_avif, wide_webp = demo_asset("premium", "hero-l.avif"), demo_asset("premium", "hero-l.webp")
+    assert avif is not None and webp is not None and wide_avif is not None and wide_webp is not None
     assert (avif.content_type, webp.content_type) == ("image/avif", "image/webp")
     html = _premium()
+    # Still on tavallinen kuva HTML:ssä: puhelimen versio oletuksena, leveä näyttö media-ehdolla
     assert f'<source srcset="{avif.url}" type="image/avif">' in html
-    assert f'src="{webp.url}"' in html
-    # Pinta ladataan heti, eikä se paina liikaa (mobiili ensin)
-    assert len(avif.body) < 60_000 and len(webp.body) < 80_000
-    assert {a.name for a in template_assets("premium")} >= {"rappaus.avif", "rappaus.webp", "elava.js", "tyylit.css"}
+    assert f'<img class="still" src="{webp.url}" alt="" width="780" height="724" fetchpriority="high"' in html
+    assert f'<source media="(min-width: 64rem)" srcset="{wide_avif.url}" type="image/avif"' in html
+    assert f'<link rel="preload" href="{avif.url}" as="image" type="image/avif" media="(max-width: 63.99rem)" fetchpriority="high">' in html
+    assert f'<link rel="preload" href="{wide_avif.url}" as="image" type="image/avif" media="(min-width: 64rem)" fetchpriority="high">' in html
+    # Still ladataan heti, eikä se paina liikaa (mobiili ensin)
+    assert len(avif.body) < 40_000 and len(webp.body) < 60_000
+    assert len(wide_avif.body) < 60_000 and len(wide_webp.body) < 90_000
+    assert {a.name for a in template_assets("premium")} >= {"hero-p.avif", "hero-l.webp", "elava.js", "tyylit.css"}
+
+
+def test_premium_hero_frames_come_from_the_folder_and_stay_light() -> None:
+    wide, phone = asset_series("premium", "hero-l"), asset_series("premium", "hero-p")
+    # Numerointi yhtenäinen 01…N: pohja ei tiedä määrää, joten sarjan voi vaihtaa skriptillä
+    assert [a.name for a in wide] == [f"hero-l-{n:02d}.webp" for n in range(1, len(wide) + 1)]
+    assert [a.name for a in phone] == [f"hero-p-{n:02d}.webp" for n in range(1, len(phone) + 1)]
+    assert 12 <= len(phone) <= len(wide) <= 60
+    # Puhelimelle kevyempi sarja
+    assert sum(len(a.body) for a in phone) < 400_000
+    assert sum(len(a.body) for a in wide) < 1_100_000
+    html = _premium()
+    tausta = re.search(r'<div class="tausta" aria-hidden="true" data-ruudut-l="([^"]+)" data-ruudut-p="([^"]+)">', html)
+    assert tausta is not None
+    assert tausta.group(1).split(" ") == [a.url for a in wide]
+    assert tausta.group(2).split(" ") == [a.url for a in phone]
+    # Ruudut eivät ole HTML:ssä kuvina: ne ladataan vasta skriptillä sivun latauduttua
+    assert html.count("<img") == 1 and "<canvas" not in html and "<video" not in html
+    assert asset_series("premium", "puuttuu") == [] and asset_series("premium", "hero") == []
 
 
 def test_v2_csp_allows_own_images_in_backend_and_worker(client_a: TestClient, cafe_demo: dict[str, Any]) -> None:
@@ -883,7 +909,7 @@ def test_v2_csp_allows_own_images_in_backend_and_worker(client_a: TestClient, ca
     assert expected in WORKER.split("export const CSP_V2")[1].split(";\n")[0]
     # Versio 1 ennallaan: ei omia tiedostoja
     assert "img-src data: https://images.unsplash.com" in WORKER.split("export const SECURITY_HEADERS")[1].split("};")[0]
-    asset = client_a.get(f"/demo/{demo_asset('premium', 'rappaus.avif').url}")  # type: ignore[union-attr]
+    asset = client_a.get(f"/demo/{demo_asset('premium', 'hero-p.avif').url}")  # type: ignore[union-attr]
     assert asset.status_code == 200 and asset.headers["content-type"] == "image/avif"
 
 
@@ -929,27 +955,46 @@ def test_premium_name_size_follows_length(name: str, size: str) -> None:
     html = _premium(name=name)
     assert f'<p class="nimi nimi-{size}" data-pisin="{longest_segment(name)}" aria-hidden="true">' in html
     assert f".nimi-{size} {{ --nimi-koko:" in PREMIUM_CSS
-    assert f'<a class="logo" href="#sisalto">{name}</a>' in html  # luettava nimi yläpalkissa
+    assert re.search(rf'<a class="logo( logo-pitka)?" href="#sisalto">{re.escape(name)}</a>', html)  # luettava nimi yläpalkissa
 
 
 def test_premium_data_pisin_values_have_css_rules() -> None:
     assert all(f'[data-pisin="{n}"] {{ --pisin: {n}; }}' in PREMIUM_CSS for n in range(2, 31))
 
 
-def test_premium_images_hero_only_on_wide_screens_and_strip_has_all() -> None:
+def test_premium_photos_are_only_in_the_strip_not_beside_the_hero_text() -> None:
     from app.demo_site import DemoImages
     pool = [_alt(f"p{i}", "barbershop chairs and mirrors") for i in range(5)]
     hero, mood, options = unsplash.choose_images(pool, "premium")
     html = _premium(images=DemoImages(hero=hero, mood=mood, options=options))
     assert len(mood) == 3
-    assert html.count('<li class="kuva') == 4 and html.count('<li class="kuva kuva-hero">') == 1
-    assert 'data-kuvia="3"' in html
-    # Heron kuva on vain ison näytön kehyksessä: lazy, ja preload rajattu leveään näyttöön
-    assert re.search(r'<div class="hero-kuva kuva">\s*<img [^>]*loading="lazy"', html)
-    assert 'media="(min-width: 64rem)">' in html
+    # Kaikki kuvat (myös hero-kuvaksi valittu) kuvanauhassa kaikilla leveyksillä, laiskasti ladattuina
+    assert html.count('<li class="kuva">') == 4 and 'data-kuvia="4"' in html
+    assert len(re.findall(r'<li class="kuva"><img [^>]*loading="lazy"', html)) == 4
+    assert "hero-kuva" not in html and "kuva-hero" not in html and "images.unsplash.com" not in html.split("<body>")[0]
+    assert "hero-kuva" not in PREMIUM_CSS and "kuva-hero" not in PREMIUM_CSS
+    assert all(f'.kuvanauha[data-kuvia="{n}"]' in PREMIUM_CSS for n in (1, 2, 4, 5))
     assert "Kuvat: " in html and "Unsplash" in html
     # Ilman kuvia osio jää pois
-    assert 'class="kuvat' not in _premium() and "hero-kuva" not in _premium()
+    assert 'class="kuvat' not in _premium()
+
+
+def test_premium_top_bar_name_wraps_instead_of_ellipsis() -> None:
+    assert "text-overflow" not in PREMIUM_CSS
+    logo = re.search(r"\.logo \{([^}]+)\}", PREMIUM_CSS)
+    assert logo is not None and "nowrap" not in logo.group(1) and "overflow: hidden" not in logo.group(1)
+    assert '<a class="logo" href="#sisalto">Terä</a>' in _premium()
+    long_name = "Parturi-Kampaamo Kauniaisten Hiuspiste"
+    assert f'<a class="logo logo-pitka" href="#sisalto">{long_name}</a>' in _premium(name=long_name)
+    assert ".logo-pitka {" in PREMIUM_CSS
+
+
+def test_premium_phone_hero_is_content_height_with_details_right_after_buttons() -> None:
+    phone_css = PREMIUM_CSS.split("@media (min-width: 30rem)")[0]
+    sisa = re.search(r"\.hero-sisa \{([^}]+)\}", phone_css)
+    assert sisa is not None and "min-height" not in sisa.group(1)
+    # Kiinteä väli nappien jälkeen (ei margin: auto, joka venyttäisi tyhjää väliin)
+    assert ".tiedot { display: grid; margin: 1.75rem 0 0; }" in phone_css
 
 
 def test_premium_without_phone_or_booking_has_no_bar() -> None:
@@ -979,3 +1024,28 @@ def test_premium_script_is_progressive_enhancement() -> None:
     assert ".js .palkki {" in PREMIUM_CSS and "position: sticky; bottom: 0" in PREMIUM_CSS
     assert "prefers-reduced-motion: reduce" in js
     assert "innerHTML" not in js and "eval(" not in js and "fetch(" not in js
+    # Ruutusarja: canvas syntyy vasta skriptissä, ruudut vasta load-tapahtuman jälkeen, ei Save-Datalla
+    assert 'document.createElement("canvas")' in js and 'addEventListener("load", aloita)' in js
+    assert "saveData" in js and "data-ruudut-l" in js and "data-ruudut-p" in js
+    # Yläpalkki: ilman skriptiä tausta aina, skriptillä läpinäkyvä vain sivun alussa
+    assert ".js:not(.on-vieritetty) .yla::before { opacity: 0; }" in PREMIUM_CSS and '"on-vieritetty"' in js
+    assert '.tausta.on-elokuva .still { visibility: hidden; }' in PREMIUM_CSS
+
+
+def test_demo_frames_script_picks_frames_and_builds_filter() -> None:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("demo_frames", ASSET_DIR.parents[3] / "scripts" / "demo_frames.py")
+    assert spec is not None and spec.loader is not None
+    frames = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(frames)
+    assert frames.pick_frames(73, 5, (0.0, 1.0)) == [0, 18, 36, 54, 72]
+    assert frames.pick_frames(73, 40, (0.0, 0.75))[0] == 0 and frames.pick_frames(73, 40, (0.0, 0.75))[-1] == 54
+    # Lyhyt video: sama ruutu ei toistu
+    assert frames.pick_frames(10, 40, (0.0, 1.0)) == list(range(10))
+    assert frames.video_filter([0, 9], "1200:1076:700:0", (780, 724)) == (
+        "select='eq(n\\,0)+eq(n\\,9)',crop=1200:1076:700:0,"
+        "scale=780:724:force_original_aspect_ratio=increase:flags=lanczos,crop=780:724"
+    )
+    assert frames.parse_range("0:0.75") == (0.0, 0.75)
+    with pytest.raises(Exception):
+        frames.parse_range("0.5:0.2")

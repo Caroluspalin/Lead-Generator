@@ -1,9 +1,10 @@
-// Premium-pohjan elävöitys. Sivu toimii kokonaan ilman tätä: tämä vain ajoittaa puhelimen
-// varauspalkin, korostaa hinnaston aktiivisen kategorian ja antaa valon seurata osoitinta herossa.
-// Tyylit tyylit.css:ssä: html.js, .hero.on-ohi, .hero.on-osoitin, .palkki.on-esilla, a[aria-current].
+// Premium-pohjan elävöitys. Sivu toimii kokonaan ilman tätä: tämä ajoittaa puhelimen varauspalkin,
+// korostaa hinnaston aktiivisen kategorian ja piirtää heron ruutusarjan (kamera liikkuu vierityksen mukana).
+// Tyylit tyylit.css:ssä: html.js, html.on-vieritetty, .hero.on-ohi, .tausta.on-elokuva, .palkki.on-esilla, a[aria-current].
 (function () {
   var hero = document.querySelector(".hero");
   if (!hero || !("IntersectionObserver" in window)) return;
+  var juuri = document.documentElement;
   var rauha = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.documentElement.classList.add("js");
 
@@ -14,6 +15,12 @@
     hero.classList.toggle("on-ohi", ohi);
     if (palkki) palkki.classList.toggle("on-esilla", ohi);
   }, { rootMargin: "-33% 0px 0px 0px" }).observe(hero);
+
+  // Ison näytön yläpalkki on läpinäkyvä vain sivun alussa: vierittäessä kuva liikkuu sen alla, joten
+  // palkki saa taustan heti
+  var vieritetty = function () { juuri.classList.toggle("on-vieritetty", window.scrollY > 24); };
+  window.addEventListener("scroll", vieritetty, { passive: true });
+  vieritetty();
 
   // Aktiivinen kategoria: ylin ryhmä, joka osuu ruudun yläosan kaistaan
   var linkit = Array.prototype.slice.call(document.querySelectorAll(".valilehdet a"));
@@ -41,25 +48,139 @@
     });
   }
 
-  // Valo seuraa osoitinta (vain hiiri, ei kosketus), pehmennettynä
-  var valo = document.querySelector(".valo-osoitin");
-  if (valo && !rauha && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
-    var x = 0, y = 0, kohdeX = 0, kohdeY = 0, kaynnissa = false, alussa = true;
-    var askel = function () {
-      x += (kohdeX - x) * 0.09;
-      y += (kohdeY - y) * 0.09;
-      valo.style.transform = "translate3d(" + x.toFixed(1) + "px," + y.toFixed(1) + "px,0)";
-      if (Math.abs(kohdeX - x) + Math.abs(kohdeY - y) > 0.5) requestAnimationFrame(askel);
-      else kaynnissa = false;
-    };
-    hero.addEventListener("pointermove", function (e) {
+  // Heron elokuva: ruutusarja canvasille stillin päälle. Still jää näkyviin, jos liikettä ei haluta
+  // (reduced motion, Save-Data, vähän muistia) tai ruudut eivät lataudu.
+  var tausta = hero.querySelector(".tausta");
+  var yhteys = navigator.connection;
+  if (!tausta || rauha || (yhteys && yhteys.saveData) || navigator.deviceMemory < 2) return;
+
+  var ALKU = 0.25;      // osuus liikkeestä, joka ajetaan itsestään sivun auettua
+  var ALKU_MS = 1600;
+  var leveys = window.matchMedia("(min-width: 64rem)");
+  var kierros = 0;      // kasvaa, kun ruutusarja vaihtuu: vanhan sarjan lataukset jäävät huomiotta
+
+  function kaynnista() {
+    var oma = ++kierros;
+    var iso = leveys.matches;
+    var osoitteet = (tausta.getAttribute(iso ? "data-ruudut-l" : "data-ruudut-p") || "").split(" ").filter(Boolean);
+    var maara = osoitteet.length;
+    var canvas = document.createElement("canvas");
+    var piirto = canvas.getContext && canvas.getContext("2d");
+    if (maara < 2 || !piirto) return;
+    canvas.className = "elokuva";
+
+    var ruudut = new Array(maara);
+    var kohta = 0, piirretty = -1, alkuHetki = 0, kaynnissa = false, muuttui = false;
+
+    // Lähin ladattu ruutu annetusta kohdasta annettuun suuntaan
+    function ladattu(i, suunta) {
+      while (i >= 0 && i < maara && !ruudut[i]) i += suunta;
+      return i >= 0 && i < maara ? i : -1;
+    }
+
+    function askel(nyt) {
+      if (oma !== kierros) return;
+      // Liike ajetaan sillä matkalla, jonka kuva on näkyvissä: puhelimella kuva on vain heron yläosassa
       var alue = hero.getBoundingClientRect();
-      kohdeX = e.clientX - alue.left;
-      kohdeY = e.clientY - alue.top;
-      if (alussa) { x = kohdeX; y = kohdeY; alussa = false; }
-      hero.classList.add("on-osoitin");
-      if (!kaynnissa) { kaynnissa = true; requestAnimationFrame(askel); }
+      var kuvanAla = canvas.offsetTop + canvas.offsetHeight;
+      var matka = (kuvanAla > 0 ? Math.min(alue.height, kuvanAla) : alue.height) + alue.top + window.scrollY;
+      var vieritys = Math.min(Math.max(window.scrollY / matka, 0), 1);
+      var alku = alkuHetki ? Math.min((nyt - alkuHetki) / ALKU_MS, 1) : 0;
+      var tavoite = ALKU * (1 - Math.pow(1 - alku, 3)) + (1 - ALKU) * vieritys;
+      kohta += (tavoite - kohta) * 0.16;
+      if (Math.abs(tavoite - kohta) < 0.0005) kohta = tavoite;
+
+      if (muuttui || Math.abs(kohta - piirretty) > 0.0004) {
+        // Kahden ladatun ruudun ristihäivytys: liike on tasaista, vaikka ruutuja on vähän
+        var paikka = kohta * (maara - 1);
+        var ala = ladattu(Math.floor(paikka), -1);
+        var yla = ladattu(Math.ceil(paikka), 1);
+        if (ala < 0) ala = yla;
+        if (ala >= 0) {
+          piirto.globalAlpha = 1;
+          piirto.drawImage(ruudut[ala], 0, 0, canvas.width, canvas.height);
+          if (yla > ala) {
+            piirto.globalAlpha = (paikka - ala) / (yla - ala);
+            piirto.drawImage(ruudut[yla], 0, 0, canvas.width, canvas.height);
+          }
+        }
+        // Kuva liikkuu hitaammin kuin sisältö ja himmenee, kun hinnasto tulee sen päälle
+        canvas.style.transform = "translate3d(0," + (window.scrollY * (iso ? 0.15 : 0.2)).toFixed(1) + "px,0)";
+        canvas.style.opacity = (1 - 0.7 * vieritys * vieritys).toFixed(3);
+        piirretty = kohta;
+        muuttui = false;
+      }
+      if (kohta !== tavoite || alku < 1 && alkuHetki) requestAnimationFrame(askel);
+      else kaynnissa = false;
+    }
+
+    function heratys() {
+      if (!kaynnissa && oma === kierros) { kaynnissa = true; requestAnimationFrame(askel); }
+    }
+
+    // Ensin joka neljäs ruutu (liike toimii heti karkeana), sitten loput väleihin
+    var jono = [];
+    [4, 2, 1].forEach(function (vali) {
+      for (var i = 0; i < maara; i += vali) if (jono.indexOf(i) < 0) jono.push(i);
     });
-    hero.addEventListener("pointerleave", function () { hero.classList.remove("on-osoitin"); });
+    var karkea = Math.ceil(maara / 4);
+    var valmiina = 0, seuraava = 0;
+
+    function lataa() {
+      if (oma !== kierros || seuraava >= jono.length) return;
+      var i = jono[seuraava++];
+      var kuva = new Image();
+      kuva.decoding = "async";
+      kuva.fetchPriority = "low";
+      var valmis = function () {
+        if (oma !== kierros) return;
+        ruudut[i] = kuva;
+        valmiina++;
+        if (i === 0) {
+          // Ensimmäinen ruutu on sama kuva kuin still: vaihto ei näy
+          canvas.width = kuva.naturalWidth;
+          canvas.height = kuva.naturalHeight;
+          piirto.drawImage(kuva, 0, 0);
+          tausta.insertBefore(canvas, tausta.querySelector(".himmennys"));
+          tausta.classList.add("on-elokuva");
+        }
+        if (valmiina === karkea) alkuHetki = performance.now();
+        muuttui = true;
+        heratys();
+        lataa();
+      };
+      // Virheessä ruutu jää väliin: piirto käyttää lähintä ladattua
+      var ohita = function () { lataa(); };
+      kuva.src = osoitteet[i];
+      if (kuva.decode) kuva.decode().then(valmis, ohita);
+      else { kuva.onload = valmis; kuva.onerror = ohita; }
+    }
+
+    window.addEventListener("scroll", heratys, { passive: true });
+    window.addEventListener("resize", heratys);
+    for (var n = 0; n < 3; n++) lataa();
+
+    return function () {
+      window.removeEventListener("scroll", heratys);
+      window.removeEventListener("resize", heratys);
+      tausta.classList.remove("on-elokuva");
+      if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    };
   }
+
+  // Ruudut ladataan vasta, kun sivu on valmis: ne eivät kilpaile stillin, fonttien ja tyylien kanssa
+  var pura = null;
+  var aloita = function () {
+    var kun = window.requestIdleCallback || function (f) { setTimeout(f, 200); };
+    kun(function () { pura = kaynnista(); });
+  };
+  if (document.readyState === "complete") aloita();
+  else window.addEventListener("load", aloita);
+
+  // Näytön kääntö tai ikkunan koon muutos rajan yli: vaihdetaan toiseen sarjaan
+  var vaihda = function () {
+    if (pura) pura();
+    pura = kaynnista();
+  };
+  if (leveys.addEventListener) leveys.addEventListener("change", vaihda);
 })();

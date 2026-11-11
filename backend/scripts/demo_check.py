@@ -12,8 +12,14 @@ ajot eivät kuluta API-kiintiötä. Palvelin jäljittelee Workeria: /{polku} ja 
 samat CSP-headerit. Tarkistukset Chromiumilla ja WebKitillä leveyksillä 320–1440 px:
 vaakavieritys, katkenneet sanat otsikoissa, konsolivirheet (myös CSP), toiminta ilman JS:ää
 ja prefers-reduced-motion. Lopuksi out/arkki.png: kuvakaappaukset rinnakkain.
+
+Premium-pohjan hero tarkistetaan lisäksi liike päällä (390 ja 1440 px): ruutusarja piirtyy ja vaihtuu
+vierittäessä, Varaa aika / Soita näkyy ilman vieritystä, yläpalkin nimi ei katkea, nappien ja tietorivin
+väliin ei jää tyhjää, ja tekstin kontrasti mitataan kuvakaappauksesta kuvan päältä (AA 4,5:1). Tuloste kertoo
+kirkkaimman taustan tekstin alla: se on tyylit.css:n --valossa.
 """
 import argparse
+import base64
 import http.server
 import json
 import os
@@ -437,6 +443,8 @@ def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
                             scrollTo(0, y); await new Promise(r => setTimeout(r, 60));
                           }
                           scrollTo(0, 0);
+                          // Vieritystapahtuma ehtii perille ennen kuvakaappausta (premiumin yläpalkin tila)
+                          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
                         }""")
                         settle(page)
                     overflow = page.evaluate(_OVERFLOW_JS)
@@ -468,6 +476,177 @@ def browser_checks(base: str, samples: list[Sample], out: Path) -> int:
                 print(f"  {engine.name:8} {sample.slug:24} ilman JS: {'ok' if ok else 'AIKATAULU PUUTTUU'}")
                 context.close()
             browser.close()
+    return failures
+
+
+# --- Premium-hero liike päällä ---
+
+_HERO_STATE_JS = """() => {
+  const napit = [...document.querySelectorAll('.hero .napit .nappi')].map(a => a.getBoundingClientRect().bottom);
+  const n = document.querySelector('.hero .napit'), t = document.querySelector('.hero .tiedot');
+  const logo = document.querySelector('.logo'), tyyli = getComputedStyle(logo);
+  return {
+    canvas: !!document.querySelector('.tausta.on-elokuva .elokuva'),
+    cta: Math.max(...napit), korkeus: innerHeight,
+    vali: t ? t.getBoundingClientRect().top - n.getBoundingClientRect().bottom : 0,
+    katkeaa: tyyli.textOverflow === 'ellipsis' || tyyli.whiteSpace === 'nowrap'
+      || logo.scrollWidth > logo.clientWidth + 1 || logo.scrollHeight > logo.clientHeight + 1,
+    himmea: getComputedStyle(document.documentElement).getPropertyValue('--himmea').trim(),
+  };
+}"""
+
+# Canvasin sisällön tunniste yhdeltä vaakakaistalta: muuttuu, kun piirretty ruutu vaihtuu
+_FRAME_SIG_JS = """() => {
+  const c = document.querySelector('.elokuva');
+  if (!c) return null;
+  const d = c.getContext('2d').getImageData(0, Math.floor(c.height * 0.3), c.width, 4).data;
+  let s = 0;
+  for (let i = 0; i < d.length; i += 4) s = (s * 31 + d[i]) % 1000000007;
+  return s;
+}"""
+
+_SCROLL_HERO_JS = """f => {
+  const h = document.querySelector('.hero');
+  scrollTo({ top: f * (h.getBoundingClientRect().bottom + scrollY), behavior: 'instant' });
+}"""
+
+# Heron ja yläpalkin tekstit, jotka ovat nyt ruudulla heron kohdalla (napeilla on oma taustansa)
+_TEXT_RECTS_JS = """() => {
+  const hero = document.querySelector('.hero').getBoundingClientRect();
+  const out = [];
+  const valitsin = '.yla .logo, .yla-linkit a, .hero .tila, .hero h1, .hero-lause, .hero .tiedot dt, .hero .tiedot dd';
+  for (const el of document.querySelectorAll(valitsin)) {
+    const r = el.getBoundingClientRect();
+    const yla = Math.max(0, r.top, hero.top), ala = Math.min(innerHeight, r.bottom, hero.bottom);
+    if (r.width < 4 || ala - yla < 4) continue;
+    out.push({ x: Math.max(0, r.left), y: yla, w: Math.min(innerWidth, r.right) - Math.max(0, r.left), h: ala - yla,
+               nimi: el.className || el.tagName.toLowerCase() });
+  }
+  return out;
+}"""
+
+_SHOW_TEXT_JS = """nakyy => document.querySelectorAll('.yla-sisa, .hero-sisa')
+  .forEach(e => { e.style.visibility = nakyy ? '' : 'hidden'; })"""
+
+# Kirkkain 4 × 4 px keskiarvo tekstialueiden alla (yksittäinen rakeen pikseli ei ratkaise luettavuutta)
+_BRIGHTEST_JS = """async ({ png, rects }) => {
+  const img = new Image();
+  img.src = 'data:image/png;base64,' + png;
+  await img.decode();
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0);
+  const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  let pahin = { l: -1, rgb: [0, 0, 0], nimi: '' };
+  for (const r of rects) {
+    const x0 = Math.floor(r.x), y0 = Math.floor(r.y), w = Math.floor(r.w), h = Math.floor(r.h);
+    if (w < 4 || h < 4) continue;
+    const d = g.getImageData(x0, y0, w, h).data;
+    for (let by = 0; by + 4 <= h; by += 4) for (let bx = 0; bx + 4 <= w; bx += 4) {
+      let R = 0, G = 0, B = 0;
+      for (let y = by; y < by + 4; y++) for (let x = bx; x < bx + 4; x++) {
+        const i = (y * w + x) * 4; R += d[i]; G += d[i + 1]; B += d[i + 2];
+      }
+      R /= 16; G /= 16; B /= 16;
+      const l = 0.2126 * lin(R) + 0.7152 * lin(G) + 0.0722 * lin(B);
+      if (l > pahin.l) pahin = { l, rgb: [Math.round(R), Math.round(G), Math.round(B)], nimi: r.nimi };
+    }
+  }
+  return pahin;
+}"""
+
+
+def _luminance(hex_color: str) -> float:
+    def lin(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(hex_color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def _brightest_under_text(page: Any) -> dict[str, Any]:
+    rects = page.evaluate(_TEXT_RECTS_JS)
+    page.evaluate(_SHOW_TEXT_JS, False)
+    png = base64.b64encode(page.screenshot()).decode()
+    page.evaluate(_SHOW_TEXT_JS, True)
+    return page.evaluate(_BRIGHTEST_JS, {"png": png, "rects": rects})
+
+
+def premium_hero_checks(base: str, samples: list[Sample]) -> int:
+    """Hero liike päällä: ruutusarja, nappi ilman vieritystä, nimi, väli ja tekstin kontrasti kuvan päällä."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+    from playwright.sync_api import sync_playwright
+
+    failures = 0
+    brightest: dict[str, dict[str, Any]] = {}
+    with sync_playwright() as pw:
+        for engine in (pw.chromium, pw.webkit):
+            browser = engine.launch()
+            for sample in samples:
+                row: list[str] = []
+                for width, height in ((390, 844), (1440, 900)):
+                    context = browser.new_context(viewport={"width": width, "height": height})
+                    page = context.new_page()
+                    errors: list[str] = []
+                    page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+                    page.on("pageerror", lambda exc: errors.append(str(exc)))
+                    open_page(page, f"{base}/{sample.slug}?aika={TEST_TIME}")
+                    problems = []
+                    try:
+                        page.wait_for_selector(".tausta.on-elokuva .elokuva", timeout=8000)
+                    except PlaywrightTimeout:
+                        problems.append("ruutusarja ei käynnistynyt")
+                    # Alkuliike (1,6 s) ja tekstien nousu loppuun, loput ruudut ladattu
+                    page.wait_for_timeout(2600)
+                    settle(page)
+                    state = page.evaluate(_HERO_STATE_JS)
+                    if state["cta"] > state["korkeus"]:
+                        problems.append(f"nappi vaatii vierityksen ({state['cta']:.0f} > {state['korkeus']})")
+                    if state["katkeaa"]:
+                        problems.append("yläpalkin nimi katkeaa")
+                    if width < 768 and state["vali"] > 40:
+                        problems.append(f"tyhjä väli nappien ja tietojen välissä {state['vali']:.0f} px")
+                    ratios: list[float] = []
+                    before = page.evaluate(_FRAME_SIG_JS)
+                    for fraction in (0, 0.2, 0.4, 0.6):
+                        page.evaluate(_SCROLL_HERO_JS, fraction)
+                        page.wait_for_timeout(700)
+                        if engine.name != "chromium":
+                            continue
+                        worst = _brightest_under_text(page)
+                        if worst["l"] < 0:
+                            continue
+                        ratio = (_luminance(state["himmea"]) + 0.05) / (worst["l"] + 0.05)
+                        ratios.append(ratio)
+                        if ratio < 4.5:
+                            problems.append(f"kontrasti {ratio:.2f} ({worst['nimi']}, vieritys {fraction})")
+                        key = sample.palette
+                        if key not in brightest or worst["l"] > brightest[key]["l"]:
+                            brightest[key] = worst
+                    if before is not None and page.evaluate(_FRAME_SIG_JS) == before:
+                        problems.append("ruutu ei vaihdu vierittäessä")
+                    if errors:
+                        problems.append(f"konsoli {errors[:2]}")
+                    failures += bool(problems)
+                    note = f", kontrasti min {min(ratios):.2f}" if ratios else ""
+                    row.append(f"{width} ok{note}" if not problems else f"{width}: {'; '.join(problems)}")
+                    context.close()
+                print(f"  {engine.name:8} {sample.slug:24} " + " · ".join(row))
+
+            # Ilman JavaScriptiä: still näkyy, canvasia ei ole
+            for sample in samples:
+                context = browser.new_context(java_script_enabled=False, viewport={"width": 390, "height": 844})
+                page = context.new_page()
+                open_page(page, f"{base}/{sample.slug}")
+                box = page.locator(".tausta .still").bounding_box()
+                ok = bool(box and box["width"] > 300 and box["height"] > 200) and page.locator(".elokuva").count() == 0
+                failures += not ok
+                print(f"  {engine.name:8} {sample.slug:24} ilman JS: {'still ok' if ok else 'STILL PUUTTUU'}")
+                context.close()
+            browser.close()
+    for palette, worst in brightest.items():
+        print(f"  {palette}: kirkkain tausta tekstin alla #{''.join(f'{v:02X}' for v in worst['rgb'])} ({worst['nimi']})")
     return failures
 
 
@@ -529,6 +708,10 @@ def main() -> int:
     base = f"http://127.0.0.1:{server.server_address[1]}"
     print(f"Selaintestit ({base}):")
     failures += browser_checks(base, samples, out)
+    premium = [s for s in samples if s.template == "premium"]
+    if premium:
+        print("Premium-hero liike päällä:")
+        failures += premium_hero_checks(base, premium)
     print(f"Arkki: {contact_sheet(samples, out)}")
     if args.serve:
         print(f"Palvelin käynnissä: {base}/<slug>  (Ctrl+C lopettaa)")

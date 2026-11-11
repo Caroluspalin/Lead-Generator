@@ -920,6 +920,14 @@ def template_assets(template: str) -> list[DemoAsset]:
     return assets
 
 
+def asset_series(group: str, name: str) -> list[DemoAsset]:
+    """Numeroitu kuvasarja järjestyksessä ({name}-01.webp, {name}-02.webp …). Määrä luetaan kansiosta, joten
+    sarjan voi vaihtaa (scripts/demo_frames.py) muuttamatta pohjaa."""
+    paths = sorted((ASSET_DIR / group).glob(f"{name}-[0-9]*.webp"))
+    assets = [demo_asset(group, path.name) for path in paths if re.fullmatch(rf"{re.escape(name)}-\d+\.webp", path.name)]
+    return [asset for asset in assets if asset is not None]
+
+
 def is_v2_template(template: str) -> bool:
     return TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE]).version >= 2
 
@@ -1171,7 +1179,7 @@ _V2_HERO: dict[str, tuple[tuple[int, ...], Optional[float]]] = {
     "cafe": ((640, 960, 1280), 1.0),  # pyöreä allas
     "salon": ((640, 960, 1280), 1.0),  # kaislikko: sama neliökuva seitsemänä suikaleena
     "barber": ((640, 960, 1280), 1.0),  # kulmakyltin kuva
-    "premium": ((640, 960, 1280), 1.25),  # 4:5 kehys heron oikeassa reunassa (iso näyttö) ja kuvanauhassa
+    "premium": ((640, 960, 1280), 1.25),  # kuvanauhan ensimmäinen 4:5 kuva (heron tausta on pohjan oma ruutusarja)
 }
 _V2_MOOD: dict[str, tuple[tuple[int, ...], Optional[float]]] = {
     "cafe": ((640, 960, 1280), 1.25),  # 4:5 pystykuvat
@@ -1226,6 +1234,7 @@ def _render_v2(
         ),
         about_title=content.about_title or tpl.about_title,
         asset=asset,
+        asset_series=asset_series,
         hero_image=hero_image,
         mood_images=mood_images,
         # Kuvaajat kerran alatunnisteessa (sama kuvaaja voi olla useassa kuvassa)

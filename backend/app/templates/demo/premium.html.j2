@@ -1,18 +1,20 @@
 {% extends "base_v2.html.j2" %}
 {#
-  Parturi, premium: "Messinki". Tumma rappauspinta, jolla valo liikkuu hitaasti, nimi isona serifinä ja
-  hinnasto menukorttina vaalealla pinnalla. Messinki vain pieninä korostuksina (viivat, numerot, pilleri).
+  Parturi, premium: "Messinki". Koko ruudun makrokuva yhdestä esineestä (kamera ja valo liikkuvat vierityksen
+  mukana), nimi isona serifinä ja hinnasto menukorttina vaalealla pinnalla. Messinki vain pieninä
+  korostuksina (viivat, numerot, pilleri).
   Valitaan käsin DemoModalissa, sama data kuin barber-pohjassa. Timman hinnasto ja arvio ovat pohjan omaa
   merkkausta (ei _timma.html.j2: sen luokat saavat yhteiset neutraalit tyylit demo.css:stä).
-  Toimii ilman JavaScriptiä: elava.js lisää varauspalkin ajoituksen, aktiivisen kategorian ja osoitinvalon.
-  Heron pinta (rappaus.avif/.webp) on generoitu kerran Higgsfieldillä, ei demon generoinnissa.
+  Toimii ilman JavaScriptiä: heron still näkyy aina, ja elava.js lisää ruutusarjan, varauspalkin ajoituksen
+  ja aktiivisen kategorian. Heron kuvat (hero-*.avif/.webp) tehdään videosta skriptillä
+  scripts/demo_frames.py, ei demon generoinnissa. Ruutujen määrä luetaan kansiosta (asset_series).
 #}
 {% block preload %}
 <link rel="preload" href="{{ asset('premium', 'instrument-serif.woff2').url }}" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="{{ asset('premium', 'instrument-serif-italic.woff2').url }}" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="{{ asset('premium', 'instrument-sans.woff2').url }}" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="{{ asset('premium', 'rappaus.avif').url }}" as="image" type="image/avif" fetchpriority="high">
-{% if hero_image %}<link rel="preload" as="image" href="{{ hero_image.src }}" imagesrcset="{{ hero_image.srcset }}" imagesizes="36vw" media="(min-width: 64rem)">{% endif %}
+<link rel="preload" href="{{ asset('premium', 'hero-p.avif').url }}" as="image" type="image/avif" media="(max-width: 63.99rem)" fetchpriority="high">
+<link rel="preload" href="{{ asset('premium', 'hero-l.avif').url }}" as="image" type="image/avif" media="(min-width: 64rem)" fetchpriority="high">
 {% endblock %}
 {% block body %}
 {% set varaus = business.booking_url %}
@@ -37,7 +39,8 @@
 
 <header class="yla">
   <div class="kehys yla-sisa">
-    <a class="logo" href="#sisalto">{{ business.name }}</a>
+    {# Pitkä nimi rivittyy (ei kolmea pistettä): yli 24 merkin nimi pienemmällä koolla #}
+    <a class="logo{% if nimen_pituus > 24 %} logo-pitka{% endif %}" href="#sisalto">{{ business.name }}</a>
     <nav class="yla-linkit" aria-label="Sivun osiot">
       <a href="#palvelut">{{ tpl.services_title }}</a>
       <a href="#meista">Meistä</a>
@@ -51,16 +54,18 @@
 
 <main id="sisalto">
   <section class="hero">
-    <div class="tausta" aria-hidden="true">
+    {# Still näkyy aina. elava.js piirtää ruutusarjan (data-ruudut-l leveä näyttö, -p puhelin) canvasille sen päälle. #}
+    <div class="tausta" aria-hidden="true" data-ruudut-l="{{ asset_series('premium', 'hero-l') | map(attribute='url') | join(' ') }}" data-ruudut-p="{{ asset_series('premium', 'hero-p') | map(attribute='url') | join(' ') }}">
       <picture>
-        <source srcset="{{ asset('premium', 'rappaus.avif').url }}" type="image/avif">
-        <img class="pinta" src="{{ asset('premium', 'rappaus.webp').url }}" alt="" width="1600" height="1600" fetchpriority="high" decoding="async">
+        <source media="(min-width: 64rem)" srcset="{{ asset('premium', 'hero-l.avif').url }}" type="image/avif" width="1600" height="900">
+        <source media="(min-width: 64rem)" srcset="{{ asset('premium', 'hero-l.webp').url }}" type="image/webp" width="1600" height="900">
+        <source srcset="{{ asset('premium', 'hero-p.avif').url }}" type="image/avif">
+        <img class="still" src="{{ asset('premium', 'hero-p.webp').url }}" alt="" width="780" height="724" fetchpriority="high" decoding="async">
       </picture>
-      <span class="valo"></span>
-      <span class="valo-osoitin"></span>
+      <span class="himmennys"></span>
       <span class="rae"></span>
     </div>
-    <div class="kehys hero-sisa{% if not hero_image %} ilman-kuvaa{% endif %}">
+    <div class="kehys hero-sisa">
       <div class="hero-teksti">
         {% if summary %}<p class="tila"><span>Tänään</span> <span data-tanaan>{{ summary }}</span></p>{% endif %}
         {# Luettava nimi on yläpalkin logossa; tämä on sama nimi isona #}
@@ -73,12 +78,6 @@
           {% if not varaus and not tel %}<a class="nappi" href="#palvelut">{{ tpl.services_title }}</a>{% endif %}
         </div>
       </div>
-      {% if hero_image %}
-      {# Vain isolla näytöllä (puhelimella sama kuva on kuvanauhan ensimmäinen): lazy, ettei piilotettu kuva lataudu #}
-      <div class="hero-kuva kuva">
-        <img src="{{ hero_image.src }}" srcset="{{ hero_image.srcset }}" sizes="36vw" width="1024" height="1280" alt="" loading="lazy" decoding="async">
-      </div>
-      {% endif %}
       {% if address_lines or arvio or business.phone %}
       <dl class="tiedot">
         {% if address_lines %}<div><dt>Osoite</dt><dd>{{ address_lines | join(', ') }}</dd></div>{% endif %}
@@ -129,10 +128,10 @@
 
     <div class="tumma">
       {% if kuvat %}
-      <section class="kuvat{% if not mood_images %} vain-hero{% endif %}" aria-label="Kuvia">
-        <ul class="kuvanauha" data-kuvia="{{ mood_images | length }}" tabindex="0">
+      <section class="kuvat" aria-label="Kuvia">
+        <ul class="kuvanauha" data-kuvia="{{ kuvat | length }}" tabindex="0">
           {% for img in kuvat %}
-          <li class="kuva{% if hero_image and loop.first %} kuva-hero{% endif %}"><img src="{{ img.src }}" srcset="{{ img.srcset }}" sizes="(min-width: 64rem) 30vw, 76vw" width="1024" height="1280" alt="" loading="lazy" decoding="async"></li>
+          <li class="kuva"><img src="{{ img.src }}" srcset="{{ img.srcset }}" sizes="(min-width: 64rem) 24vw, 76vw" width="1024" height="1280" alt="" loading="lazy" decoding="async"></li>
           {% endfor %}
         </ul>
       </section>
