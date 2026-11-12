@@ -264,6 +264,7 @@ from app.demo_site import (  # noqa: E402
     IMAGE_NOTE_PREMIUM_EXAMPLE,
     IMAGE_NOTE_PREMIUM_TIMMA,
     IMAGE_NOTE_TIMMA,
+    TIMMA_MIN_IMAGES,
     TIMMA_PRICES_NOTE,
     DemoImages,
     format_duration,
@@ -327,7 +328,7 @@ def test_demo_with_timma_uses_prices_booking_rating_and_images(
     client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
     fake_get: FakeTimma, unsplash_calls: list[str], template: str,
 ) -> None:
-    fake_get.queue.append(FakeResponse(body=_payload_with_images(3)))
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(TIMMA_MIN_IMAGES)))
     lead = make_lead(name="R-Mak parturi", phone="040 0218015", primary_type="barber_shop", website=RMAK_URL,
                      address="Pyyntitie 1 A, 02230 Espoo, Suomi", website_status="NO WEBSITE")
     fake_openai.reply = json.dumps(VALID)
@@ -338,7 +339,7 @@ def test_demo_with_timma_uses_prices_booking_rating_and_images(
     stored = demo["content"]["timma"]
     assert stored["booking_url"] == BOOKING
     assert stored["rating_avg"] == 5.0 and stored["rating_count"] == 262
-    assert len(stored["images"]) == 3
+    assert len(stored["images"]) == TIMMA_MIN_IMAGES == 2
     # Hinnasto kategorioittain, hinnat ja kestot
     assert "Leikkaukset" in html and "Ihokarvojen poisto" in html
     assert '<span class="timma-nimi">Parturileikkaus</span><span class="timma-kesto">30 min</span><span class="timma-hinta">25 €</span>' in html
@@ -360,7 +361,7 @@ def test_premium_demo_with_timma_uses_same_data_in_its_own_markup(
     client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
     fake_get: FakeTimma, unsplash_calls: list[str],
 ) -> None:
-    fake_get.queue.append(FakeResponse(body=_payload_with_images(3)))
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(TIMMA_MIN_IMAGES)))
     lead = make_lead(name="R-Mak parturi", phone="040 0218015", primary_type="barber_shop", website=RMAK_URL,
                      address="Pyyntitie 1 A, 02230 Espoo, Suomi", website_status="NO WEBSITE")
     fake_openai.reply = json.dumps(VALID)
@@ -395,10 +396,11 @@ def test_premium_banner_says_hero_is_illustration_in_every_case() -> None:
     assert image_note(base, "barber") is None and image_note(base) is None
 
 
-def test_timma_with_two_images_uses_unsplash_only(
+def test_timma_with_one_image_uses_unsplash_only(
     client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any],
     fake_get: FakeTimma, unsplash_calls: list[str],
 ) -> None:
+    fake_get.queue.append(FakeResponse(body=_payload_with_images(1)))
     lead = make_lead(name="R-Mak parturi", primary_type="barber_shop", website=RMAK_URL)
     fake_openai.reply = json.dumps(VALID)
     demo, html = _demo_html(client_a, lead["id"])

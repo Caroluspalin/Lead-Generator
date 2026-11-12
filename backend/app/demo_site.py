@@ -49,7 +49,7 @@ DEFAULT_PRICE_NOTE_SITE = "Ajanvaraus puhelimitse."
 SITE_PRICES_NOTE = "Hinnat nykyiseltä sivultanne."
 TIMMA_PRICES_NOTE = "Hinnat Timma-sivultanne."
 # Kuvat yhdestä lähteestä per demo: Timman kuvat vain jos niitä on vähintään näin monta, muuten Unsplash
-TIMMA_MIN_IMAGES = 3
+TIMMA_MIN_IMAGES = 2
 IMAGE_NOTE_TIMMA = "Kuvat Timma-sivultanne"
 IMAGE_NOTE_EXAMPLE = "Kuvat ovat esimerkkejä"
 # Premiumin heron veitsi on pohjan oma kuvitus, ei yrityksen kuva: maininta kuuluu kaikkiin premium-demoihin
