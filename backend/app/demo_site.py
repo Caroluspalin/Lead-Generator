@@ -568,6 +568,13 @@ SÄÄNNÖT:
 - Selkeä, rauhallinen ja asiallinen sävy. Lyhyet lauseet."""
 
 
+BARBER_PROMPT_TEMPLATES = ("barber", "premium")
+BARBER_PROMPT_LINE = (
+    "Sivu on parturille, vaikka Googlen luokka olisi muu: palvelut ovat parturin palveluita. Älä kirjoita "
+    "värjäyksistä, raidoista tai kampauksista, ellei niitä ole alla olevissa lähdetiedoissa."
+)
+
+
 def build_demo_prompt(
     *,
     name: str,
@@ -575,12 +582,16 @@ def build_demo_prompt(
     primary_type: Optional[str],
     website_context: Optional[str],
     site_facts: Optional[SiteFacts] = None,
+    template: Optional[str] = None,
 ) -> str:
     parts = [
         f"Yritys: {name}",
         f"Kaupunki: {city}",
         f"Toimiala (Googlen luokka englanniksi): {primary_type or 'ei tiedossa'}",
     ]
+    if template in BARBER_PROMPT_TEMPLATES:
+        # Käsin valittu parturipohja voittaa Googlen luokan (hair_care / hair_salon on usein myös parturi)
+        parts.append(BARBER_PROMPT_LINE)
     if site_facts and site_facts.services:
         # Hintoja ei anneta mallille: ne liitetään koodissa, jotta malli ei voi muuttaa niitä
         names = "\n".join(f"- {s.name}" for s in site_facts.services[:12])

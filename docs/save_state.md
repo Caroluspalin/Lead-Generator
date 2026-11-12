@@ -250,7 +250,7 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 | PUT | `/sender-profile` | Luo/päivitä profiili (name + short_intro pakollisia, tyhjät valinnaiset → null) |
 | GET | `/demo-templates` | Pohjat (version 2 pohjat ensin, `version`-kenttä) ja paletit |
 | GET | `/leads/{lead_id}/demo/screenshot` | 390 × 844 puhelinnäkymä JPEG:nä (Playwright, välimuisti HTML:n tiivisteellä). 501 jos Playwright puuttuu |
-| POST | `/leads/{lead_id}/demo` | Generoi demo (`template`/`color_scheme` valinnaisia, muuten primary_typen mukaan). 404/409 DNC/428 profiili puuttuu/502 sisältö ei läpäissyt validointia kahdesti |
+| POST | `/leads/{lead_id}/demo` | Generoi demo (`template`/`color_scheme` valinnaisia; ilman `template`a olemassa olevan demon pohja ja väri säilyvät (Regenerate, autodemo), primary_typen mukainen oletus vain ensimmäiselle demolle). Barber- ja premium-pohjalla promptiin rivi `BARBER_PROMPT_LINE` (parturin palvelut, ei värjäyksiä/raitoja/kampauksia ellei lähdetiedoissa), vaikka Googlen luokka olisi hair_care / hair_salon. 404/409 DNC/428 profiili puuttuu/502 sisältö ei läpäissyt validointia kahdesti |
 | GET | `/leads/{lead_id}/demo` | Demon tiedot (ilman HTML:ää) + `preview_url` |
 | PATCH | `/leads/{lead_id}/demo` | Vaihda pohja/värit ja/tai muokkaa tekstejä ilman AI-kutsua (renderöi uudelleen) |
 | DELETE | `/leads/{lead_id}/demo` | Poista demo (linkki lakkaa toimimasta) |

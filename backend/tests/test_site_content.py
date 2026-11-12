@@ -318,6 +318,16 @@ def test_prompt_lists_site_services_but_never_prices() -> None:
     assert "Leikkaamme naisten" in prompt
 
 
+@pytest.mark.parametrize("template,barber", [("barber", True), ("premium", True), ("salon", False), (None, False)])
+def test_prompt_barber_line_follows_template_not_google_type(template: str | None, barber: bool) -> None:
+    from app.demo_site import BARBER_PROMPT_LINE
+
+    prompt = build_demo_prompt(name="Parturi", city="Espoo", primary_type="hair_salon", website_context=None,
+                               template=template)
+    assert (BARBER_PROMPT_LINE in prompt) is barber
+    assert "värjäyksistä, raidoista tai kampauksista" in BARBER_PROMPT_LINE
+
+
 BUSINESS = DemoBusiness(name="Parturi Esimerkki", city="Espoo", address="Katu 1, 02100 Espoo, Suomi", phone="040 000 0000",
                         maps_url="https://maps.google.com/?cid=1")
 SENDER = DemoSender(name="Carolus Palin", company_name="Palin Web", phone="040 111 2222", website="https://palinweb.fi")

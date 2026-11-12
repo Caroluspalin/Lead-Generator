@@ -352,6 +352,37 @@ def test_regenerate_keeps_token(client_a: TestClient, lead: dict[str, Any], demo
     assert second["template"] == "services"
 
 
+def test_regenerate_without_template_keeps_manual_premium(
+    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.demo_site import BARBER_PROMPT_LINE, DemoImages
+
+    image_templates: list[str] = []
+
+    async def _find(_lead: Any, template: str) -> tuple[DemoImages, int]:
+        image_templates.append(template)
+        return DemoImages(), 0
+
+    monkeypatch.setattr("app.main.find_demo_images", _find)
+    # Googlen luokka hair_salon -> oletus olisi salon; käyttäjä valitsee parturin premium-pohjan
+    first = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "premium", "color_scheme": "pullo"}).json()
+    second = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    assert (second["template"], second["color_scheme"]) == ("premium", "pullo")
+    assert second["id"] == first["id"]
+    assert image_templates == ["premium", "premium"]
+    assert all(BARBER_PROMPT_LINE in str(call["messages"]) for call in demo_ready.calls)
+
+
+def test_first_demo_without_template_uses_google_type(
+    client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]
+) -> None:
+    from app.demo_site import BARBER_PROMPT_LINE
+
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    assert demo["template"] == "salon"
+    assert BARBER_PROMPT_LINE not in str(demo_ready.calls[0]["messages"])
+
+
 def test_patch_rerenders_without_ai_call(client_a: TestClient, lead: dict[str, Any], demo_ready: type[FakeOpenAI]) -> None:
     demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
     calls_before = len(demo_ready.calls)

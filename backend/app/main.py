@@ -2369,7 +2369,7 @@ async def generate_demo_content(
     allowed_text = " ".join(filter(None, [lead.name, lead.city, lead.address, lead.website_context, facts_text]))
     prompt = build_demo_prompt(
         name=lead.name, city=lead.city, primary_type=lead.primary_type, website_context=lead.website_context,
-        site_facts=site_facts,
+        site_facts=site_facts, template=template,
     )
     results: list[ChatResult] = []
     problems: list[str] = []
@@ -2453,10 +2453,16 @@ async def generate_demo(
     profile = _require_sender_profile(session, user)
     if not OPENAI_API_KEY:
         raise HTTPException(500, "OPENAI_API_KEY not configured")
+    demo = session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).first()
+    # Regenerate ilman pohjaa säilyttää käsin valitun pohjan ja värin; Googlen luokka vain ensimmäiselle demolle
+    if req.template:
+        template_choice, scheme_choice = req.template, req.color_scheme
+    elif demo is not None:
+        template_choice, scheme_choice = demo.template, req.color_scheme or demo.color_scheme
+    else:
+        template_choice, scheme_choice = template_for_primary_type(lead.primary_type), req.color_scheme
     try:
-        template, scheme = validate_template_choice(
-            req.template or template_for_primary_type(lead.primary_type), req.color_scheme
-        )
+        template, scheme = validate_template_choice(template_choice, scheme_choice)
     except ValueError as e:
         raise HTTPException(422, str(e))
 
@@ -2502,7 +2508,6 @@ async def generate_demo(
     _log_demo_cost(lead_id, results, place_calls, unsplash_requests=searches + len(used))
 
     html = _render_for(template, scheme, stored, lead, profile)
-    demo = session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).first()
     if demo is None:
         demo = Demo(
             user_id=user.id, lead_id=lead_id, template=template, color_scheme=scheme,
