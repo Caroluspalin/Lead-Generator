@@ -282,9 +282,9 @@ def test_email_link_only_for_published_demo(
     fake_openai.reply = "Olen Palin ja teen nettisivuja.\n\nAsiakas ei näe aukioloaikojanne. [DEMO_LINKKI]"
     body = client_a.post(f"/leads/{lead_id}/generate-email", json={}).json()["body"]
     # Linkki omalla rivillään koodin kappaleessa, julkinen osoite (ei backendin esikatselua)
-    assert f"miltä sivunne voisivat näyttää:\n{published['public_url']}\nVoitte katsoa" in body
+    assert f"miltä sivunne voisivat näyttää:\n{published['public_url']}\nLinkki aukeaa suoraan puhelimella." in body
     assert "testserver" not in body and "[DEMO_LINKKI]" not in body
-    assert "Kirjoitat suomeksi KAKSI lyhyttä kappaletta" in fake_openai.calls[-1]["messages"][0]["content"]
+    assert "Kirjoitat suomeksi enintään KAKSI lyhyttä kappaletta" in fake_openai.calls[-1]["messages"][0]["content"]
 
     client_a.post(f"/leads/{lead_id}/demo/unpublish")
     fake_openai.reply = "Hei,\n\nTein luonnoksen: [DEMO_LINKKI]"

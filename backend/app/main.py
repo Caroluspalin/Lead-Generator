@@ -60,6 +60,7 @@ from .demo_site import (
     is_v2_template,
     attach_site_prices,
     BOOKING_TEMPLATES,
+    DemoTimma,
     demo_timma,
     shows_prices,
     timma_prompt_facts,
@@ -1275,7 +1276,7 @@ DEMO_LINK_SENTENCE = "Tein teille jo valmiin luonnoksen, jonka voitte katsoa tä
 DEMO_OFFER = DEMO_LINK_SENTENCE.format(url=DEMO_LINK_PLACEHOLDER)
 
 # Lisätään koodissa jokaisen viestin loppuun, jotta ne ovat aina mukana (ei luoteta malliin)
-OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastaa vain "ei kiitos", niin en ota enää yhteyttä.'
+OPT_OUT_LINE = 'Jos tämä ei ole ajankohtaista, vastatkaa vain "ei kiitos", niin en ota enää yhteyttä.'
 SIGN_OFF = "Terveisin,"
 MAX_EMAIL_WORDS = 90
 
@@ -1470,28 +1471,43 @@ def finalize_email_body(text: str, profile: SenderProfile, demo_url: Optional[st
 
 
 # --- Sähköposti julkaistun demon kanssa ---
-# Malli kirjoittaa vain kappaleet 1–2 (kuka olen + miten löysin, mitä asiakkaille tapahtuu nyt).
-# Kappaleet 3–5 ja allekirjoitus tulevat koodista, joten linkki, riskittömyys ja seuraava askel
-# ovat aina mukana, eikä viesti pääty mielipidekysymykseen ("Mitä pidätte?").
+# Järjestys: "Hei," + linkkikappale (koodi) + mallin 1–2 kappaletta (kuka olen + miten löysin, asiakasvaikutus
+# vain oikeasta ongelmasta) + tarjous (koodi) + seuraava askel (koodi). Linkki, hinta ja määräaika tulevat
+# aina koodista, eikä viesti pääty mielipidekysymykseen ("Mitä pidätte?").
 
-DEMO_EMAIL_MAX_WORDS = 110  # koko viesti ennen allekirjoitusta
-DEMO_MODEL_MAX_WORDS = 55  # mallin kappaleet 1–2; koodin osuus on n. 50 sanaa
+DEMO_EMAIL_MAX_WORDS = 150  # koko viesti ennen allekirjoitusta: koodin osuus ~100 sanaa + mallin ~50
+DEMO_MODEL_MAX_WORDS = 50  # mallin kappaleet 1–2; koodin osuus on n. 85–100 sanaa
+# Hinta tulee .env:stä; tyhjä arvo jättää hintalauseen pois (ei oletusta tyhjälle, vain puuttuvalle)
+OFFER_PRICE_TEXT = os.getenv("OFFER_PRICE_TEXT", "390 €").strip()
 
-DEMO_LINK_PARAGRAPH = "Tein teille luonnoksen siitä, miltä sivunne voisivat näyttää:\n{url}\nVoitte katsoa sen suoraan puhelimella."
+DEMO_LINK_PARAGRAPH = (
+    "Tein teille luonnoksen siitä, miltä sivunne voisivat näyttää:\n{url}\nLinkki aukeaa suoraan puhelimella."
+)
 # Demo kirjoitettiin yrityksen nykyisen sivun palveluista/hinnoista/esittelystä
 DEMO_LINK_PARAGRAPH_SITE = (
     "Tein luonnoksen nykyisten tietojenne pohjalta, jotta näette miltä sivunne voisivat näyttää:\n{url}\n"
-    "Voitte katsoa sen suoraan puhelimella."
+    "Linkki aukeaa suoraan puhelimella."
 )
+# Timma-demo: {business} = parturillenne / kampaamollenne / teille, {contents} = demossa oikeasti näkyvät asiat
+DEMO_LINK_PARAGRAPH_TIMMA = (
+    "tein {business} valmiin nettisivun luonnoksen. Siinä on jo {contents}:\n{url}\nLinkki aukeaa suoraan puhelimella."
+)
+TIMMA_BOOKING_CLAUSE = ", jotka vievät suoraan Timmaanne"
+DEMO_BUSINESS_WORD_BY_TEMPLATE: Dict[str, str] = {"barber": "parturillenne", "premium": "parturillenne", "salon": "kampaamollenne", "cafe": "kahvilallenne"}
+DEMO_BUSINESS_WORD_DEFAULT = "teille"
 # Liidin website on ajanvarausalusta: salon/barber-demon Varaa aika -nappi vie sinne
 DEMO_BOOKING_SENTENCE = "Nykyinen ajanvarauksenne toimii sivulla sellaisenaan."
 DEMO_BOOKING_TEMPLATES = BOOKING_TEMPLATES
-DEMO_RISK_PARAGRAPH = (
-    "Luonnos on ilmainen eikä sido teitä mihinkään. Jos se näyttää hyvältä, "
-    "viimeistelen sen teidän omilla tiedoillanne ja kuvillanne."
+DEMO_OFFER_FREE = "Luonnos on ilmainen eikä sido mihinkään."
+DEMO_OFFER_DOMAIN_WITH_PRICE = (
+    "Jos haluatte sen käyttöön omalla verkkotunnuksellanne, hinta on {price} kertamaksuna "
+    "(verkkotunnuksen vuosimaksu erikseen) ja sivu on yleensä valmis viikossa."
 )
-DEMO_NEXT_STEP_WITH_PHONE = "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin tai soittaa minulle numeroon {phone}."
-DEMO_NEXT_STEP = "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin."
+DEMO_OFFER_DOMAIN = "Jos haluatte sen käyttöön omalla verkkotunnuksellanne, sivu on yleensä valmis viikossa."
+DEMO_OFFER_INVOICE = "Lasku lähtee vasta, kun olette hyväksyneet valmiin sivun."
+DEMO_NEXT_STEP_WITH_PHONE = 'Vastatkaa tähän "kyllä" tai soittakaa {phone}, niin hoidan loput.'
+DEMO_NEXT_STEP = 'Vastatkaa tähän "kyllä", niin hoidan loput.'
+DEMO_EXPIRY_SENTENCE = "Linkki on voimassa {date} asti."
 
 # Mitä asiakkaalle konkreettisesti tapahtuu nyt (vihje kappaleeseen 2). Tarkin osuma issue-tekstistä ensin.
 CUSTOMER_IMPACT_BY_ISSUE: list[tuple[str, str]] = [
@@ -1564,18 +1580,66 @@ def clean_demo_paragraphs(text: str) -> list[str]:
     return paragraphs[:2]
 
 
-def demo_next_step(profile: SenderProfile) -> str:
-    return DEMO_NEXT_STEP_WITH_PHONE.format(phone=profile.phone) if profile.phone else DEMO_NEXT_STEP
+def has_real_problem(website_status: Optional[str]) -> bool:
+    """Asiakasvaikutus kerrotaan vain varmistetusta ongelmasta (ei UNKNOWN / WEBSITE OK)."""
+    return website_status not in (None, "UNKNOWN", "WEBSITE OK")
+
+
+def demo_offer_paragraph() -> str:
+    domain = DEMO_OFFER_DOMAIN_WITH_PRICE.format(price=OFFER_PRICE_TEXT) if OFFER_PRICE_TEXT else DEMO_OFFER_DOMAIN
+    return f"{DEMO_OFFER_FREE} {domain} {DEMO_OFFER_INVOICE}"
+
+
+def demo_next_step(profile: SenderProfile, expires_at: Optional[datetime] = None) -> str:
+    step = DEMO_NEXT_STEP_WITH_PHONE.format(phone=profile.phone) if profile.phone else DEMO_NEXT_STEP
+    if expires_at is None:
+        return step
+    # UTC-päivä: Suomen aikaa myöhäisillä tunneilla päivä on korkeintaan yhtä aikaisempi, eli turvallinen suunta
+    date = _as_utc(expires_at)
+    return f"{step} {DEMO_EXPIRY_SENTENCE.format(date=f'{date.day}.{date.month}.')}"
+
+
+def timma_link_paragraph(timma: DemoTimma, template: str, demo_url: str) -> str:
+    """Linkkikappale, joka mainitsee vain sen, mitä demossa oikeasti näkyy (hinnasto, arvio, varausnapit)."""
+    contents: list[str] = []
+    if timma.has_prices:
+        contents.append("Timma-hinnastonne")
+    if timma.rating_avg is not None and timma.rating_count:
+        contents.append(f"arvostelunne ({timma.rating_avg:.1f} · {timma.rating_count})".replace(".", ",", 1))
+    if timma.booking_url:
+        contents.append("Varaa aika -napit")
+    joined = contents[0] if len(contents) == 1 else f"{', '.join(contents[:-1])} ja {contents[-1]}"
+    if timma.booking_url:
+        joined += TIMMA_BOOKING_CLAUSE
+    business = DEMO_BUSINESS_WORD_BY_TEMPLATE.get(template, DEMO_BUSINESS_WORD_DEFAULT)
+    return DEMO_LINK_PARAGRAPH_TIMMA.format(business=business, contents=joined, url=demo_url)
 
 
 def build_demo_email_body(
-    text: str, profile: SenderProfile, demo_url: str, *, site_based: bool = False, has_booking: bool = False
+    text: str,
+    profile: SenderProfile,
+    demo_url: str,
+    *,
+    site_based: bool = False,
+    has_booking: bool = False,
+    timma: Optional[DemoTimma] = None,
+    template: str = "",
+    has_problem: bool = True,
+    expires_at: Optional[datetime] = None,
 ) -> str:
-    """Hei + mallin kappaleet 1–2 + linkki omalla rivillään + riskittömyys + seuraava askel + allekirjoitus."""
-    link = (DEMO_LINK_PARAGRAPH_SITE if site_based else DEMO_LINK_PARAGRAPH).format(url=demo_url)
-    if has_booking:
-        link = f"{link} {DEMO_BOOKING_SENTENCE}"
-    parts = ["Hei,", *clean_demo_paragraphs(text), link, DEMO_RISK_PARAGRAPH, demo_next_step(profile)]
+    """Hei + linkkikappale + mallin kappaleet + tarjous + seuraava askel + allekirjoitus + opt-out.
+
+    `timma` annetaan vain kun demon pohja oikeasti näyttää Timma-dataa (BOOKING_TEMPLATES).
+    Ilman ongelmaa (`has_problem` False) mallilta otetaan vain ensimmäinen kappale (kuka olen).
+    """
+    if timma is not None and template in DEMO_BOOKING_TEMPLATES:
+        link = timma_link_paragraph(timma, template, demo_url)
+    else:
+        link = (DEMO_LINK_PARAGRAPH_SITE if site_based else DEMO_LINK_PARAGRAPH).format(url=demo_url)
+        if has_booking:
+            link = f"{link} {DEMO_BOOKING_SENTENCE}"
+    model_paragraphs = clean_demo_paragraphs(text)[: 2 if has_problem else 1]
+    parts = ["Hei,", link, *model_paragraphs, demo_offer_paragraph(), demo_next_step(profile, expires_at)]
     head = "\n\n".join(parts)
     return f"{head}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
 
@@ -1727,17 +1791,17 @@ PAKOLLISET SÄÄNNÖT:
 11. ÄLÄ kirjoita lopputervehdystä, allekirjoitusta tai "jos ei kiinnosta" -riviä — ne lisätään automaattisesti.
 12. Palauta VAIN viestin teksti (ei subject-riviä)."""
 
-DEMO_EMAIL_SYSTEM_PROMPT = f"""Kirjoitat suomeksi KAKSI lyhyttä kappaletta ensimmäisen yhteydenoton sähköpostiin paikalliselle
+DEMO_EMAIL_SYSTEM_PROMPT = f"""Kirjoitat suomeksi enintään KAKSI lyhyttä kappaletta ensimmäisen yhteydenoton sähköpostiin paikalliselle
 yritykselle. Lähettäjä on yksityinen tekijä (tiedot LÄHETTÄJÄ-kohdassa), joka on jo tehnyt yritykselle luonnoksen
-nettisivuista. Viestin muut osat (tervehdys, linkki luonnokseen, tarjous, yhteydenottopyyntö, allekirjoitus)
-lisätään automaattisesti — älä kirjoita niitä.
+nettisivuista. Teksti tulee viestissä heti luonnoksen linkin jälkeen. Viestin muut osat (tervehdys, linkki
+luonnokseen, tarjous ja hinta, yhteydenottopyyntö, allekirjoitus) lisätään automaattisesti — älä kirjoita niitä.
 
 KAPPALE 1: kuka olen ja miten löysin yrityksen. Yksi tai kaksi lausetta, esim.
    "Olen Palin ja teen nettisivuja paikallisille yrityksille. Etsin parturi-kampaamoja Kauniaisista ja löysin teidät Googlesta."
    Käytä LÄHETTÄJÄ-kohdan nimeä ja esittelyä, toimialaa ja kaupunkia (taivuta luontevasti).
-KAPPALE 2: mitä asiakkaille tapahtuu nyt, konkreettisesti ASIAKKAAN TILANNE -kohdan mukaan. Yksi tai kaksi lausetta.
-   Kerro se omana havaintona asiakkaan näkökulmasta, ei yleistä "moni etsii netistä" -lausetta.
-   Ei pelottelua, ei liioittelua, ei lupauksia.
+KAPPALE 2: vain jos ASIAKKAAN TILANNE -kohta on annettu: mitä asiakkaille tapahtuu nyt, konkreettisesti sen mukaan.
+   Yksi tai kaksi lausetta. Kerro se omana havaintona asiakkaan näkökulmasta, ei yleistä "moni etsii netistä" -lausetta.
+   Ei pelottelua, ei liioittelua, ei lupauksia. Jos kohtaa ei ole annettu, kirjoita vain kappale 1 äläkä keksi ongelmaa.
 
 SÄÄNNÖT:
 - Te-muoto johdonmukaisesti (teidän, teille, sivunne, voitte). Ei koskaan sinä-muotoa.
@@ -1751,7 +1815,7 @@ SÄÄNNÖT:
   digitaalinen läsnäolo, nostaa seuraavalle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia,
   liiketoiminnan kasvu, keskustella tarkemmin, saattaa. Ei teknistä jargonia (SSL, HTTPS, DNS, sertifikaatti,
   domain, viewport, virhekoodit).
-- Palauta VAIN nämä kaksi kappaletta."""
+- Palauta VAIN nämä kappaleet."""
 
 CALL_SCRIPT_SYSTEM_PROMPT = """Kirjoitat suomeksi lyhyen (n. 30 sekuntia puhuttuna) puhelinrungon soittajalle, joka soittaa
 paikalliselle yritykselle ensimmäistä kertaa. Kuulostaa tavalliselta ihmiseltä, ei myyntikoulutukselta.
@@ -1870,8 +1934,11 @@ def build_demo_email_user_prompt(lead: Lead, profile: SenderProfile, instruction
         parts.append(f"HAVAINTO (varma, tein sen itse): {problem}")
     else:
         parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
-    parts.append(f"ASIAKKAAN TILANNE NYT (kappale 2): {customer_impact(lead.website_status, lead.website_issue)}")
-    parts.append("\nKirjoita kappaleet 1 ja 2.")
+    if has_real_problem(lead.website_status):
+        parts.append(f"ASIAKKAAN TILANNE NYT (kappale 2): {customer_impact(lead.website_status, lead.website_issue)}")
+        parts.append("\nKirjoita kappaleet 1 ja 2.")
+    else:
+        parts.append("\nKirjoita vain kappale 1.")
     if instruction:
         parts.append(f"\nLisäohje: {instruction}")
     return "\n".join(parts)
@@ -1995,10 +2062,24 @@ async def generate_email(
             DEMO_EMAIL_SYSTEM_PROMPT, build_demo_email_user_prompt(db_lead, profile, req.instruction), max_tokens=300
         )
         model = result.model
-        site_based = DemoStoredContent.model_validate_json(demo.content_json).site_based if demo else False
-        has_booking = demo_booking_url(db_lead) is not None and demo is not None and demo.template in DEMO_BOOKING_TEMPLATES
-        body = build_demo_email_body(result.text, profile, demo_url, site_based=site_based, has_booking=has_booking)
-        check_generated_text(email_head(body), kind="sähköposti", lead_id=lead_id, model=model, max_words=DEMO_EMAIL_MAX_WORDS - 20)
+        stored = DemoStoredContent.model_validate_json(demo.content_json)
+        has_booking = demo_booking_url(db_lead) is not None and demo.template in DEMO_BOOKING_TEMPLATES
+        body = build_demo_email_body(
+            result.text,
+            profile,
+            demo_url,
+            site_based=stored.site_based,
+            has_booking=has_booking,
+            timma=stored.timma,
+            template=demo.template,
+            has_problem=has_real_problem(db_lead.website_status),
+            expires_at=demo.expires_at,
+        )
+        # Tarjouksen hinta on tarkoituksellinen, joten hintatarkistus ei saa lokittaa sitä vääränä hälytyksenä
+        checked = email_head(body)
+        if OFFER_PRICE_TEXT:
+            checked = checked.replace(OFFER_PRICE_TEXT, "")
+        check_generated_text(checked, kind="sähköposti", lead_id=lead_id, model=model, max_words=DEMO_EMAIL_MAX_WORDS - 20)
         subject = demo_email_subject(db_lead)
     else:
         result = await _chat_completion(

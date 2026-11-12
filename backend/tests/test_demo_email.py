@@ -1,6 +1,8 @@
 """Sähköposti julkaistun demon kanssa: rakenne per ongelmatyyppi, ei loppukysymystä, allekirjoitus, brand_name."""
 import json
+import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pytest
@@ -10,7 +12,7 @@ from app.main import (
     CUSTOMER_IMPACT_DEFAULT,
     DEMO_EMAIL_MAX_WORDS,
     DEMO_LINK_PARAGRAPH,
-    DEMO_RISK_PARAGRAPH,
+    DEMO_LINK_PARAGRAPH_SITE,
     OPT_OUT_LINE,
     build_demo_email_body,
     build_signature,
@@ -20,6 +22,7 @@ from app.main import (
     display_website,
     email_head,
 )
+from app.demo_site import DemoTimma, PriceCategory, PriceItem
 from app.models import Lead, SenderProfile
 from app.text_quality import word_count
 from tests.conftest import FakeOpenAI
@@ -37,6 +40,20 @@ MODEL_TEXT = (
 def _profile(**kw: Any) -> SenderProfile:
     base: dict[str, Any] = {"user_id": "u", "name": "Palin", "short_intro": "teen nettisivuja"}
     return SenderProfile(**{**base, **kw})
+
+
+EXPIRES = datetime(2026, 12, 12, 9, 30, tzinfo=timezone.utc)
+PRICE_SENTENCE = "hinta on 390 € kertamaksuna (verkkotunnuksen vuosimaksu erikseen) ja sivu on yleensä valmis viikossa."
+
+
+def _timma(**kw: Any) -> DemoTimma:
+    base: dict[str, Any] = {
+        "booking_url": "https://timma.fi/yritys/rmak",
+        "rating_avg": 5.0,
+        "rating_count": 262,
+        "price_list": [PriceCategory(name="Hiukset", items=[PriceItem(name="Leikkaus", price="25 €")])],
+    }
+    return DemoTimma(**{**base, **kw})
 
 
 def _lead(status: str, issue: Optional[str] = None) -> Lead:
@@ -113,26 +130,115 @@ def test_subject_is_personal_not_corporate() -> None:
 # --- Rakenne ---
 
 def test_body_structure_and_order() -> None:
-    body = build_demo_email_body(MODEL_TEXT, _profile(brand_name="Palin Web", website="https://palinweb.fi", phone="040 123 4567"), URL)
+    body = build_demo_email_body(
+        MODEL_TEXT, _profile(brand_name="Palin Web", website="https://palinweb.fi", phone="040 123 4567"), URL,
+        expires_at=EXPIRES,
+    )
     head, _, tail = body.partition("\n\nTerveisin,\n")
     paragraphs = head.split("\n\n")
     assert paragraphs[0] == "Hei,"
-    assert paragraphs[1].startswith("Olen Palin")  # 1: kuka olen + miten löysin
-    assert paragraphs[2].startswith("Asiakas löytää teidät kartalta")  # 2: mitä tapahtuu nyt
-    assert paragraphs[3] == DEMO_LINK_PARAGRAPH.format(url=URL)  # 3: linkki omalla rivillään + puhelin
-    assert f"\n{URL}\n" in paragraphs[3] and "puhelimella" in paragraphs[3]
-    assert paragraphs[4] == DEMO_RISK_PARAGRAPH  # 4: ilmainen, ei sido, viimeistelen tiedoillanne ja kuvillanne
-    assert "ilmainen" in paragraphs[4] and "sido teitä mihinkään" in paragraphs[4] and "kuvillanne" in paragraphs[4]
-    assert paragraphs[5] == "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin tai soittaa minulle numeroon 040 123 4567."
+    assert paragraphs[1] == DEMO_LINK_PARAGRAPH.format(url=URL)  # 1: linkki ensin, omalla rivillään
+    assert f"\n{URL}\n" in paragraphs[1] and paragraphs[1].endswith("Linkki aukeaa suoraan puhelimella.")
+    assert paragraphs[2].startswith("Olen Palin")  # kuka olen + miten löysin
+    assert paragraphs[3].startswith("Asiakas löytää teidät kartalta")  # mitä tapahtuu nyt
+    assert paragraphs[4] == (
+        "Luonnos on ilmainen eikä sido mihinkään. Jos haluatte sen käyttöön omalla verkkotunnuksellanne, "
+        f"{PRICE_SENTENCE} Lasku lähtee vasta, kun olette hyväksyneet valmiin sivun."
+    )
+    assert paragraphs[5] == 'Vastatkaa tähän "kyllä" tai soittakaa 040 123 4567, niin hoidan loput. Linkki on voimassa 12.12. asti.'
     assert len(paragraphs) == 6
     assert tail == f"Palin\nPalin Web · palinweb.fi\n040 123 4567\n\n{OPT_OUT_LINE}"
     assert word_count(head) <= DEMO_EMAIL_MAX_WORDS
+    assert "?" not in head
+
+
+def test_opt_out_line_is_in_you_form() -> None:
+    assert OPT_OUT_LINE == 'Jos tämä ei ole ajankohtaista, vastatkaa vain "ei kiitos", niin en ota enää yhteyttä.'
+
+
+def test_site_based_link_paragraph_ends_with_phone_note() -> None:
+    body = build_demo_email_body(MODEL_TEXT, _profile(), URL, site_based=True)
+    assert DEMO_LINK_PARAGRAPH_SITE.format(url=URL) in body
+    assert "Linkki aukeaa suoraan puhelimella." in body and "Voitte katsoa" not in body
+
+
+# --- Timma-demo: linkkikappale mainitsee vain sen, mitä demossa on ---
+
+@pytest.mark.parametrize(
+    ("template", "business_word"),
+    [("barber", "parturillenne"), ("premium", "parturillenne"), ("salon", "kampaamollenne")],
+)
+def test_timma_link_paragraph_per_template(template: str, business_word: str) -> None:
+    body = build_demo_email_body(MODEL_TEXT, _profile(), URL, timma=_timma(), template=template)
+    paragraphs = email_head(body).split("\n\n")
+    assert paragraphs[1] == (
+        f"tein {business_word} valmiin nettisivun luonnoksen. Siinä on jo Timma-hinnastonne, arvostelunne (5,0 · 262) "
+        f"ja Varaa aika -napit, jotka vievät suoraan Timmaanne:\n{URL}\nLinkki aukeaa suoraan puhelimella."
+    )
+    assert paragraphs[2].startswith("Olen Palin")
+    assert "Nykyinen ajanvarauksenne" not in body  # Timma-kappale kattaa varauksen
+    assert word_count(email_head(body)) <= DEMO_EMAIL_MAX_WORDS
+
+
+def test_timma_link_paragraph_without_rating() -> None:
+    for timma in (_timma(rating_avg=None), _timma(rating_count=0)):
+        link = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL, timma=timma, template="barber")).split("\n\n")[1]
+        assert "arvostelu" not in link
+        assert "Siinä on jo Timma-hinnastonne ja Varaa aika -napit, jotka vievät suoraan Timmaanne:" in link
+
+
+def test_timma_link_paragraph_without_prices() -> None:
+    timma = _timma(price_list=[PriceCategory(name="Hiukset", items=[PriceItem(name="Leikkaus")])])
+    link = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL, timma=timma, template="salon")).split("\n\n")[1]
+    assert "hinnasto" not in link.lower()
+    assert "Siinä on jo arvostelunne (5,0 · 262) ja Varaa aika -napit, jotka vievät suoraan Timmaanne:" in link
+
+
+def test_timma_rating_uses_comma_decimal() -> None:
+    link = email_head(
+        build_demo_email_body(MODEL_TEXT, _profile(), URL, timma=_timma(rating_avg=4.8, rating_count=12), template="barber")
+    ).split("\n\n")[1]
+    assert "arvostelunne (4,8 · 12)" in link
+
+
+def test_timma_ignored_for_template_that_does_not_show_it() -> None:
+    body = build_demo_email_body(MODEL_TEXT, _profile(), URL, timma=_timma(), template="cafe")
+    assert email_head(body).split("\n\n")[1] == DEMO_LINK_PARAGRAPH.format(url=URL)
+    assert "Timma" not in body
+
+
+# --- Tarjous ja seuraava askel ---
+
+def test_offer_price_comes_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.main.OFFER_PRICE_TEXT", "450 €")
+    assert "hinta on 450 € kertamaksuna" in build_demo_email_body(MODEL_TEXT, _profile(), URL)
+
+
+def test_empty_offer_price_drops_only_the_price_clause(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.main.OFFER_PRICE_TEXT", "")
+    offer = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL)).split("\n\n")[4]
+    assert offer == (
+        "Luonnos on ilmainen eikä sido mihinkään. Jos haluatte sen käyttöön omalla verkkotunnuksellanne, "
+        "sivu on yleensä valmis viikossa. Lasku lähtee vasta, kun olette hyväksyneet valmiin sivun."
+    )
+    assert "hinta" not in offer and "€" not in offer
+
+
+def test_expiry_date_is_omitted_without_expires_at() -> None:
+    body = build_demo_email_body(MODEL_TEXT, _profile(phone="040 1"), URL)
+    assert 'Vastatkaa tähän "kyllä" tai soittakaa 040 1, niin hoidan loput.\n\nTerveisin,' in body
+    assert "voimassa" not in body
+
+
+def test_no_problem_keeps_only_intro_paragraph() -> None:
+    body = build_demo_email_body(MODEL_TEXT, _profile(), URL, has_problem=False)
+    assert "Olen Palin" in body and "Asiakas löytää teidät kartalta" not in body
 
 
 def test_next_step_without_phone_only_asks_to_reply() -> None:
-    body = build_demo_email_body(MODEL_TEXT, _profile(), URL)
-    assert "Jos haluatte jatkaa, voitte vastata suoraan tähän viestiin.\n\nTerveisin," in body
-    assert "soittaa" not in email_head(body).split("\n\n")[-1]
+    body = build_demo_email_body(MODEL_TEXT, _profile(), URL, expires_at=EXPIRES)
+    assert 'Vastatkaa tähän "kyllä", niin hoidan loput. Linkki on voimassa 12.12. asti.\n\nTerveisin,' in body
+    assert "soittakaa" not in email_head(body).split("\n\n")[-1]
 
 
 @pytest.mark.parametrize(
@@ -150,7 +256,7 @@ def test_closing_opinion_question_never_ends_up_in_email(closing: str) -> None:
     head = email_head(body)
     assert closing not in body
     assert "?" not in head
-    assert head.endswith("soittaa minulle numeroon 040 1.")
+    assert head.endswith("soittakaa 040 1, niin hoidan loput.")
 
 
 def test_model_extras_are_removed() -> None:
@@ -224,6 +330,34 @@ def test_generate_email_with_demo_per_problem_type(
     assert f"\n{made['demo']['public_url']}\n" in body
     assert "Mitä pidätte" not in body and "?" not in email_head(body)
     assert word_count(email_head(body)) <= DEMO_EMAIL_MAX_WORDS
+
+
+def test_generate_email_offer_expiry_and_no_false_price_warning(
+    client_a: TestClient, published: Any, fake_openai: type[FakeOpenAI], monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr("app.main.scrape_website_text", lambda _url: None)
+    made = published("NO WEBSITE")
+    fake_openai.reply = MODEL_TEXT
+    with caplog.at_level(logging.WARNING):
+        body = client_a.post(f"/leads/{made['lead']['id']}/generate-email", json={"require_demo_link": True}).json()["body"]
+    assert "hinta on 390 € kertamaksuna" in body
+    expires = datetime.fromisoformat(made["demo"]["expires_at"])
+    assert f"Linkki on voimassa {expires.day}.{expires.month}. asti." in body
+    assert "Linkki aukeaa suoraan puhelimella." in body and "Timma" not in body
+    assert not [r for r in caplog.records if "mainitaan hinta" in r.getMessage()]
+
+
+def test_generate_email_for_site_without_verified_problem_asks_only_intro(
+    client_a: TestClient, published: Any, fake_openai: type[FakeOpenAI], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.main.scrape_website_text", lambda _url: None)
+    made = published("UNKNOWN")
+    fake_openai.reply = MODEL_TEXT
+    body = client_a.post(f"/leads/{made['lead']['id']}/generate-email", json={"require_demo_link": True}).json()["body"]
+    user_prompt = fake_openai.calls[-1]["messages"][1]["content"]
+    assert "ASIAKKAAN TILANNE" not in user_prompt and "Kirjoita vain kappale 1." in user_prompt
+    assert "Olen Palin" in body and "Asiakas löytää teidät kartalta" not in body
 
 
 def test_email_without_demo_keeps_previous_flow(
