@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { Agency, Demo, SavedAgency, PipelineStatus } from '../types/agency';
 import { apiFetch } from '../lib/api';
@@ -29,32 +29,47 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const { session } = useAuth();
+  const userId = session?.user.id ?? null;
   const [savedAgencies, setSavedAgencies] = useState<SavedAgency[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Käyttäjä, jonka liidit on ladattu. Myöhemmät haut päivittävät listan taustalla:
+  // luurangot tai virhepaneeli sulkisivat avoimen modaalin ja nollaisivat scrollin.
+  const loadedForRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!session) {
+    if (!userId) {
+      loadedForRef.current = null;
       setSavedAgencies([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
-    setError('');
+    const firstLoad = loadedForRef.current !== userId;
+    if (firstLoad) {
+      setSavedAgencies([]);
+      setLoading(true);
+      setError('');
+    }
     try {
       const res = await apiFetch(`/leads`);
       if (!res.ok) {
         throw new Error(`Palvelin palautti virheen: ${res.status}`);
       }
-      const data = await res.json();
+      const data: SavedAgency[] = await res.json();
       setSavedAgencies(data);
+      loadedForRef.current = userId;
+      setError('');
     } catch (err) {
       console.error('Failed to fetch leads:', err);
-      setError('Failed to load leads. Make sure the backend is running.');
+      if (firstLoad) {
+        setError('Failed to load leads. Make sure the backend is running.');
+      }
     } finally {
-      setLoading(false);
+      if (firstLoad) {
+        setLoading(false);
+      }
     }
-  }, [session]);
+  }, [userId]);
 
   useEffect(() => {
     refresh();

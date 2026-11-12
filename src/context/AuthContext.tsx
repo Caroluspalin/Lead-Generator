@@ -33,13 +33,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     if (!supabase) return;
 
+    // Tokenin päivitys (esim. välilehdelle palatessa) tuo uuden session-olion samalle käyttäjälle.
+    // Pidetään vanha olio, ettei koko sovellus hae dataa uudelleen. apiFetch hakee tuoreen tokenin itse.
+    const applySession = (next: Session | null) =>
+      setSession((prev) => (prev?.user.id === next?.user.id ? prev : next));
+
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+      applySession(data.session);
       setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
+      applySession(newSession);
     });
 
     return () => {
