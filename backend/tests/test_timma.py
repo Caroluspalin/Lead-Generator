@@ -128,12 +128,20 @@ def test_show_prices_false_hides_prices() -> None:
     assert all(s.price_cents is None and not s.from_price for s in data.services)
 
 
-@pytest.mark.parametrize("flag", ["hideFromMarketplace", "noOnlineBookingIndexing"])
-def test_hidden_business_is_not_used(flag: str) -> None:
+def test_hidden_business_is_not_used() -> None:
     payload = rmak_payload()
-    payload[flag] = True
+    payload["hideFromMarketplace"] = True
     snapshot = parse_timma(payload, "x")
     assert snapshot.status == "hidden" and snapshot.data is None
+
+
+def test_no_online_booking_indexing_still_imports() -> None:
+    payload = rmak_payload()
+    payload["noOnlineBookingIndexing"] = True
+    payload["hideFromMarketplace"] = False
+    snapshot = parse_timma(payload, "x")
+    assert snapshot.status == "ok"
+    assert snapshot.data == parse_timma(rmak_payload(), "x").data
 
 
 def test_not_for_sale_services_and_foreign_images_skipped() -> None:

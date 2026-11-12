@@ -63,7 +63,7 @@ class TimmaSnapshot(BaseModel):
     """Tallennetaan Lead.timma_data-sarakkeeseen.
 
     ok = data käytettävissä, not_found = sivua ei ole, hidden = yritys on piilottanut sivun
-    (hideFromMarketplace / noOnlineBookingIndexing): dataa ei tallenneta eikä käytetä.
+    (hideFromMarketplace): dataa ei tallenneta eikä käytetä.
     """
     status: Literal["ok", "not_found", "hidden"]
     slug: str
@@ -160,7 +160,9 @@ def parse_timma(payload: object, slug: str) -> TimmaSnapshot:
     """Timman JSON -> TimmaSnapshot. Heittää TimmaFetchError jos rakenne on muuttunut."""
     if not isinstance(payload, dict):
         raise TimmaFetchError("vastaus ei ole JSON-objekti")
-    if payload.get("hideFromMarketplace") is True or payload.get("noOnlineBookingIndexing") is True:
+    # noOnlineBookingIndexing ei estä tuontia: demot ovat noindex-luonnoksia, jotka näytetään vain
+    # liikkeelle itselleen, joten hakukoneindeksoinnin kielto ei koske niitä.
+    if payload.get("hideFromMarketplace") is True:
         return TimmaSnapshot(status="hidden", slug=slug)
     name = _text(payload.get("name"), 120)
     if not name:
