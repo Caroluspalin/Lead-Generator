@@ -129,7 +129,8 @@ def test_subject_is_personal_not_corporate() -> None:
 
 # --- Rakenne ---
 
-def test_body_structure_and_order() -> None:
+def test_body_structure_and_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.main.OFFER_PRICE_TEXT", "390 €")
     body = build_demo_email_body(
         MODEL_TEXT, _profile(brand_name="Palin Web", website="https://palinweb.fi", phone="040 123 4567"), URL,
         expires_at=EXPIRES,
@@ -337,6 +338,7 @@ def test_generate_email_offer_expiry_and_no_false_price_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr("app.main.scrape_website_text", lambda _url: None)
+    monkeypatch.setattr("app.main.OFFER_PRICE_TEXT", "390 €")
     made = published("NO WEBSITE")
     fake_openai.reply = MODEL_TEXT
     with caplog.at_level(logging.WARNING):

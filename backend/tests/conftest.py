@@ -12,7 +12,7 @@ os.environ["EMAIL_MODEL"] = ""
 os.environ["EMAIL_REASONING_EFFORT"] = ""
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_JWT_SECRET"] = ""
-for _smtp_var in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"):
+for _smtp_var in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME", "SMTP_BCC"):
     os.environ[_smtp_var] = ""
 # Ei koskaan oikeaa R2-bucketia tai Unsplashia testeissä (boto3 ohittaa requests-eston)
 for _external_var in (

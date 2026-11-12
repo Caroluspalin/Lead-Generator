@@ -11,7 +11,7 @@ import ssl
 from dataclasses import dataclass, field
 from email.message import Message
 from email.mime.text import MIMEText
-from email.utils import formatdate, make_msgid
+from email.utils import formataddr, formatdate, getaddresses, make_msgid
 from typing import Callable, Literal, Optional
 
 import certifi
@@ -172,10 +172,11 @@ def open_smtp(
         raise
 
 
-def build_message(from_addr: str, to: str, subject: str, body: str) -> MIMEText:
+def build_message(from_addr: str, to: str, subject: str, body: str, from_name: str = "") -> MIMEText:
     # Date ja Message-ID mukaan: ilman niitä viesti näyttää roskapostilta ja palvelin voi katkaista DATA-vaiheessa
     msg = MIMEText(body, "plain", "utf-8")
-    msg["From"] = from_addr
+    # formataddr koodaa ääkköset (RFC 2047); Message-ID:n domain ja kirjekuori tulevat pelkästä osoitteesta
+    msg["From"] = formataddr((from_name, from_addr)) if from_name else from_addr
     msg["To"] = to
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
@@ -184,10 +185,14 @@ def build_message(from_addr: str, to: str, subject: str, body: str) -> MIMEText:
     return msg
 
 
-def send_mail(cfg: SmtpConfig, msg: Message, *, timeout: float = SMTP_TIMEOUT_SECONDS) -> None:
+def send_mail(cfg: SmtpConfig, msg: Message, *, bcc: str = "", timeout: float = SMTP_TIMEOUT_SECONDS) -> None:
+    # Piilokopio vain kirjekuoreen (RCPT TO), ei Bcc-otsaketta, joten vastaanottaja ei näe sitä
+    recipients = [addr for _, addr in getaddresses(msg.get_all("To", [])) if addr]
+    if bcc and bcc.lower() not in (r.lower() for r in recipients):
+        recipients.append(bcc)
     server = open_smtp(cfg, timeout=timeout)
     try:
-        server.send_message(msg)
+        server.send_message(msg, from_addr=cfg.from_addr, to_addrs=recipients)
     except SmtpFailure:
         raise
     except Exception as exc:

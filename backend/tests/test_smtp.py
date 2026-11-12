@@ -2,6 +2,7 @@
 import smtplib
 import socket
 import ssl
+from email.header import decode_header, make_header
 from typing import Any, Optional
 
 import pytest
@@ -49,8 +50,9 @@ class FakeSMTP:
         self.calls.append("login")
         self._maybe_fail("login")
 
-    def send_message(self, msg: Any) -> None:
+    def send_message(self, msg: Any, from_addr: Optional[str] = None, to_addrs: Optional[list[str]] = None) -> None:
         self.calls.append("send")
+        self.sent = (msg, from_addr, to_addrs)
         self._maybe_fail("send")
 
     def quit(self) -> None:
@@ -138,6 +140,38 @@ def test_message_has_date_and_message_id() -> None:
     assert msg.get_content_charset() == "utf-8"
 
 
+def test_from_header_without_name_is_plain_address() -> None:
+    assert build_message("me@icloud.com", "x@y.fi", "Aihe", "Hei")["From"] == "me@icloud.com"
+
+
+def test_from_header_with_name() -> None:
+    msg = build_message("me@icloud.com", "x@y.fi", "Aihe", "Hei", from_name="Carolus Palin")
+    assert msg["From"] == "Carolus Palin <me@icloud.com>"
+    assert msg["Message-ID"].endswith("@icloud.com>")
+
+
+def test_from_name_with_umlauts_is_encoded() -> None:
+    msg = build_message("me@icloud.com", "x@y.fi", "Aihe", "Hei", from_name="Äijä Öhman")
+    raw = msg["From"]
+    assert raw.isascii() and "=?utf-8?" in raw and raw.endswith(" <me@icloud.com>")
+    assert str(make_header(decode_header(raw))) == "Äijä Öhman <me@icloud.com>"
+    assert msg["Message-ID"].endswith("@icloud.com>")
+
+
+def test_envelope_uses_bare_address_and_bcc_stays_hidden(fake_smtp: type[FakeSMTP]) -> None:
+    msg = build_message(CFG.from_addr, "x@y.fi", "S", "B", from_name="Carolus Palin")
+    send_mail(CFG, msg, bcc="copy@palin.fi")
+    sent, from_addr, to_addrs = fake_smtp.instances[0].sent
+    assert from_addr == CFG.from_addr
+    assert to_addrs == ["x@y.fi", "copy@palin.fi"]
+    assert sent["Bcc"] is None and "copy@palin.fi" not in sent.as_string()
+
+
+def test_no_bcc_sends_only_to_recipient(fake_smtp: type[FakeSMTP]) -> None:
+    send_mail(CFG, build_message(CFG.from_addr, "x@y.fi", "S", "B"))
+    assert fake_smtp.instances[0].sent[2] == ["x@y.fi"]
+
+
 def test_config_repr_hides_password() -> None:
     assert PASSWORD not in repr(CFG)
 
@@ -178,3 +212,21 @@ def test_endpoint_sends_with_fixed_flow(
     res = client_a.post("/send-email", json={"to": "x@y.fi", "subject": "S", "body": "B"})
     assert res.status_code == 200
     assert fake_smtp.instances[0].calls[-2:] == ["send", "quit"]
+    sent, _, to_addrs = fake_smtp.instances[0].sent
+    assert sent["From"] == CFG.from_addr and to_addrs == ["x@y.fi"]
+
+
+def test_endpoint_uses_from_name_and_bcc(
+    client_a: TestClient, fake_smtp: type[FakeSMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in [
+        ("SMTP_HOST", CFG.host), ("SMTP_USER", CFG.user), ("SMTP_PASSWORD", PASSWORD), ("SMTP_FROM", CFG.from_addr),
+        ("SMTP_FROM_NAME", "Carolus Palin"), ("SMTP_BCC", "copy@palin.fi"),
+    ]:
+        monkeypatch.setattr(f"app.main.{name}", value)
+    res = client_a.post("/send-email", json={"to": "x@y.fi", "subject": "S", "body": "B"})
+    assert res.status_code == 200
+    sent, from_addr, to_addrs = fake_smtp.instances[0].sent
+    assert sent["From"] == "Carolus Palin <me@icloud.com>" and from_addr == CFG.from_addr
+    assert to_addrs == ["x@y.fi", "copy@palin.fi"]
+    assert sent["Bcc"] is None and "copy@palin.fi" not in sent.as_string()

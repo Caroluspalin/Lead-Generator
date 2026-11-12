@@ -114,6 +114,8 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "").strip()
+SMTP_BCC = os.getenv("SMTP_BCC", "").strip()
 
 # Safety Limits
 MAX_SEARCH_CALLS = 15      # Geocode + Text Search -sivut yhteensä, ehdoton raja per haku
@@ -2826,9 +2828,9 @@ async def send_email(
         raise HTTPException(500, "SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD and SMTP_FROM in .env")
 
     cfg = SmtpConfig(host=SMTP_HOST, port=SMTP_PORT, user=SMTP_USER, password=SMTP_PASSWORD, from_addr=SMTP_FROM)
-    msg = build_message(SMTP_FROM, req.to, req.subject, req.body)
+    msg = build_message(SMTP_FROM, req.to, req.subject, req.body, from_name=SMTP_FROM_NAME)
     try:
-        await asyncio.to_thread(send_mail, cfg, msg)
+        await asyncio.to_thread(send_mail, cfg, msg, bcc=SMTP_BCC)
     except SmtpFailure as f:
         # Viesti on luokiteltu ja turvallinen (ei tunnuksia); sama teksti lokiin ja UI:hin
         logger.error(f"SMTP {f.kind} failure at {f.stage}: {f.user_message()}")
