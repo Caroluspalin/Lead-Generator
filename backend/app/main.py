@@ -1519,8 +1519,9 @@ DEMO_EXPIRY_SENTENCE = "Linkki on voimassa {date} asti."
 
 # Mitä asiakkaalle konkreettisesti tapahtuu nyt (vihje kappaleeseen 2). Tarkin osuma issue-tekstistä ensin.
 CUSTOMER_IMPACT_BY_ISSUE: list[tuple[str, str]] = [
-    ("social media only", "Googlesta asiakas löytää teidät vain Facebookin kautta, eikä sieltä näe palveluitanne, hintoja tai aukioloaikoja yhdellä silmäyksellä."),
-    ("booking platform only", "Googlesta asiakas pääsee ajanvaraukseen, mutta omaa sivua, jolta näkisi palvelut, aukioloajat ja esittelyn, ei ole."),
+    # Aukioloajat näkyvät Google-profiilissa, joten niistä ei väitetä mitään (kuten NO WEBSITE)
+    ("social media only", "Googlesta asiakas pääsee Facebook-sivullenne, mutta palveluille ja hinnoille ei ole omaa sivua."),
+    ("booking platform only", "Googlesta asiakas pääsee ajanvaraukseen, mutta palveluille ja hinnoille ei ole omaa sivua."),
     ("DNS not resolving", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea lainkaan.'),
     ("connection", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea lainkaan.'),
     ("parked domain", 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, hän päätyy sivulle, jolla ei ole teidän tietojanne.'),

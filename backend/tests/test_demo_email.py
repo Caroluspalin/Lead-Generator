@@ -99,7 +99,8 @@ def test_display_website() -> None:
     ("status", "issue", "expected"),
     [
         ("NO WEBSITE", None, "Google-kartalta, mutta palveluille ja hinnoille ei ole omaa sivua"),
-        ("NO WEBSITE", "social media only", "vain Facebookin kautta"),
+        ("NO WEBSITE", "social media only", "Googlesta asiakas pääsee Facebook-sivullenne, mutta palveluille ja hinnoille ei ole omaa sivua"),
+        ("NO WEBSITE", "booking platform only", "Googlesta asiakas pääsee ajanvaraukseen, mutta palveluille ja hinnoille ei ole omaa sivua"),
         ("BROKEN WEBSITE", "DNS not resolving", "sivu ei aukea lainkaan"),
         ("BROKEN WEBSITE", "connection refused", "sivu ei aukea lainkaan"),
         ("BROKEN WEBSITE", "HTTP 500", "virheilmoituksen"),
@@ -118,11 +119,14 @@ def test_customer_impact_is_concrete(status: str, issue: Optional[str], expected
     assert "moni" not in impact.lower() or status == "INSECURE"  # ei geneeristä "moni etsii netistä"
 
 
-def test_no_website_impact_does_not_claim_hours_are_missing() -> None:
+@pytest.mark.parametrize("issue", [None, "social media only", "booking platform only"])
+def test_no_website_impact_does_not_claim_hours_are_missing(issue: Optional[str]) -> None:
     # Aukioloajat näkyvät Google-profiilissa
-    impact = customer_impact("NO WEBSITE", None)
-    assert impact == "Asiakas löytää teidät Google-kartalta, mutta palveluille ja hinnoille ei ole omaa sivua."
+    impact = customer_impact("NO WEBSITE", issue)
     assert "aukiolo" not in impact
+    assert impact.endswith("mutta palveluille ja hinnoille ei ole omaa sivua.")
+    if issue is None:
+        assert impact == "Asiakas löytää teidät Google-kartalta, mutta palveluille ja hinnoille ei ole omaa sivua."
 
 
 @pytest.mark.parametrize("status", ["UNKNOWN", "WEBSITE OK", None])
