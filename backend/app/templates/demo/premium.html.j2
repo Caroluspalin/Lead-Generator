@@ -78,12 +78,13 @@
           {% if not varaus and not tel %}<a class="nappi" href="#palvelut">{{ tpl.services_title }}</a>{% endif %}
         </div>
       </div>
-      {% if address_lines or arvio or business.phone %}
+      {% if address_lines or arvio or business.phone or business.maps_url %}
       <dl class="tiedot">
         {% if address_lines %}<div><dt>Osoite</dt><dd>{{ address_lines | join(', ') }}</dd></div>{% endif %}
         {% if business.phone %}<div{% if tel %} class="vain-iso"{% endif %}><dt>Puhelin</dt><dd>{% if tel %}<a href="tel:{{ tel }}">{{ business.phone }}</a>{% else %}{{ business.phone }}{% endif %}</dd></div>{% endif %}
         {# Vain keskiarvo ja määrä; arvostelut luetaan Timmasta #}
-        {% if arvio %}<div><dt>Arviot</dt><dd><a class="arvio" href="{{ timma.booking_url }}" rel="noopener noreferrer"><span class="arvio-luku">{{ '%.1f' | format(timma.rating_avg) | replace('.', ',') }}</span> {{ timma.rating_count }} {{ 'arvostelu' if timma.rating_count == 1 else 'arvostelua' }} Timmassa</a></dd></div>{% endif %}
+        {% if arvio %}<div><dt>Arviot</dt><dd><a class="arvio" href="{{ timma.booking_url }}" rel="noopener noreferrer"><span class="arvio-luku">{{ '%.1f' | format(timma.rating_avg) | replace('.', ',') }}</span> {{ timma.rating_count }} {{ 'arvostelu' if timma.rating_count == 1 else 'arvostelua' }} Timmassa</a></dd></div>
+        {% elif business.maps_url %}<div><dt>Arvostelut</dt><dd><a href="{{ business.maps_url }}" rel="noopener noreferrer">Lue arvostelut Googlessa</a></dd></div>{% endif %}
       </dl>
       {% endif %}
     </div>

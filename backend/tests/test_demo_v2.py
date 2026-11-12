@@ -1091,3 +1091,57 @@ def test_demo_frames_script_picks_frames_and_builds_filter() -> None:
     assert frames.parse_range("0:0.75") == (0.0, 0.75)
     with pytest.raises(Exception):
         frames.parse_range("0.5:0.2")
+
+
+# --- Ilman Timma-arviota: linkki Google-profiilin arvosteluihin ---
+
+GOOGLE_REVIEWS_ROW = (
+    '<div><dt>Arvostelut</dt><dd><a href="https://maps.google.com/?cid=1" rel="noopener noreferrer">'
+    "Lue arvostelut Googlessa</a></dd></div>"
+)
+
+
+def _render_reviews(template: str, timma: Optional[DemoTimma] = None, maps_url: Optional[str] = "https://maps.google.com/?cid=1") -> str:
+    business = DemoBusiness(name="Parturi Terä", city="Oulu", address="Esimerkkikatu 15, 90100 Oulu, Suomi",
+                            phone="050 000 0000", maps_url=maps_url)
+    return render_demo_html(template=template, color_scheme=next(iter(TEMPLATES[template].schemes)), business=business,
+                            sender=SENDER, content=DemoStoredContent(**VALID, timma=timma))
+
+
+@pytest.mark.parametrize("template", ["barber", "premium", "salon"])
+def test_google_reviews_link_without_timma(template: str) -> None:
+    html = _render_reviews(template)
+    assert html.count(GOOGLE_REVIEWS_ROW) == 1
+    # Ei Googlen arvosanaa, tähtiä eikä arvostelumäärää
+    assert "★" not in html and "arvio-luku" not in html and "arvostelua" not in html
+    assert "Timmassa" not in html
+
+
+@pytest.mark.parametrize("template", ["barber", "premium", "salon"])
+def test_google_reviews_link_in_same_list_as_timma_rating(template: str) -> None:
+    rows = re.search(r'<dl class="(?:tanaan-rivi|tiedot)">(.*?)</dl>', _render_reviews(template), re.S)
+    assert rows is not None and GOOGLE_REVIEWS_ROW in rows.group(1)
+    timma_rows = re.search(r'<dl class="(?:tanaan-rivi|tiedot)">(.*?)</dl>', _render_reviews(template, timma=_timma(1)), re.S)
+    assert timma_rows is not None and "arvostelua Timmassa" in timma_rows.group(1)
+
+
+@pytest.mark.parametrize("template", ["barber", "premium", "salon"])
+def test_timma_rating_replaces_google_reviews_link(template: str) -> None:
+    html = _render_reviews(template, timma=_timma(1))
+    assert "187 arvostelua Timmassa" in html and "Lue arvostelut Googlessa" not in html
+
+
+@pytest.mark.parametrize("template", ["barber", "premium", "salon"])
+def test_google_reviews_link_when_timma_has_no_rating(template: str) -> None:
+    timma = _timma(1).model_copy(update={"rating_avg": None, "rating_count": 0})
+    assert GOOGLE_REVIEWS_ROW in _render_reviews(template, timma=timma)
+
+
+@pytest.mark.parametrize("template", ["barber", "premium", "salon"])
+def test_no_google_reviews_link_without_maps_url(template: str) -> None:
+    assert "Lue arvostelut Googlessa" not in _render_reviews(template, maps_url=None)
+
+
+@pytest.mark.parametrize("template", ["cafe", "services", "beauty"])
+def test_other_templates_have_no_google_reviews_link(template: str) -> None:
+    assert "Lue arvostelut Googlessa" not in _render_reviews(template)

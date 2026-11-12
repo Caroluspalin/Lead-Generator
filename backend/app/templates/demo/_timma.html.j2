@@ -18,9 +18,12 @@
 </div>
 {% endmacro %}
 
-{# Vain keskiarvo ja määrä; arvostelut luetaan Timmasta #}
-{% macro arviot(timma) %}
+{# Vain keskiarvo ja määrä; arvostelut luetaan Timmasta. Ilman Timma-arviota pelkkä linkki Google-profiiliin:
+   Googlen arvosanaa, tähtiä tai määrää ei näytetä (ei Places-kenttää, ei vanhenevaa lukua) #}
+{% macro arviot(timma, maps_url=none) %}
 {% if timma and timma.rating_avg is not none and timma.rating_count %}
 <div><dt>Arviot</dt><dd><a class="timma-arvio" href="{{ timma.booking_url }}" rel="noopener noreferrer"><span aria-hidden="true">★</span> {{ '%.1f' | format(timma.rating_avg) | replace('.', ',') }} · {{ timma.rating_count }} {{ 'arvostelu' if timma.rating_count == 1 else 'arvostelua' }} Timmassa</a></dd></div>
+{% elif maps_url %}
+<div><dt>Arvostelut</dt><dd><a href="{{ maps_url }}" rel="noopener noreferrer">Lue arvostelut Googlessa</a></dd></div>
 {% endif %}
 {% endmacro %}
