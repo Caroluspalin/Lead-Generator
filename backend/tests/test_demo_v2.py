@@ -14,17 +14,21 @@ from app.demo_site import (
     DemoBusiness,
     DemoSender,
     DemoStoredContent,
+    DemoTimma,
     OpeningPeriod,
     Palette,
     aukiolo_attrs,
     demo_asset,
+    has_example_services,
     hours_summary,
+    is_default_price_note,
     periods_from_google,
     price_note_for,
     render_demo_html,
     template_assets,
     week_rows,
 )
+from app.utils.site_content import SiteFacts, SiteService
 from tests.conftest import FakeOpenAI
 from tests.test_demo_publish import CONFIG, FakeStore
 from tests.test_demo_site import VALID
@@ -293,8 +297,8 @@ def test_cafe_lead_gets_cafe_template_and_its_price_note(cafe_demo: dict[str, An
 def test_template_switch_swaps_default_price_note_but_keeps_custom(client_a: TestClient, cafe_demo: dict[str, Any]) -> None:
     lead_id = cafe_demo["lead_id"]
     res = client_a.patch(f"/leads/{lead_id}/demo", json={"template": "services"}).json()
-    assert res["content"]["price_note"] == price_note_for("services")
-    edited = {k: v for k, v in res["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
+    assert res["content"]["price_note"] == price_note_for("services", example_services=True)
+    edited ={k: v for k, v in res["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
     edited["price_note"] = "Kahvi kolme euroa, pulla neljä."
     client_a.patch(f"/leads/{lead_id}/demo", json={"content": edited})
     res = client_a.patch(f"/leads/{lead_id}/demo", json={"template": "cafe"}).json()
@@ -771,6 +775,41 @@ def test_price_note_with_booking_platform_says_online() -> None:
     # Vain hinnaton oletusteksti vaihtuu; kahvilan ja hinnallinen teksti ennallaan
     assert price_note_for("salon", has_prices=True, has_booking=True) == price_note_for("salon", has_prices=True)
     assert price_note_for("cafe", has_booking=True) == price_note_for("cafe")
+
+
+def test_price_note_says_services_are_examples_without_real_data() -> None:
+    examples = "Palvelut ovat esimerkkejä. Hinnat ja ajanvaraus puhelimitse."
+    for template in ("salon", "barber", "premium", "services", "beauty"):
+        assert price_note_for(template, example_services=True) == examples
+        assert is_default_price_note(template, examples)
+    # Hinnalliset, ajanvaraus- ja kahvilatekstit ennallaan
+    assert price_note_for("salon", has_prices=True, example_services=True) == price_note_for("salon", has_prices=True)
+    assert price_note_for("salon", has_booking=True, example_services=True) == "Hinnat näette ajanvarauksesta."
+    assert price_note_for("cafe", example_services=True) == price_note_for("cafe")
+
+
+def test_example_services_only_without_timma_and_site_services() -> None:
+    content = DemoStoredContent(**VALID)
+    assert has_example_services(content, None)
+    assert has_example_services(content, SiteFacts(about="Pieni parturi Espoon keskustassa, jossa leikataan hiuksia."))
+    assert not has_example_services(content, SiteFacts(services=[SiteService(name="Hiustenleikkaus")]))
+    timma = DemoTimma(booking_url="https://timma.fi/yritys/lumo")
+    assert not has_example_services(DemoStoredContent(**VALID, timma=timma), None)
+
+
+def test_custom_price_note_survives_when_services_are_examples(
+    client_a: TestClient, make_lead: Any, fake_openai: type[FakeOpenAI], sender_profile: dict[str, Any]
+) -> None:
+    lead = make_lead(name="Parturi Testi", phone="040 000 0000", primary_type="barber_shop", website_status="NO WEBSITE")
+    fake_openai.reply = json.dumps(VALID)
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "barber"}).json()
+    assert demo["content"]["price_note"] == "Palvelut ovat esimerkkejä. Hinnat ja ajanvaraus puhelimitse."
+    edited = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
+    edited["price_note"] = "Parturileikkaus 30 €, varaukset puhelimitse."
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"content": edited}).json()
+    assert res["content"]["price_note"] == "Parturileikkaus 30 €, varaukset puhelimitse."
+    res = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "salon"}).json()
+    assert res["content"]["price_note"] == "Parturileikkaus 30 €, varaukset puhelimitse."
 
 
 def test_booking_lead_demo_gets_online_price_note_and_follows_template(

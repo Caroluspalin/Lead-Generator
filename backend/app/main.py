@@ -63,6 +63,7 @@ from .demo_site import (
     DemoTimma,
     demo_timma,
     shows_prices,
+    has_example_services,
     timma_prompt_facts,
     is_default_price_note,
     price_note_for,
@@ -1497,6 +1498,11 @@ DEMO_LINK_PARAGRAPH_TIMMA = (
 TIMMA_BOOKING_CLAUSE = ", jotka vievät suoraan Timmaanne"
 DEMO_BUSINESS_WORD_BY_TEMPLATE: Dict[str, str] = {"barber": "parturillenne", "premium": "parturillenne", "salon": "kampaamollenne", "cafe": "kahvilallenne"}
 DEMO_BUSINESS_WORD_DEFAULT = "teille"
+# Demo ilman Timma-dataa ja ilman yrityksen omalta sivulta haettuja tietoja: kuvat ja palvelut ovat keksittyjä
+DEMO_EXAMPLES_PARAGRAPH = "Luonnoksen kuvat ja palvelut ovat esimerkkejä. Vaihdan niiden tilalle teidän omanne."
+# Parturipohjan demo: mallin kappaleessa puhutaan partureista, vaikka Googlen luokka olisi hair_care / hair_salon
+BARBER_DEMO_TEMPLATES = ("barber", "premium")
+_SALON_PLURAL_RE = re.compile(r"\b(?:parturi-)?kampaamoja\b", re.IGNORECASE)
 # Liidin website on ajanvarausalusta: salon/barber-demon Varaa aika -nappi vie sinne
 DEMO_BOOKING_SENTENCE = "Nykyinen ajanvarauksenne toimii sivulla sellaisenaan."
 DEMO_BOOKING_TEMPLATES = BOOKING_TEMPLATES
@@ -1527,7 +1533,8 @@ CUSTOMER_IMPACT_BY_ISSUE: list[tuple[str, str]] = [
     ("no viewport meta", "Puhelimella sivunne näkyy pienenä tietokoneversiona, jota pitää suurentaa sormilla."),
 ]
 CUSTOMER_IMPACT_BY_STATUS: Dict[str, str] = {
-    "NO WEBSITE": "Asiakas löytää teidät Google-kartalta, mutta ei näe palveluitanne, hintoja eikä aukioloaikoja, vaan joutuu soittamaan tai etsimään tiedot muualta.",
+    # Aukioloajat näkyvät Google-profiilissa, joten niistä ei väitetä mitään
+    "NO WEBSITE": "Asiakas löytää teidät Google-kartalta, mutta palveluille ja hinnoille ei ole omaa sivua.",
     "BROKEN WEBSITE": 'Kun asiakas painaa Googlessa "Verkkosivusto"-linkkiä, sivu ei aukea.',
     "INSECURE": "Kun asiakas avaa sivunne, selain varoittaa, ettei yhteys ole turvallinen.",
     "NOT MOBILE": "Puhelimella sivunne näkyy pienenä tietokoneversiona, jota pitää suurentaa sormilla.",
@@ -1634,6 +1641,7 @@ def build_demo_email_body(
 
     `timma` annetaan vain kun demon pohja oikeasti näyttää Timma-dataa (BOOKING_TEMPLATES).
     Ilman ongelmaa (`has_problem` False) mallilta otetaan vain ensimmäinen kappale (kuka olen).
+    Ilman Timmaa ja omalta sivulta haettuja tietoja linkin perään kerrotaan, että kuvat ja palvelut ovat esimerkkejä.
     """
     if timma is not None and template in DEMO_BOOKING_TEMPLATES:
         link = timma_link_paragraph(timma, template, demo_url)
@@ -1641,8 +1649,15 @@ def build_demo_email_body(
         link = (DEMO_LINK_PARAGRAPH_SITE if site_based else DEMO_LINK_PARAGRAPH).format(url=demo_url)
         if has_booking:
             link = f"{link} {DEMO_BOOKING_SENTENCE}"
+    examples = [DEMO_EXAMPLES_PARAGRAPH] if timma is None and not site_based else []
     model_paragraphs = clean_demo_paragraphs(text)[: 2 if has_problem else 1]
-    parts = ["Hei,", link, *model_paragraphs, demo_offer_paragraph(), demo_next_step(profile, expires_at)]
+    if template in BARBER_DEMO_TEMPLATES:
+        # Varmistus promptin lisäksi: malli kopioi helposti esimerkin "Etsin parturi-kampaamoja"
+        model_paragraphs = [
+            _SALON_PLURAL_RE.sub(lambda m: "Partureita" if m.group()[0].isupper() else "partureita", p)
+            for p in model_paragraphs
+        ]
+    parts = ["Hei,", link, *examples, *model_paragraphs, demo_offer_paragraph(), demo_next_step(profile, expires_at)]
     head = "\n\n".join(parts)
     return f"{head}\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
 
@@ -1918,7 +1933,9 @@ def build_email_user_prompt(
     return "\n".join(parts)
 
 
-def build_demo_email_user_prompt(lead: Lead, profile: SenderProfile, instruction: Optional[str] = None) -> str:
+def build_demo_email_user_prompt(
+    lead: Lead, profile: SenderProfile, instruction: Optional[str] = None, *, template: str = ""
+) -> str:
     parts = [
         "LÄHETTÄJÄ (minä):",
         f"- Nimi: {profile.name}",
@@ -1929,7 +1946,10 @@ def build_demo_email_user_prompt(lead: Lead, profile: SenderProfile, instruction
         f"- Yritys: {lead.name}",
         f"- Kaupunki: {lead.city}",
     ]
-    if lead.primary_type:
+    if template in BARBER_DEMO_TEMPLATES:
+        # Googlen luokka on usein hair_care / hair_salon myös parturilla; demon pohja kertoo oikean alan
+        parts.append('- Toimiala: parturi. Puhu partureista, älä kampaamoista (esim. "Etsin partureita" + kaupunki taivutettuna).')
+    elif lead.primary_type:
         parts.append(f"- Toimiala (Googlen luokka englanniksi, käännä luontevasti suomeksi): {lead.primary_type}")
     problem = describe_website_problem(lead.website_status, lead.website_issue)
     parts.append("")
@@ -2062,7 +2082,9 @@ async def generate_email(
     if demo_url:
         # Malli kirjoittaa vain kappaleet 1–2, loput koodista (ks. build_demo_email_body)
         result = await _chat_completion(
-            DEMO_EMAIL_SYSTEM_PROMPT, build_demo_email_user_prompt(db_lead, profile, req.instruction), max_tokens=300
+            DEMO_EMAIL_SYSTEM_PROMPT,
+            build_demo_email_user_prompt(db_lead, profile, req.instruction, template=demo.template),
+            max_tokens=300,
         )
         model = result.model
         stored = DemoStoredContent.model_validate_json(demo.content_json)
@@ -2502,7 +2524,10 @@ async def generate_demo(
         timma=stored_timma,
     )
     stored = stored.model_copy(update={
-        "price_note": price_note_for(template, shows_prices(stored, template), has_demo_booking(lead, template))
+        "price_note": price_note_for(
+            template, shows_prices(stored, template), has_demo_booking(lead, template),
+            example_services=has_example_services(stored, site_facts),
+        )
     })
     used = _used_photos(images)
     if used:
@@ -2583,7 +2608,10 @@ def update_demo(
         # Pohjan oletusteksti seuraa pohjaa ja hintoja (kahvilassa ei "ajanvarausta",
         # hintojen kanssa ei "hinnat puhelimitse"); käyttäjän oma teksti säilyy
         stored = stored.model_copy(
-            update={"price_note": price_note_for(template, has_prices, has_demo_booking(lead, template))}
+            update={"price_note": price_note_for(
+                template, has_prices, has_demo_booking(lead, template),
+                example_services=has_example_services(stored, lead_site_facts(lead)),
+            )}
         )
     # Hero-vaihto, tai pohjan vaihto: tunnelmakuvien säännöt ovat pohjakohtaisia (kahvilassa tumma viimeinen)
     if req.hero_image_id is not None or template != demo.template:

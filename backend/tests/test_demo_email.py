@@ -11,10 +11,12 @@ from fastapi.testclient import TestClient
 from app.main import (
     CUSTOMER_IMPACT_DEFAULT,
     DEMO_EMAIL_MAX_WORDS,
+    DEMO_EXAMPLES_PARAGRAPH,
     DEMO_LINK_PARAGRAPH,
     DEMO_LINK_PARAGRAPH_SITE,
     OPT_OUT_LINE,
     build_demo_email_body,
+    build_demo_email_user_prompt,
     build_signature,
     clean_demo_paragraphs,
     customer_impact,
@@ -96,7 +98,7 @@ def test_display_website() -> None:
 @pytest.mark.parametrize(
     ("status", "issue", "expected"),
     [
-        ("NO WEBSITE", None, "kartalta, mutta ei näe palveluitanne"),
+        ("NO WEBSITE", None, "Google-kartalta, mutta palveluille ja hinnoille ei ole omaa sivua"),
         ("NO WEBSITE", "social media only", "vain Facebookin kautta"),
         ("BROKEN WEBSITE", "DNS not resolving", "sivu ei aukea lainkaan"),
         ("BROKEN WEBSITE", "connection refused", "sivu ei aukea lainkaan"),
@@ -114,6 +116,13 @@ def test_customer_impact_is_concrete(status: str, issue: Optional[str], expected
     impact = customer_impact(status, issue)
     assert expected in impact
     assert "moni" not in impact.lower() or status == "INSECURE"  # ei geneeristä "moni etsii netistä"
+
+
+def test_no_website_impact_does_not_claim_hours_are_missing() -> None:
+    # Aukioloajat näkyvät Google-profiilissa
+    impact = customer_impact("NO WEBSITE", None)
+    assert impact == "Asiakas löytää teidät Google-kartalta, mutta palveluille ja hinnoille ei ole omaa sivua."
+    assert "aukiolo" not in impact
 
 
 @pytest.mark.parametrize("status", ["UNKNOWN", "WEBSITE OK", None])
@@ -140,14 +149,15 @@ def test_body_structure_and_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert paragraphs[0] == "Hei,"
     assert paragraphs[1] == DEMO_LINK_PARAGRAPH.format(url=URL)  # 1: linkki ensin, omalla rivillään
     assert f"\n{URL}\n" in paragraphs[1] and paragraphs[1].endswith("Linkki aukeaa suoraan puhelimella.")
-    assert paragraphs[2].startswith("Olen Palin")  # kuka olen + miten löysin
-    assert paragraphs[3].startswith("Asiakas löytää teidät kartalta")  # mitä tapahtuu nyt
-    assert paragraphs[4] == (
+    assert paragraphs[2] == DEMO_EXAMPLES_PARAGRAPH  # ei Timmaa eikä omaa sivua
+    assert paragraphs[3].startswith("Olen Palin")  # kuka olen + miten löysin
+    assert paragraphs[4].startswith("Asiakas löytää teidät kartalta")  # mitä tapahtuu nyt
+    assert paragraphs[5] == (
         "Luonnos on ilmainen eikä sido mihinkään. Jos haluatte sen käyttöön omalla verkkotunnuksellanne, "
         f"{PRICE_SENTENCE} Lasku lähtee vasta, kun olette hyväksyneet valmiin sivun."
     )
-    assert paragraphs[5] == 'Vastatkaa tähän "kyllä" tai soittakaa 040 123 4567, niin hoidan loput. Linkki on voimassa 11.12. asti.'
-    assert len(paragraphs) == 6
+    assert paragraphs[6] == 'Vastatkaa tähän "kyllä" tai soittakaa 040 123 4567, niin hoidan loput. Linkki on voimassa 11.12. asti.'
+    assert len(paragraphs) == 7
     assert tail == f"Palin\nPalin Web · palinweb.fi\n040 123 4567\n\n{OPT_OUT_LINE}"
     assert word_count(head) <= DEMO_EMAIL_MAX_WORDS
     assert "?" not in head
@@ -161,6 +171,57 @@ def test_site_based_link_paragraph_ends_with_phone_note() -> None:
     body = build_demo_email_body(MODEL_TEXT, _profile(), URL, site_based=True)
     assert DEMO_LINK_PARAGRAPH_SITE.format(url=URL) in body
     assert "Linkki aukeaa suoraan puhelimella." in body and "Voitte katsoa" not in body
+
+
+def test_examples_paragraph_only_without_timma_and_site_data() -> None:
+    assert DEMO_EXAMPLES_PARAGRAPH == "Luonnoksen kuvat ja palvelut ovat esimerkkejä. Vaihdan niiden tilalle teidän omanne."
+    assert DEMO_EXAMPLES_PARAGRAPH not in build_demo_email_body(MODEL_TEXT, _profile(), URL, site_based=True)
+    for template in ("barber", "cafe"):
+        timma_body = build_demo_email_body(MODEL_TEXT, _profile(), URL, timma=_timma(), template=template, site_based=True)
+        assert DEMO_EXAMPLES_PARAGRAPH not in timma_body
+    paragraphs = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL, has_booking=True)).split("\n\n")
+    assert paragraphs[1].endswith("Nykyinen ajanvarauksenne toimii sivulla sellaisenaan.")
+    assert paragraphs[2] == DEMO_EXAMPLES_PARAGRAPH
+
+
+def test_examples_paragraph_fits_word_limit_in_worst_case(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.main.OFFER_PRICE_TEXT", "390 € + alv")
+    model_text = " ".join(["sana"] * 30) + ".\n\n" + " ".join(["sana"] * 20) + "."  # mallin 50 sanan enimmäismäärä
+    body = build_demo_email_body(
+        model_text, _profile(phone="040 123 4567"), URL, has_booking=True, expires_at=EXPIRES,
+    )
+    assert DEMO_EXAMPLES_PARAGRAPH in body
+    assert word_count(email_head(body)) <= DEMO_EMAIL_MAX_WORDS
+
+
+# --- Parturipohja: mallin kappaleessa partureita, ei kampaamoja ---
+
+@pytest.mark.parametrize("template", ["barber", "premium"])
+@pytest.mark.parametrize("primary_type", ["hair_care", "hair_salon", None])
+def test_barber_demo_prompt_talks_about_barbers(template: str, primary_type: Optional[str]) -> None:
+    lead = Lead(user_id="u", name="Parturi Testi", city="Espoo", website_status="NO WEBSITE", primary_type=primary_type)
+    prompt = build_demo_email_user_prompt(lead, _profile(), template=template)
+    assert '- Toimiala: parturi. Puhu partureista, älä kampaamoista (esim. "Etsin partureita"' in prompt
+    assert "hair_" not in prompt
+
+
+def test_salon_demo_prompt_keeps_google_category() -> None:
+    lead = Lead(user_id="u", name="Kampaamo Testi", city="Espoo", website_status="NO WEBSITE", primary_type="hair_care")
+    prompt = build_demo_email_user_prompt(lead, _profile(), template="salon")
+    assert "käännä luontevasti suomeksi): hair_care" in prompt and "partureista" not in prompt
+
+
+@pytest.mark.parametrize("template", ["barber", "premium"])
+def test_barber_demo_email_replaces_salon_plural(template: str) -> None:
+    text = "Olen Palin. Etsin parturi-kampaamoja Espoosta ja löysin teidät Googlesta. Kampaamoja on paljon."
+    head = email_head(build_demo_email_body(text, _profile(), URL, template=template))
+    assert "Etsin partureita Espoosta" in head and "Partureita on paljon." in head
+    assert "kampaamo" not in head.lower()
+
+
+def test_salon_demo_email_keeps_salon_wording() -> None:
+    head = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL, template="salon"))
+    assert "Etsin parturi-kampaamoja Kauniaisista" in head
 
 
 # --- Timma-demo: linkkikappale mainitsee vain sen, mitä demossa on ---
@@ -217,7 +278,7 @@ def test_offer_price_comes_from_setting(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_empty_offer_price_drops_only_the_price_clause(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.main.OFFER_PRICE_TEXT", "")
-    offer = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL)).split("\n\n")[4]
+    offer = email_head(build_demo_email_body(MODEL_TEXT, _profile(), URL)).split("\n\n")[-2]
     assert offer == (
         "Luonnos on ilmainen eikä sido mihinkään. Jos haluatte sen käyttöön omalla verkkotunnuksellanne, "
         "sivu on yleensä valmis viikossa. Lasku lähtee vasta, kun olette hyväksyneet valmiin sivun."
@@ -293,12 +354,12 @@ def published(
     monkeypatch.setattr("app.main.get_r2_config", lambda: CONFIG)
     monkeypatch.setattr("app.main.get_object_store", lambda: store)
 
-    def _make(status: str, issue: Optional[str] = None) -> dict[str, Any]:
+    def _make(status: str, issue: Optional[str] = None, template: Optional[str] = None) -> dict[str, Any]:
         fake_openai.reply = json.dumps(VALID)
         lead = make_lead(name="Parturi-Kampaamo Taina Lantiainen", city="Kauniainen", phone="050 1",
                          website_status=status, website_issue=issue, primary_type="hair_salon",
                          website=None if status == "NO WEBSITE" else "https://taina.example")
-        client_a.post(f"/leads/{lead['id']}/demo", json={})
+        client_a.post(f"/leads/{lead['id']}/demo", json={"template": template} if template else {})
         demo = client_a.post(f"/leads/{lead['id']}/demo/publish").json()
         return {"lead": lead, "demo": demo}
 
@@ -308,7 +369,7 @@ def published(
 @pytest.mark.parametrize(
     ("status", "issue", "hint", "subject"),
     [
-        ("NO WEBSITE", None, "kartalta, mutta ei näe palveluitanne", "Tein teille luonnoksen nettisivuista"),
+        ("NO WEBSITE", None, "palveluille ja hinnoille ei ole omaa sivua", "Tein teille luonnoksen nettisivuista"),
         ("BROKEN WEBSITE", "DNS not resolving", "sivu ei aukea lainkaan", "Tein teille luonnoksen uusista nettisivuista"),
         ("INSECURE", "SSL certificate expired", "selain näyttää ensin varoituksen", "Tein teille luonnoksen uusista nettisivuista"),
     ],
@@ -348,6 +409,19 @@ def test_generate_email_offer_expiry_and_no_false_price_warning(
     assert f"Linkki on voimassa {expires.day}.{expires.month}. asti." in body
     assert "Linkki aukeaa suoraan puhelimella." in body and "Timma" not in body
     assert not [r for r in caplog.records if "mainitaan hinta" in r.getMessage()]
+
+
+def test_generate_email_for_barber_demo_talks_about_barbers_and_examples(
+    client_a: TestClient, published: Any, fake_openai: type[FakeOpenAI],
+) -> None:
+    made = published("NO WEBSITE", template="barber")
+    fake_openai.reply = MODEL_TEXT
+    body = client_a.post(f"/leads/{made['lead']['id']}/generate-email", json={"require_demo_link": True}).json()["body"]
+    user_prompt = fake_openai.calls[-1]["messages"][1]["content"]
+    assert "Puhu partureista" in user_prompt and "hair_salon" not in user_prompt
+    assert "Etsin partureita Kauniaisista" in body and "kampaamoja" not in body
+    paragraphs = email_head(body).split("\n\n")
+    assert paragraphs[1].endswith("Linkki aukeaa suoraan puhelimella.") and paragraphs[2] == DEMO_EXAMPLES_PARAGRAPH
 
 
 def test_generate_email_for_site_without_verified_problem_asks_only_intro(

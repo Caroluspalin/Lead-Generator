@@ -46,6 +46,8 @@ DEFAULT_PRICE_NOTE_BOOKING = "Hinnat näette ajanvarauksesta."
 SERVICES_LEAD_BOOKING = "Varatkaa aika verkossa tai puhelimitse."
 # Kun hinnat ovat yrityksen omalta sivulta, huomautus ei puhu hinnoista (ne näkyvät palveluissa)
 DEFAULT_PRICE_NOTE_SITE = "Ajanvaraus puhelimitse."
+# Ei Timma-dataa eikä palveluita yrityksen omalta sivulta: AI:n palvelut ovat keksittyjä esimerkkejä
+DEFAULT_PRICE_NOTE_EXAMPLES = "Palvelut ovat esimerkkejä. Hinnat ja ajanvaraus puhelimitse."
 SITE_PRICES_NOTE = "Hinnat nykyiseltä sivultanne."
 TIMMA_PRICES_NOTE = "Hinnat Timma-sivultanne."
 # Kuvat yhdestä lähteestä per demo: Timman kuvat vain jos niitä on vähintään näin monta, muuten Unsplash
@@ -231,16 +233,22 @@ def templates_catalog() -> list[dict[str, object]]:
     ]
 
 
-def price_note_for(template: str, has_prices: bool = False, has_booking: bool = False) -> str:
+def price_note_for(
+    template: str, has_prices: bool = False, has_booking: bool = False, example_services: bool = False
+) -> str:
     tpl = TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
     note = tpl.price_note_site if has_prices else tpl.price_note
-    return DEFAULT_PRICE_NOTE_BOOKING if has_booking and note == DEFAULT_PRICE_NOTE else note
+    if note != DEFAULT_PRICE_NOTE:
+        return note
+    if has_booking:
+        return DEFAULT_PRICE_NOTE_BOOKING
+    return DEFAULT_PRICE_NOTE_EXAMPLES if example_services else note
 
 
 def is_default_price_note(template: str, note: str) -> bool:
     return note in (
         price_note_for(template), price_note_for(template, has_prices=True),
-        price_note_for(template, has_booking=True),
+        price_note_for(template, has_booking=True), price_note_for(template, example_services=True),
     )
 
 
@@ -374,6 +382,11 @@ def shows_prices(content: DemoStoredContent, template: str) -> bool:
     return any(s.price for s in content.services) or any(
         item.price for cat in timma_price_list(content, template) for item in cat.items
     )
+
+
+def has_example_services(content: DemoStoredContent, site_facts: Optional[SiteFacts]) -> bool:
+    """Palvelut ovat AI:n esimerkkejä: ei Timma-dataa eikä palveluita yrityksen omalta sivulta."""
+    return content.timma is None and not (site_facts and site_facts.services)
 
 
 # Keksityt faktat: arvostelut, palkinnot, historia, sitaatit (label, regex)

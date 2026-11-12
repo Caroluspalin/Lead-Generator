@@ -273,7 +273,8 @@ def test_generate_demo(client_a: TestClient, lead: dict[str, Any], demo_ready: t
     assert demo["template"] == "beauty" and demo["color_scheme"] == "rose"
     assert demo["status"] == "draft"
     assert demo["content"]["hero_title"] == VALID["hero_title"]
-    assert demo["content"]["price_note"] == "Hinnat ja ajanvaraus puhelimitse."
+    # Ei Timmaa eikä omaa sivua: AI:n palvelut ovat esimerkkejä
+    assert demo["content"]["price_note"] == "Palvelut ovat esimerkkejä. Hinnat ja ajanvaraus puhelimitse."
     assert demo["preview_url"] == f"http://testserver/demo/{demo['public_path']}"
     assert demo["public_url"] is None and demo["publishing_enabled"] is False
     assert "html" not in demo
