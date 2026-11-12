@@ -1481,11 +1481,11 @@ DEMO_MODEL_MAX_WORDS = 50  # mallin kappaleet 1–2; koodin osuus on n. 85–100
 OFFER_PRICE_TEXT = os.getenv("OFFER_PRICE_TEXT", "390 €").strip()
 
 DEMO_LINK_PARAGRAPH = (
-    "Tein teille luonnoksen siitä, miltä sivunne voisivat näyttää:\n{url}\nLinkki aukeaa suoraan puhelimella."
+    "tein teille luonnoksen siitä, miltä sivunne voisivat näyttää:\n{url}\nLinkki aukeaa suoraan puhelimella."
 )
 # Demo kirjoitettiin yrityksen nykyisen sivun palveluista/hinnoista/esittelystä
 DEMO_LINK_PARAGRAPH_SITE = (
-    "Tein luonnoksen nykyisten tietojenne pohjalta, jotta näette miltä sivunne voisivat näyttää:\n{url}\n"
+    "tein luonnoksen nykyisten tietojenne pohjalta, jotta näette miltä sivunne voisivat näyttää:\n{url}\n"
     "Linkki aukeaa suoraan puhelimella."
 )
 # Timma-demo: {business} = parturillenne / kampaamollenne / teille, {contents} = demossa oikeasti näkyvät asiat
@@ -1594,8 +1594,9 @@ def demo_next_step(profile: SenderProfile, expires_at: Optional[datetime] = None
     step = DEMO_NEXT_STEP_WITH_PHONE.format(phone=profile.phone) if profile.phone else DEMO_NEXT_STEP
     if expires_at is None:
         return step
-    # UTC-päivä: Suomen aikaa myöhäisillä tunneilla päivä on korkeintaan yhtä aikaisempi, eli turvallinen suunta
-    date = _as_utc(expires_at)
+    # Linkki vanhenee kesken expires_at-päivän, joten ilmoitetaan edellinen päivä (UTC; Suomen päivä on
+    # korkeintaan yhtä myöhäisempi, eli suunta on aina turvallinen)
+    date = _as_utc(expires_at) - timedelta(days=1)
     return f"{step} {DEMO_EXPIRY_SENTENCE.format(date=f'{date.day}.{date.month}.')}"
 
 

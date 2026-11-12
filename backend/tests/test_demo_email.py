@@ -2,7 +2,7 @@
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import pytest
@@ -145,7 +145,7 @@ def test_body_structure_and_order() -> None:
         "Luonnos on ilmainen eikä sido mihinkään. Jos haluatte sen käyttöön omalla verkkotunnuksellanne, "
         f"{PRICE_SENTENCE} Lasku lähtee vasta, kun olette hyväksyneet valmiin sivun."
     )
-    assert paragraphs[5] == 'Vastatkaa tähän "kyllä" tai soittakaa 040 123 4567, niin hoidan loput. Linkki on voimassa 12.12. asti.'
+    assert paragraphs[5] == 'Vastatkaa tähän "kyllä" tai soittakaa 040 123 4567, niin hoidan loput. Linkki on voimassa 11.12. asti.'
     assert len(paragraphs) == 6
     assert tail == f"Palin\nPalin Web · palinweb.fi\n040 123 4567\n\n{OPT_OUT_LINE}"
     assert word_count(head) <= DEMO_EMAIL_MAX_WORDS
@@ -237,7 +237,7 @@ def test_no_problem_keeps_only_intro_paragraph() -> None:
 
 def test_next_step_without_phone_only_asks_to_reply() -> None:
     body = build_demo_email_body(MODEL_TEXT, _profile(), URL, expires_at=EXPIRES)
-    assert 'Vastatkaa tähän "kyllä", niin hoidan loput. Linkki on voimassa 12.12. asti.\n\nTerveisin,' in body
+    assert 'Vastatkaa tähän "kyllä", niin hoidan loput. Linkki on voimassa 11.12. asti.\n\nTerveisin,' in body
     assert "soittakaa" not in email_head(body).split("\n\n")[-1]
 
 
@@ -342,7 +342,7 @@ def test_generate_email_offer_expiry_and_no_false_price_warning(
     with caplog.at_level(logging.WARNING):
         body = client_a.post(f"/leads/{made['lead']['id']}/generate-email", json={"require_demo_link": True}).json()["body"]
     assert "hinta on 390 € kertamaksuna" in body
-    expires = datetime.fromisoformat(made["demo"]["expires_at"])
+    expires = datetime.fromisoformat(made["demo"]["expires_at"]) - timedelta(days=1)
     assert f"Linkki on voimassa {expires.day}.{expires.month}. asti." in body
     assert "Linkki aukeaa suoraan puhelimella." in body and "Timma" not in body
     assert not [r for r in caplog.records if "mainitaan hinta" in r.getMessage()]

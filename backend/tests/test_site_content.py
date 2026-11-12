@@ -489,7 +489,7 @@ def test_demo_email_says_draft_is_based_on_current_information(
     assert client_a.post(f"/leads/{site_demo['lead_id']}/demo/publish").status_code == 200
     fake_openai.reply = "Hei, olen Carolus ja teen nettisivuja.\n\nSivunne ei toimi puhelimella hyvin."
     body = client_a.post(f"/leads/{site_demo['lead_id']}/generate-email", json={"require_demo_link": True}).json()["body"]
-    assert "Tein luonnoksen nykyisten tietojenne pohjalta" in body
+    assert "tein luonnoksen nykyisten tietojenne pohjalta" in body
 
 
 def test_email_deep_scan_for_partial_site_respects_robots(
