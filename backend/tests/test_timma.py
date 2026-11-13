@@ -10,7 +10,16 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.utils import timma
-from app.utils.timma import TimmaFetchError, canonical_timma_url, fetch_timma, parse_timma, timma_slug
+from app.utils.timma import (
+    TimmaFetchError,
+    canonical_timma_url,
+    fetch_timma,
+    fetch_timma_source,
+    parse_timma,
+    timma_slug,
+    timma_source,
+    varaa_slug,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "timma_rmak.json"
 RMAK_URL = "https://timma.fi/yritys/scissor-room-matinkyla?landingPage=parturi-espoo"
@@ -326,6 +335,126 @@ def test_ensure_timma_fetches_once(session: Session, fake_get: FakeTimma) -> Non
     # Website vaihtui: vanhan sivun dataa ei käytetä
     lead.website = "https://example.fi"
     assert lead_timma(lead) is None
+
+
+# --- varaa.timma.fi -osoitteet (Googlen varauslinkki) ---
+
+SARO_VARAA_URL = "https://varaa.timma.fi/sarostudio"
+
+
+def varaa_response(**fields: Any) -> FakeResponse:
+    # varaa.timma.fi:n julkisen API:n vastauksesta tarvitaan vain gslug ja hideFromMarketplace
+    payload = {"name": "Saro studio", "slug": "sarostudio", "gslug": "saro-studio", "hideFromMarketplace": False, **fields}
+    return FakeResponse(body=json.dumps(payload).encode())
+
+
+@pytest.mark.parametrize("url,slug", [
+    (SARO_VARAA_URL, "sarostudio"),
+    ("https://varaa.timma.fi/sarostudio/", "sarostudio"),
+    ("http://varaa.timma.fi/sarostudio", "sarostudio"),
+    ("https://varaa.timma.fi/reservation/sarostudio?service=1", "sarostudio"),
+])
+def test_varaa_slug_accepts_booking_pages(url: str, slug: str) -> None:
+    assert varaa_slug(url) == slug
+    assert timma_source(url) == f"varaa:{slug}"
+
+
+@pytest.mark.parametrize("url", [
+    None,
+    "https://varaa.timma.fi/",
+    "https://varaa.timma.fi/customergroup/ketju",
+    "https://varaa.timma.fi/iframed/sarostudio",
+    "https://varaa.timma.fi/sarostudio/extra",
+    "https://varaa.timma.fi/SaroStudio",
+    "https://varaa.timma.fi:8443/sarostudio",
+    "https://varaa.timma.fi@evil.example/sarostudio",
+    "https://varaa.timma.fi.evil.example/sarostudio",
+    "https://evil.varaa.timma.fi/sarostudio",
+    "https://timma.fi/sarostudio",
+    "varaa.timma.fi/sarostudio",
+])
+def test_varaa_slug_rejects_everything_else(url: str | None) -> None:
+    assert varaa_slug(url) is None
+
+
+def test_timma_source_prefers_business_page() -> None:
+    assert timma_source("https://timma.fi/yritys/saro-studio") == "saro-studio"
+    assert timma_source("https://example.fi") is None
+
+
+def test_fetch_varaa_resolves_gslug_then_fetches_business_page(fake_get: FakeTimma) -> None:
+    fake_get.queue.append(varaa_response())
+    snapshot = fetch_timma_source("varaa:sarostudio")
+    assert snapshot.status == "ok" and snapshot.slug == "varaa:sarostudio"
+    assert [c["url"] for c in fake_get.calls] == [
+        "https://varaa.timma.fi/api/customers/withservices/slug/sarostudio/public",
+        "https://timma.fi/api/customers/withservicesandusers/gslug/saro-studio/public/v3",
+    ]
+    assert all(c["allow_redirects"] is False and c["timeout"] == timma.TIMEOUT for c in fake_get.calls)
+
+
+@pytest.mark.parametrize("response,status", [
+    (FakeResponse(status=404, body=b'{"message":"Customer not found by slug."}'), "not_found"),
+    (varaa_response(hideFromMarketplace=True), "hidden"),
+    (varaa_response(gslug=None), "not_found"),
+    (varaa_response(gslug="../admin"), "not_found"),
+])
+def test_fetch_varaa_without_usable_business_page(fake_get: FakeTimma, response: FakeResponse, status: str) -> None:
+    fake_get.queue.append(response)
+    snapshot = fetch_timma_source("varaa:sarostudio")
+    assert (snapshot.status, snapshot.slug, snapshot.data) == (status, "varaa:sarostudio", None)
+    assert len(fake_get.calls) == 1
+
+
+@pytest.mark.parametrize("response", [
+    FakeResponse(status=302),
+    FakeResponse(status=500),
+    FakeResponse(body=b"<html></html>", content_type="text/html"),
+    FakeResponse(body=b"[]"),
+])
+def test_fetch_varaa_errors(fake_get: FakeTimma, response: FakeResponse) -> None:
+    fake_get.queue.append(response)
+    with pytest.raises(TimmaFetchError):
+        fetch_timma_source("varaa:sarostudio")
+    assert len(fake_get.calls) == 1
+
+
+def test_fetch_varaa_rejects_bad_slug(fake_get: FakeTimma) -> None:
+    with pytest.raises(TimmaFetchError):
+        fetch_timma_source("varaa:../admin")
+    assert fake_get.calls == []
+
+
+def test_refresh_with_varaa_website(client_a: TestClient, make_lead: Any, fake_get: FakeTimma, session: Session) -> None:
+    from app.main import lead_timma
+    from app.models import Lead
+
+    lead = make_lead(website=SARO_VARAA_URL, website_status="NO WEBSITE", website_issue="booking platform only")
+    fake_get.queue.append(varaa_response())
+    res = client_a.post(f"/leads/{lead['id']}/timma/refresh")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["website"] == SARO_VARAA_URL  # Googlen osoite säilyy
+    assert json.loads(body["timma_data"])["slug"] == "varaa:sarostudio"
+    db_lead = session.get(Lead, lead["id"])
+    assert db_lead is not None
+    data = lead_timma(db_lead)
+    # Varauslinkki on kanoninen yrityssivu (Timman vastauksen gslug), ei varaa-osoite
+    assert data is not None and data.booking_url.startswith("https://timma.fi/yritys/")
+
+
+def test_ensure_timma_with_varaa_fetches_once(session: Session, fake_get: FakeTimma) -> None:
+    from app.main import ensure_timma
+    from app.models import Lead
+
+    lead = Lead(user_id="u", name="Saro Studio", city="Espoo", website=SARO_VARAA_URL)
+    session.add(lead)
+    session.commit()
+    fake_get.queue.append(varaa_response())
+    first = asyncio.run(ensure_timma(session, lead))
+    second = asyncio.run(ensure_timma(session, lead))
+    assert first is not None and second == first
+    assert len(fake_get.calls) == 2  # varaa-API + yrityssivun API, vain kerran
 
 
 # --- Demo Timma-tiedoilla ---

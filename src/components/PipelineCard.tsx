@@ -94,9 +94,10 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [editingWebsite, setEditingWebsite] = useState(false);
   const [websiteDraft, setWebsiteDraft] = useState('');
   const [savingWebsite, setSavingWebsite] = useState(false);
-  // Sama ehto kuin backendin timma_slug(): vain yrityssivu, ei /pro/-markkinointisivuja
+  // Sama ehto kuin backendin timma_source(): yrityssivu tai varaa.timma.fi-varaussivu, ei /pro/-markkinointisivuja
   const isTimmaPage = (url: string | null | undefined) =>
-    /^https:\/\/timma\.fi\/yritys\/[a-z0-9-]+\/?(\?.*)?$/.test(url ?? '');
+    /^https:\/\/timma\.fi\/yritys\/[a-z0-9-]+\/?(\?.*)?$/.test(url ?? '') ||
+    /^https?:\/\/varaa\.timma\.fi\/(reservation\/)?[a-z0-9-]+\/?(\?.*)?$/.test(url ?? '');
   const hasTimmaPage = isTimmaPage(agency.website);
 
   const startEditWebsite = () => {

@@ -88,7 +88,14 @@ from .utils.site_content import (
     verify_site_facts,
 )
 from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_booking_url, is_business_booking_page, is_social_media_url
-from .utils.timma import TimmaData, TimmaFetchError, TimmaSnapshot, canonical_timma_url, fetch_timma, timma_slug
+from .utils.timma import (
+    TimmaData,
+    TimmaFetchError,
+    TimmaSnapshot,
+    canonical_timma_url,
+    fetch_timma_source,
+    timma_source,
+)
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
@@ -1094,7 +1101,7 @@ def update_lead(
         # Googlessa), joten käsin muutettu osoite ei muuta niitä.
         website = (lead_data["website"] or "").strip() or None
         website = (canonical_timma_url(website) or website) if website else None
-        if timma_slug(website) != timma_slug(db_lead.website):
+        if timma_source(website) != timma_source(db_lead.website):
             db_lead.timma_data, db_lead.timma_fetched_at = None, None
         lead_data["website"] = website
     for key, value in lead_data.items():
@@ -1119,8 +1126,10 @@ async def refresh_timma(
         raise HTTPException(status_code=404, detail="Lead not found")
     if not TIMMA_IMPORT_ENABLED:
         raise HTTPException(503, "Timma import is disabled (TIMMA_IMPORT_ENABLED)")
-    if timma_slug(db_lead.website) is None:
-        raise HTTPException(422, "Lead website is not a Timma business page (https://timma.fi/yritys/...)")
+    if timma_source(db_lead.website) is None:
+        raise HTTPException(
+            422, "Lead website is not a Timma business page (https://timma.fi/yritys/... or https://varaa.timma.fi/...)"
+        )
     before = db_lead.timma_fetched_at
     await ensure_timma(session, db_lead, refresh=True)
     if db_lead.timma_fetched_at == before:
@@ -2351,7 +2360,7 @@ def lead_timma(lead: Lead) -> Optional[TimmaData]:
         logger.warning(f"Liidin {lead.id} timma_data ei ole kelvollinen, ohitetaan")
         return None
     # Website on voinut vaihtua haun jälkeen: vanhan sivun dataa ei käytetä
-    return snapshot.data if snapshot.status == "ok" and snapshot.slug == timma_slug(lead.website) else None
+    return snapshot.data if snapshot.status == "ok" and snapshot.slug == timma_source(lead.website) else None
 
 
 async def ensure_timma(session: Session, lead: Lead, *, refresh: bool = False) -> Optional[TimmaData]:
@@ -2360,7 +2369,7 @@ async def ensure_timma(session: Session, lead: Lead, *, refresh: bool = False) -
     Verkko- tai muotovirhettä ei tallenneta (seuraava kerta yrittää uudelleen); not_found ja hidden
     tallennetaan, jotta niitä ei haeta joka demolla.
     """
-    slug = timma_slug(lead.website)
+    slug = timma_source(lead.website)
     if not TIMMA_IMPORT_ENABLED or slug is None:
         return None
     if lead.timma_data and not refresh:
@@ -2370,7 +2379,7 @@ async def ensure_timma(session: Session, lead: Lead, *, refresh: bool = False) -
         except ValueError:
             pass
     try:
-        snapshot = await asyncio.to_thread(fetch_timma, slug)
+        snapshot = await asyncio.to_thread(fetch_timma_source, slug)
     except TimmaFetchError as e:
         logger.warning(f"Timma-haku epäonnistui (liidi {lead.id}, {slug}): {e}")
         return None

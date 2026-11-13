@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 TIMMA_HOST = "timma.fi"
 TIMMA_API_URL = "https://timma.fi/api/customers/withservicesandusers/gslug/{slug}/public/v3"
+# Vanha ajanvaraussivu varaa.timma.fi/{slug}: sen julkinen API palauttaa saman yrityksen gslugin
+# (timma.fi/yritys/{gslug}). Slugit eroavat, esim. sarostudio -> saro-studio.
+VARAA_HOST = "varaa.timma.fi"
+VARAA_API_URL = "https://varaa.timma.fi/api/customers/withservices/slug/{slug}/public"
+VARAA_SOURCE_PREFIX = "varaa:"
 TIMMA_IMAGE_PREFIX = "https://scaled-images.timma.fi/"
 USER_AGENT = "AgencyHunter/1.0 (+https://palinweb.fi)"
 TIMEOUT = (5, 10)  # yhteys, luku
@@ -109,6 +114,34 @@ def canonical_timma_url(url: str) -> Optional[str]:
         return None
     slug = timma_slug(f"https://{TIMMA_HOST}{parsed.path}")
     return booking_page_url(slug) if slug else None
+
+
+def varaa_slug(url: Optional[str]) -> Optional[str]:
+    """http(s)://varaa.timma.fi/{slug} tai /reservation/{slug} [/][?…] -> slug. Muut -> None."""
+    if not url:
+        return None
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https") or parsed.hostname != VARAA_HOST or parsed.port is not None:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    parts = parsed.path.split("/")[1:]
+    if parts and parts[-1] == "":
+        parts.pop()
+    if len(parts) == 2 and parts[0] == "reservation":
+        parts = parts[1:]
+    if len(parts) != 1:
+        return None
+    return parts[0] if SLUG_RE.match(parts[0]) else None
+
+
+def timma_source(url: Optional[str]) -> Optional[str]:
+    """Liidin website -> Timma-haun avain (TimmaSnapshot.slug): gslug tai "varaa:{slug}". None = ei Timma-sivu."""
+    slug = timma_slug(url)
+    if slug:
+        return slug
+    varaa = varaa_slug(url)
+    return f"{VARAA_SOURCE_PREFIX}{varaa}" if varaa else None
 
 
 def _text(value: object, limit: int) -> Optional[str]:
@@ -204,14 +237,12 @@ def parse_timma(payload: object, slug: str) -> TimmaSnapshot:
     return TimmaSnapshot(status="ok", slug=slug, data=data)
 
 
-def fetch_timma(slug: str) -> TimmaSnapshot:
-    """Yksi GET Timman julkiseen API:in. Blokkaava: kutsu asyncio.to_thread()-funktiolla."""
-    if not SLUG_RE.match(slug):
-        raise TimmaFetchError("virheellinen slug")
+def _get_json(url: str, params: Optional[dict[str, str]] = None) -> Optional[object]:
+    """GET kiinteään Timman API-osoitteeseen. None = 404. Heittää TimmaFetchError muista virheistä."""
     try:
         response = requests.get(
-            TIMMA_API_URL.format(slug=slug),
-            params={"lang": "fi", "country": "FI"},
+            url,
+            params=params,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
             timeout=TIMEOUT,
             allow_redirects=False,
@@ -221,7 +252,7 @@ def fetch_timma(slug: str) -> TimmaSnapshot:
         raise TimmaFetchError(f"pyyntö epäonnistui: {e.__class__.__name__}") from e
     try:
         if response.status_code == 404:
-            return TimmaSnapshot(status="not_found", slug=slug)
+            return None
         if response.status_code != 200:
             # 3xx mukaan lukien: uudelleenohjauksia ei seurata
             raise TimmaFetchError(f"HTTP {response.status_code}")
@@ -236,10 +267,44 @@ def fetch_timma(slug: str) -> TimmaSnapshot:
     finally:
         response.close()
     try:
-        payload = json.loads(body)
+        payload: object = json.loads(body)
     except ValueError as e:
         raise TimmaFetchError("vastaus ei ole JSONia") from e
     # Timman sovellus käsittelee {"status": ...} -vastauksen virheenä (merkitys ei tiedossa): ei tallenneta
     if isinstance(payload, dict) and "status" in payload and "name" not in payload:
         raise TimmaFetchError(f"Timman virhevastaus status={str(payload.get('status'))[:40]}")
+    return payload
+
+
+def fetch_timma(slug: str) -> TimmaSnapshot:
+    """Yksi GET Timman julkiseen API:in. Blokkaava: kutsu asyncio.to_thread()-funktiolla."""
+    if not SLUG_RE.match(slug):
+        raise TimmaFetchError("virheellinen slug")
+    payload = _get_json(TIMMA_API_URL.format(slug=slug), {"lang": "fi", "country": "FI"})
+    if payload is None:
+        return TimmaSnapshot(status="not_found", slug=slug)
     return parse_timma(payload, slug)
+
+
+def fetch_timma_source(source: str) -> TimmaSnapshot:
+    """timma_source()-avaimen tiedot. varaa-osoitteesta ensin gslug varaa.timma.fi:n julkisesta API:sta,
+    sitten sama haku kuin timma.fi/yritys-sivulle. Snapshotin slug = avain (välimuistin tarkistus).
+    Blokkaava: kutsu asyncio.to_thread()-funktiolla.
+    """
+    if not source.startswith(VARAA_SOURCE_PREFIX):
+        return fetch_timma(source)
+    slug = source.removeprefix(VARAA_SOURCE_PREFIX)
+    if not SLUG_RE.match(slug):
+        raise TimmaFetchError("virheellinen slug")
+    payload = _get_json(VARAA_API_URL.format(slug=slug))
+    if payload is None:
+        return TimmaSnapshot(status="not_found", slug=source)
+    if not isinstance(payload, dict):
+        raise TimmaFetchError("vastaus ei ole JSON-objekti")
+    if payload.get("hideFromMarketplace") is True:
+        return TimmaSnapshot(status="hidden", slug=source)
+    gslug = payload.get("gslug")
+    if not isinstance(gslug, str) or not SLUG_RE.match(gslug):
+        # Ei timma.fi/yritys-sivua (ei markkinapaikalla): ei dataa
+        return TimmaSnapshot(status="not_found", slug=source)
+    return fetch_timma(gslug).model_copy(update={"slug": source})
