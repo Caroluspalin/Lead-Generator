@@ -1,6 +1,42 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-11)
+## Mihin jäätiin (päivitetty 2026-11-13)
+
+**Myyntityön sujuvoitus: Timma-osoitteet (2026-11-13), `main`**, commitit `84a52e5` (website-kentän muokkaus) ja
+`b84854b` (varaa.timma.fi). Testit: pytest 963 passed, `npm run lint && npm run build` ok. Ei migraatioita, ei
+Worker-deployta. TIMMA_IMPORT_ENABLED, hideFromMarketplace-esto, MAX_SEARCH_CALLS, field mask ja demopohjat ennallaan.
+
+- **Website-kentän muokkaus kortilta**: Pipeline-kortin Website-rivillä Edit → osoite → Save (Enter tallentaa, Esc
+  peruu, tyhjä = ei sivua). `PATCH /leads/{id}` muuttaa Timma-yrityssivun kanoniseen muotoon
+  (`timma.fi/yritys/x`, `http://`, `www.` → `https://timma.fi/yritys/x`, `canonical_timma_url`), jolloin Refresh
+  Timma ilmestyy heti. Jos Timma-avain vaihtuu, vanha `timma_data` / `timma_fetched_at` tyhjennetään.
+  **`website_status` / `website_issue` eivät muutu**: ne kuvaavat Googlen profiilia, ja demosähköposti kertoo niiden
+  perusteella, mitä asiakas näkee Googlessa (Mini parturi pysyy NO WEBSITE: "Asiakas löytää teidät Google-kartalta…").
+  Timma-dataa ei haeta tallennuksessa: Refresh Timma tai Autodemo / Demo hakee sen.
+- **varaa.timma.fi**: `http(s)://varaa.timma.fi/{slug}` ja `/reservation/{slug}` tunnistetaan (`varaa_slug`). varaa-sovelluksen
+  julkinen API `https://varaa.timma.fi/api/customers/withservices/slug/{slug}/public` (ei kirjautumista) palauttaa
+  `gslug`in, eli timma.fi/yritys-sivun tunnisteen (Saro Studio: `sarostudio` → `saro-studio`). Sen jälkeen sama haku
+  kuin ennen (`fetch_timma(gslug)`). Haku tehdään vain liidin Googlesta tulleesta tai käsin syötetystä osoitteesta,
+  ei nimellä. Välimuistiavain `TimmaSnapshot.slug = "varaa:{slug}"` (`timma_source`), liidin website säilyy
+  Googlen osoitteena, demon varauslinkki on kanoninen `https://timma.fi/yritys/{gslug}`. `hideFromMarketplace`
+  varaa-vastauksessa → hidden ilman toista pyyntöä; 404 tai puuttuva gslug → not_found. Molemmat haut kulkevat saman
+  suojatun GETin kautta (`_get_json`: kiinteä osoite, ei uudelleenohjauksia, timeout, 512 kt, Content-Type).
+  Tarkistettu oikeaa Timmaa vasten: Saro Studio → 5,0 (82), Leikkaukset / Parta / Muut hiuspalvelut,
+  Mallinmuutosleikkaus alk. 42,00 €.
+- **Käsitesti, Saro Studio** (Merituulentie 1, Espoo; Googlessa varaa.timma.fi-osoite): (1) Pipeline-kortilla Website
+  näyttää `varaa.timma.fi` ja vieressä on Refresh Timma (jos liidi on lisätty ennen tätä muutosta, nappi ilmestyy nyt
+  ilman toimenpiteitä). (2) Refresh Timma → toast "Timma details refreshed". (3) Autodemo tai Demo → Regenerate
+  barber-/premium-pohjalla: hinnasto kategorioittain, 5,0 · 82, Varaa aika -linkki `timma.fi/yritys/saro-studio`.
+  (4) Sähköpostissa NO WEBSITE / "booking platform only" -asiakasvaikutus ("Googlesta asiakas pääsee ajanvaraukseen…").
+  Jos Googlen osoite on eri muotoinen (esim. `varaa.timma.fi/customergroup/…`), nappia ei tule: liitä Editillä
+  `https://timma.fi/yritys/saro-studio`.
+- **Käsitesti, Mini parturi** (Länsituuli 6, Espoo; Googlessa ei sivua): (1) Kortilla Website: None → Edit → liitä
+  Timma-yrityssivun osoite (esim. `timma.fi/yritys/…` ilman https:ää) → Save. (2) Osoite näkyy muodossa
+  `https://timma.fi/yritys/…`, toast "Timma page detected" ja Refresh Timma ilmestyy. Status-merkki pysyy NO WEBSITE.
+  (3) Refresh Timma → Autodemo → demossa Timman hinnasto ja varauslinkki. (4) Sähköpostissa yhä "Asiakas löytää teidät
+  Google-kartalta…" (ei väitettä Googlen varauslinkistä). (5) Edit → tyhjennä → Save palauttaa None ja nappi katoaa.
+- **Vaihe 3 (Pipelinen "Demo published" -suodatin) odottaa päätöstä**: julkaistun demon tieto ei ole `GET /leads`
+  -vastauksessa (vain Demo-taulussa), joten tarvitaan uusi API-kenttä tai -endpoint (ei migraatiota).
 
 **Premium-parturipohjan videohero (2026-11-11), haara `premium-pohja-video`** (haarautettu `premium-pohja`sta, ei
 mergetty, ei julkaistu). Testit: pytest 849 passed, worker `npm test` ok, `npm run lint && npm run build` ok,
@@ -136,7 +172,7 @@ Frontend (React 19 + TS + Vite 7)  -->  Backend (FastAPI + SQLModel)  -->  Postg
 | scraped_at | datetime? | Deep Scan: milloin verkkosivun teksti haettiin |
 | website_facts | str? (JSON) | Laajennettu Deep Scan (`SiteFacts`): palvelut, hinnat ja esittely yrityksen omalta sivulta, tarkistettu sivujen tekstiä vasten. Tyhjä JSON = skannattu ilman käyttökelpoista sisältöä (ei skannata uudelleen) |
 | website_facts_at | datetime? | Milloin laajennettu Deep Scan tehtiin |
-| timma_data | str? (JSON) | `TimmaSnapshot`: status ok / not_found / hidden, slug, data (palvelut, osoite, arvio, kuvat, varauslinkki). Haetaan kerran, uudelleen vain Refreshistä. Käytetään vain jos slug = nykyisen websiten slug |
+| timma_data | str? (JSON) | `TimmaSnapshot`: status ok / not_found / hidden, slug, data (palvelut, osoite, arvio, kuvat, varauslinkki). Haetaan kerran, uudelleen vain Refreshistä. Käytetään vain jos slug = nykyisen websiten `timma_source()` (gslug tai `varaa:{slug}`) |
 | timma_fetched_at | datetime? | Timma-haun päivämäärä |
 | review_before_contact | bool | Oletus false (server_default). Autodemo asettaa true: tarkista demo ennen yhteydenottoa. PATCH false = tarkistettu |
 | email | str? | Vain yrityksen sivustolta oikeasti löytynyt osoite (ei arvailua) tai käsin PATCHilla asetettu |
@@ -234,12 +270,12 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 | DELETE | `/places/{place_id}/dismiss` | Palauta hylätty (rivi poistetaan → näkyy taas uutena). 404 jos ei hylätty (myös toisen käyttäjän) |
 | GET | `/places/dismissed` | Hylätyt: `place_id`, `maps_url` (Google Maps place_id-linkki), `dismissed_at` |
 | POST | `/leads` | Tallenna liidi kantaan (Places-kentät mukaan, `lead_score` lasketaan serverissä). Jos sivu toimii (WEBSITE OK / NOT MOBILE / INSECURE), sähköpostihaku käynnistyy taustalla vastauksen jälkeen |
-| POST | `/leads/{lead_id}/timma/refresh` | Hae Timma-tiedot uudelleen. 422 jos website ei ole `https://timma.fi/yritys/{slug}`, 503 jos `TIMMA_IMPORT_ENABLED=false`, 502 jos haku epäonnistui (ei tallennu) |
+| POST | `/leads/{lead_id}/timma/refresh` | Hae Timma-tiedot uudelleen. 422 jos website ei ole `https://timma.fi/yritys/{slug}` eikä `http(s)://varaa.timma.fi/{slug}` (tai `/reservation/{slug}`), 503 jos `TIMMA_IMPORT_ENABLED=false`, 502 jos haku epäonnistui (ei tallennu) |
 | POST | `/leads/{lead_id}/autodemo` | Timma-tiedot (jos on) + `generate_demo` + `publish_demo` (samat funktiot kuin endpointeissa), sitten `review_before_contact = true`. Ei sähköpostia. 503 ennen AI-kutsua jos R2 puuttuu, 409 DNC, 428 profiili |
 | POST | `/leads/{lead_id}/find-email` | Hae sähköposti heti liidin sivustolta (422 jos sivu ei toimi). Palauttaa päivitetyn liidin; `email` null = ei löytynyt |
 | GET | `/leads` | Hae kaikki tallennetut liidit |
 | GET | `/leads/export?ids=1,2,3` | CSV-export valituille liideille |
-| PATCH | `/leads/{lead_id}` | Päivitä status, notes, phone, website, email, do_not_contact (päivittää `updated_at`) |
+| PATCH | `/leads/{lead_id}` | Päivitä status, notes, phone, website, email, do_not_contact (päivittää `updated_at`). website: trimmataan, tyhjä → null, Timma-yrityssivu kanoniseen muotoon; Timma-avaimen vaihtuessa `timma_data` tyhjennetään. `website_status`/`website_issue` eivät muutu |
 | DELETE | `/leads/{lead_id}` | Poista liidi |
 | POST | `/leads/{lead_id}/generate-email` | AI-sähköpostiluonnos (GPT-4o-mini) opt-out-rivillä, tallentaa draftin kantaan. 409 jos do_not_contact |
 | POST | `/leads/{lead_id}/generate-call-script` | 30 s puhelinrunko suomeksi (GPT-4o-mini), ei tallennu, ei scrapingia. 409 jos do_not_contact |
