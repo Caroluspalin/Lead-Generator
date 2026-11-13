@@ -95,6 +95,22 @@ def booking_page_url(slug: str) -> str:
     return f"https://{TIMMA_HOST}/yritys/{slug}"
 
 
+def canonical_timma_url(url: str) -> Optional[str]:
+    """Käsin syötetty Timma-yrityssivu (http, www., ilman skeemaa) -> https://timma.fi/yritys/{slug}.
+
+    Muut osoitteet -> None (tallennetaan sellaisenaan). timma_slug() pysyy tiukkana: vain tämän
+    funktion tuottama muoto kelpaa hakuun.
+    """
+    raw = url.strip()
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    if parsed.scheme not in ("http", "https") or parsed.port is not None or parsed.username or parsed.password:
+        return None
+    if (parsed.hostname or "").removeprefix("www.") != TIMMA_HOST:
+        return None
+    slug = timma_slug(f"https://{TIMMA_HOST}{parsed.path}")
+    return booking_page_url(slug) if slug else None
+
+
 def _text(value: object, limit: int) -> Optional[str]:
     if not isinstance(value, str):
         return None

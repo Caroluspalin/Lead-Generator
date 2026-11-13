@@ -88,7 +88,7 @@ from .utils.site_content import (
     verify_site_facts,
 )
 from .utils.website_check import SOCIAL_MEDIA_ISSUE, analyze_website, is_booking_url, is_business_booking_page, is_social_media_url
-from .utils.timma import TimmaData, TimmaFetchError, TimmaSnapshot, fetch_timma, timma_slug
+from .utils.timma import TimmaData, TimmaFetchError, TimmaSnapshot, canonical_timma_url, fetch_timma, timma_slug
 from .utils.contact_finder import find_contact_email
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
@@ -1089,6 +1089,14 @@ def update_lead(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     lead_data = lead_update.model_dump(exclude_unset=True)
+    if "website" in lead_data:
+        # website_status / website_issue kuvaavat Googlen profiilia (sähköposti kertoo, mitä asiakas näkee
+        # Googlessa), joten käsin muutettu osoite ei muuta niitä.
+        website = (lead_data["website"] or "").strip() or None
+        website = (canonical_timma_url(website) or website) if website else None
+        if timma_slug(website) != timma_slug(db_lead.website):
+            db_lead.timma_data, db_lead.timma_fetched_at = None, None
+        lead_data["website"] = website
     for key, value in lead_data.items():
         setattr(db_lead, key, value)
     db_lead.updated_at = utc_now()

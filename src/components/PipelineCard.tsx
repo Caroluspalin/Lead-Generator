@@ -88,11 +88,44 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setEmailWithDemo(true);
     setEmailModalOpen(true);
   };
-  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma } = usePipeline();
+  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, updateWebsite } = usePipeline();
   const [autodemoRunning, setAutodemoRunning] = useState(false);
   const [timmaRefreshing, setTimmaRefreshing] = useState(false);
+  const [editingWebsite, setEditingWebsite] = useState(false);
+  const [websiteDraft, setWebsiteDraft] = useState('');
+  const [savingWebsite, setSavingWebsite] = useState(false);
   // Sama ehto kuin backendin timma_slug(): vain yrityssivu, ei /pro/-markkinointisivuja
-  const hasTimmaPage = /^https:\/\/timma\.fi\/yritys\/[a-z0-9-]+\/?(\?.*)?$/.test(agency.website ?? '');
+  const isTimmaPage = (url: string | null | undefined) =>
+    /^https:\/\/timma\.fi\/yritys\/[a-z0-9-]+\/?(\?.*)?$/.test(url ?? '');
+  const hasTimmaPage = isTimmaPage(agency.website);
+
+  const startEditWebsite = () => {
+    setWebsiteDraft(agency.website ?? '');
+    setEditingWebsite(true);
+  };
+
+  const handleSaveWebsite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const next = websiteDraft.trim() || null;
+    if (next === (agency.website ?? null)) {
+      setEditingWebsite(false);
+      return;
+    }
+    setSavingWebsite(true);
+    try {
+      const updated = await updateWebsite(agency.id, next);
+      setEditingWebsite(false);
+      toast.success(
+        isTimmaPage(updated.website)
+          ? 'Website saved. Timma page detected: Refresh Timma or Autodemo uses it.'
+          : 'Website saved',
+      );
+    } catch {
+      toast.error('Failed to save the website');
+    } finally {
+      setSavingWebsite(false);
+    }
+  };
 
   // Generoi + julkaisee demon (Timma-tiedoilla jos on). Ei sähköpostia: liidi jää tarkistettavaksi.
   const handleAutodemo = async () => {
@@ -257,21 +290,66 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 
         <dt className="text-fg-subtle">Website</dt>
         <dd className="min-w-0">
-          {website ? (
-            <a
-              href={website}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={agency.website}
-              className={`inline-flex max-w-full items-center gap-1 font-mono text-xs text-fg ${linkClass}`}
-            >
-              <span className="truncate">{websiteLabel}</span>
-              <ExternalLink size={11} className="shrink-0 text-fg-subtle" />
-            </a>
+          {editingWebsite ? (
+            <form onSubmit={handleSaveWebsite} className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <input
+                type="text"
+                inputMode="url"
+                value={websiteDraft}
+                onChange={(e) => setWebsiteDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setEditingWebsite(false);
+                }}
+                autoFocus
+                maxLength={500}
+                placeholder="https://timma.fi/yritys/…"
+                aria-label={`Website of ${agency.name}`}
+                className="w-full min-w-0 h-control-sm px-2 font-mono text-xs bg-canvas border border-line rounded text-fg"
+              />
+              <button
+                type="submit"
+                disabled={savingWebsite}
+                className={`inline-flex items-center gap-1 text-xs text-fg disabled:opacity-60 ${linkClass}`}
+              >
+                {savingWebsite && <Loader2 size={11} className="animate-spin" />}
+                {savingWebsite ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingWebsite(false)}
+                disabled={savingWebsite}
+                className={`text-xs text-fg-muted hover:text-fg ${linkClass}`}
+              >
+                Cancel
+              </button>
+            </form>
           ) : (
-            <span className="text-fg-subtle">None</span>
+            <>
+              {website ? (
+                <a
+                  href={website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={agency.website}
+                  className={`inline-flex max-w-full items-center gap-1 font-mono text-xs text-fg ${linkClass}`}
+                >
+                  <span className="truncate">{websiteLabel}</span>
+                  <ExternalLink size={11} className="shrink-0 text-fg-subtle" />
+                </a>
+              ) : (
+                <span className="text-fg-subtle">None</span>
+              )}
+              <button
+                type="button"
+                onClick={startEditWebsite}
+                title="Edit the website address, e.g. paste the Timma business page"
+                className={`ml-2.5 text-xs text-fg-muted hover:text-fg ${linkClass}`}
+              >
+                Edit
+              </button>
+            </>
           )}
-          {hasTimmaPage && (
+          {hasTimmaPage && !editingWebsite && (
             <button
               type="button"
               onClick={handleRefreshTimma}

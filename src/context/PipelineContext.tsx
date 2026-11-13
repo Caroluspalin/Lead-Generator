@@ -18,6 +18,7 @@ interface PipelineContextValue {
   runAutodemo: (id: number) => Promise<Demo>;
   markReviewed: (id: number) => Promise<void>;
   refreshTimma: (id: number) => Promise<void>;
+  updateWebsite: (id: number, website: string | null) => Promise<SavedAgency>;
   refresh: () => Promise<void>;
 }
 
@@ -193,6 +194,21 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
   };
 
+  // Backend muuttaa Timma-yrityssivun kanoniseen muotoon (https://timma.fi/yritys/slug), jolloin Refresh Timma näkyy
+  const updateWebsite = async (id: number, website: string | null): Promise<SavedAgency> => {
+    const res = await apiFetch(`/leads/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ website }),
+    });
+    if (!res.ok) {
+      throw new Error(`Website update failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    return updated;
+  };
+
   const removeFromPipeline = async (id: number) => {
     const res = await apiFetch(`/leads/${id}`, {
       method: 'DELETE',
@@ -233,6 +249,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         runAutodemo,
         markReviewed,
         refreshTimma,
+        updateWebsite,
         refresh,
       }}
     >

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.utils import timma
-from app.utils.timma import TimmaFetchError, fetch_timma, parse_timma, timma_slug
+from app.utils.timma import TimmaFetchError, canonical_timma_url, fetch_timma, parse_timma, timma_slug
 
 FIXTURE = Path(__file__).parent / "fixtures" / "timma_rmak.json"
 RMAK_URL = "https://timma.fi/yritys/scissor-room-matinkyla?landingPage=parturi-espoo"
@@ -84,6 +84,69 @@ def test_timma_slug_accepts_business_pages(url: str, slug: str) -> None:
 ])
 def test_timma_slug_rejects_everything_else(url: str | None) -> None:
     assert timma_slug(url) is None
+
+
+@pytest.mark.parametrize("url", [
+    "https://timma.fi/yritys/mini-parturi",
+    "https://timma.fi/yritys/mini-parturi/",
+    "timma.fi/yritys/mini-parturi",
+    "  http://timma.fi/yritys/mini-parturi?landingPage=x ",
+    "https://www.timma.fi/yritys/mini-parturi",
+    "www.timma.fi/yritys/mini-parturi",
+])
+def test_canonical_timma_url_accepts_hand_typed_variants(url: str) -> None:
+    assert canonical_timma_url(url) == "https://timma.fi/yritys/mini-parturi"
+
+
+@pytest.mark.parametrize("url", [
+    "https://timma.fi/pro/book-demo/642fff026759411f4a6cf069",
+    "https://timma.fi/yritys/",
+    "https://timma.fi/yritys/natawat/varaa",
+    "https://timma.fi/yritys/Natawat",
+    "https://timma.fi:8443/yritys/natawat",
+    "https://timma.fi@evil.example/yritys/natawat",
+    "https://timma.fi.evil.example/yritys/natawat",
+    "ftp://timma.fi/yritys/natawat",
+    "https://example.fi",
+])
+def test_canonical_timma_url_rejects_others(url: str) -> None:
+    assert canonical_timma_url(url) is None
+
+
+# --- Website-kentän muokkaus kortilta (PATCH) ---
+
+def test_patch_website_to_timma_page_enables_refresh(client_a: TestClient, make_lead: Any, fake_get: FakeTimma) -> None:
+    lead = make_lead(website=None, website_status="NO WEBSITE")
+    assert client_a.post(f"/leads/{lead['id']}/timma/refresh").status_code == 422
+    res = client_a.patch(f"/leads/{lead['id']}", json={"website": " timma.fi/yritys/mini-parturi/ "})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["website"] == "https://timma.fi/yritys/mini-parturi"
+    # Tila kuvaa Googlen profiilia (sähköpostin asiakasvaikutus), ei käsin syötettyä osoitetta
+    assert body["website_status"] == "NO WEBSITE"
+    assert client_a.post(f"/leads/{lead['id']}/timma/refresh").status_code == 200
+    assert fake_get.calls[0]["url"].endswith("/gslug/mini-parturi/public/v3")
+
+
+def test_patch_website_other_url_is_stored_as_is(client_a: TestClient, make_lead: Any) -> None:
+    lead = make_lead(website=None)
+    res = client_a.patch(f"/leads/{lead['id']}", json={"website": "https://example.fi/"})
+    assert res.json()["website"] == "https://example.fi/"
+    assert client_a.patch(f"/leads/{lead['id']}", json={"website": "   "}).json()["website"] is None
+
+
+def test_patch_website_clears_cached_timma_of_other_slug(client_a: TestClient, make_lead: Any, fake_get: FakeTimma) -> None:
+    lead = make_lead(website=RMAK_URL)
+    client_a.post(f"/leads/{lead['id']}/timma/refresh")
+    same = client_a.patch(f"/leads/{lead['id']}", json={"website": "https://timma.fi/yritys/scissor-room-matinkyla"}).json()
+    assert same["timma_data"] is not None
+    other = client_a.patch(f"/leads/{lead['id']}", json={"website": "https://timma.fi/yritys/saro-studio"}).json()
+    assert other["timma_data"] is None and other["timma_fetched_at"] is None
+
+
+def test_patch_website_other_users_lead_404(client_b: TestClient, make_lead: Any) -> None:
+    lead = make_lead(website=None)
+    assert client_b.patch(f"/leads/{lead['id']}", json={"website": "https://timma.fi/yritys/x"}).status_code == 404
 
 
 # --- Jäsennin (tallennettu R-Makin vastaus) ---
