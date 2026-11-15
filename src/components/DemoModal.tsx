@@ -5,6 +5,11 @@ import { toast } from 'sonner';
 import type { Demo, DemoContent, DemoPhoto, DemoTemplateOption, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
+import { usePipeline } from '../context/PipelineContext';
+
+// Sama ehto kuin backendin demo_published (GET /leads): julkaistu eikä vanhentunut
+const isLive = (demo: Demo): boolean =>
+  demo.status === 'published' && (!demo.expires_at || new Date(demo.expires_at) > new Date());
 
 interface DemoModalProps {
   isOpen: boolean;
@@ -54,11 +59,13 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
   const [error, setError] = useState('');
   const [previewVersion, setPreviewVersion] = useState(0);
   const [phoneShot, setPhoneShot] = useState<PhoneShot>({ status: 'loading' });
+  const { setDemoPublished } = usePipeline();
 
   const applyDemo = (next: Demo) => {
     setDemo(next);
     setDraft(toEditable(next));
     setPreviewVersion((v) => v + 1);
+    setDemoPublished(agency.id, isLive(next));
   };
 
   const load = useCallback(async () => {
@@ -73,10 +80,12 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
       if (demoRes.status === 404) {
         setDemo(null);
         setDraft(null);
+        setDemoPublished(agency.id, false);
       } else if (demoRes.ok) {
         const data: Demo = await demoRes.json();
         setDemo(data);
         setDraft(toEditable(data));
+        setDemoPublished(agency.id, isLive(data));
       } else {
         setError(outreachErrorMessage(demoRes.status, await readDetail(demoRes)));
       }
@@ -85,7 +94,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
     } finally {
       setLoading(false);
     }
-  }, [agency.id]);
+  }, [agency.id, setDemoPublished]);
 
   useEffect(() => {
     if (isOpen) load();
@@ -229,6 +238,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
       if (!res.ok) throw new Error(`${res.status}`);
       setDemo(null);
       setDraft(null);
+      setDemoPublished(agency.id, false);
       toast.success('Demo deleted');
     } catch {
       toast.error('Failed to delete demo');

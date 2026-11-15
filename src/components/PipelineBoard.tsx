@@ -38,8 +38,22 @@ async function processInBatches<T>(
 }
 
 const PipelineBoard: React.FC = () => {
-  const { savedAgencies, loading, error, updateStatus, updateNotes, removeFromPipeline, dismissFromPipeline, refresh } =
-    usePipeline();
+  const {
+    savedAgencies,
+    loading,
+    error,
+    updateStatus,
+    updateNotes,
+    removeFromPipeline,
+    dismissFromPipeline,
+    refresh,
+    demoPublishedOnly,
+    setDemoPublishedOnly,
+  } = usePipeline();
+  // "Demo published": vain julkaistun demon liidit, do not contact -liidit pois. Myös välilehtien luvut.
+  const visibleAgencies = demoPublishedOnly
+    ? savedAgencies.filter((a) => a.demo_published && !a.do_not_contact)
+    : savedAgencies;
   const [activeTab, setActiveTab] = useState<PipelineStatus>('Shortlisted');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -55,7 +69,7 @@ const PipelineBoard: React.FC = () => {
   }, []);
 
   const selectAllInTab = useCallback(() => {
-    const tabIds = savedAgencies
+    const tabIds = visibleAgencies
       .filter((a) => a.pipeline_status === activeTab)
       .map((a) => a.id);
     setSelectedIds((prev) => {
@@ -68,9 +82,15 @@ const PipelineBoard: React.FC = () => {
       }
       return next;
     });
-  }, [savedAgencies, activeTab]);
+  }, [visibleAgencies, activeTab]);
 
   const clearSelection = () => setSelectedIds(new Set());
+
+  // Valinnat tyhjennetään, ettei massatoiminto osu suodatuksen piilottamiin liideihin
+  const toggleDemoPublishedOnly = (value: boolean) => {
+    setDemoPublishedOnly(value);
+    clearSelection();
+  };
 
   const handleBulkStatusChange = async (status: PipelineStatus) => {
     setBulkLoading(true);
@@ -189,11 +209,11 @@ const PipelineBoard: React.FC = () => {
   };
 
   const getTabCount = (status: PipelineStatus) => {
-    return savedAgencies.filter((agency) => agency.pipeline_status === status)
+    return visibleAgencies.filter((agency) => agency.pipeline_status === status)
       .length;
   };
 
-  const activeAgencies = savedAgencies.filter(
+  const activeAgencies = visibleAgencies.filter(
     (agency) => agency.pipeline_status === activeTab,
   );
 
@@ -205,6 +225,17 @@ const PipelineBoard: React.FC = () => {
       <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-xl font-semibold tracking-tight text-fg">Pipeline</h1>
         <p className="text-sm text-fg-subtle">Track prospects from first contact to decision</p>
+        {!loading && !error && savedAgencies.length > 0 && (
+          <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg transition-colors">
+            <input
+              type="checkbox"
+              checked={demoPublishedOnly}
+              onChange={(e) => toggleDemoPublishedOnly(e.target.checked)}
+              className="size-3.5 cursor-pointer"
+            />
+            Demo published
+          </label>
+        )}
       </header>
 
       {loading ? (
@@ -302,7 +333,9 @@ const PipelineBoard: React.FC = () => {
             {activeAgencies.length === 0 ? (
               <div className="py-12 text-center border border-dashed border-line rounded">
                 <p className="text-fg-subtle text-sm">
-                  No businesses in <span className="font-medium text-fg-muted">{activeTab}</span> yet
+                  {demoPublishedOnly ? 'No businesses with a published demo in ' : 'No businesses in '}
+                  <span className="font-medium text-fg-muted">{activeTab}</span>
+                  {demoPublishedOnly ? '' : ' yet'}
                 </p>
               </div>
             ) : (

@@ -98,12 +98,8 @@ class SenderProfileUpdate(SQLModel):
     short_intro: str = Field(min_length=5, max_length=200)
 
 
-class Lead(SQLModel, table=True):
-    __table_args__ = (
-        UniqueConstraint("google_place_id", "user_id", name="uq_lead_place_user"),
-    )
-
-    id: Optional[int] = Field(default=None, primary_key=True)
+class LeadBase(SQLModel):
+    # Yhteiset kentät: Lead (taulu) ja LeadRead (GET /leads, lisäksi laskettu demo_published)
     user_id: str = Field(index=True)
     google_place_id: Optional[str] = Field(default=None, index=True)
 
@@ -147,6 +143,20 @@ class Lead(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Lead(LeadBase, table=True):
+    __table_args__ = (
+        UniqueConstraint("google_place_id", "user_id", name="uq_lead_place_user"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class LeadRead(LeadBase):
+    id: int
+    # Laskettu Demo-taulusta (ei saraketta): julkaistu ja voimassa oleva demo
+    demo_published: bool = False
 
 class LeadCreate(SQLModel):
     name: str

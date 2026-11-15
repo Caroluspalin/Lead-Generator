@@ -19,6 +19,10 @@ interface PipelineContextValue {
   markReviewed: (id: number) => Promise<void>;
   refreshTimma: (id: number) => Promise<void>;
   updateWebsite: (id: number, website: string | null) => Promise<SavedAgency>;
+  setDemoPublished: (id: number, value: boolean) => void;
+  // Pipelinen "Demo published" -suodatin: täällä, jotta valinta säilyy välilehteä vaihdettaessa
+  demoPublishedOnly: boolean;
+  setDemoPublishedOnly: (value: boolean) => void;
   refresh: () => Promise<void>;
 }
 
@@ -34,6 +38,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   const [savedAgencies, setSavedAgencies] = useState<SavedAgency[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [demoPublishedOnly, setDemoPublishedOnly] = useState(false);
   // Käyttäjä, jonka liidit on ladattu. Myöhemmät haut päivittävät listan taustalla:
   // luurangot tai virhepaneeli sulkisivat avoimen modaalin ja nollaisivat scrollin.
   const loadedForRef = useRef<string | null>(null);
@@ -76,6 +81,21 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     refresh();
   }, [refresh]);
 
+  // Muut liidivastaukset kuin GET /leads eivät sisällä demo_published-kenttää: yhdistetään, ei korvata
+  const mergeLead = (updated: SavedAgency) => {
+    setSavedAgencies((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+  };
+
+  // Demo-ikkuna ja Autodemo pitävät demo_published-tiedon ajan tasalla ilman koko listan hakua.
+  // Vakaa funktio: Demo-ikkunan lataus riippuu siitä.
+  const setDemoPublished = useCallback((id: number, value: boolean) => {
+    setSavedAgencies((prev) =>
+      prev.some((a) => a.id === id && a.demo_published !== value)
+        ? prev.map((a) => (a.id === id ? { ...a, demo_published: value } : a))
+        : prev,
+    );
+  }, []);
+
   const addToPipeline = async (agency: Agency) => {
     const res = await apiFetch(`/leads`, {
       method: 'POST',
@@ -115,9 +135,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(`Status update failed: ${res.status}`);
     }
     const updated = await res.json();
-    setSavedAgencies((prev) =>
-      prev.map((a) => (a.id === id ? updated : a)),
-    );
+    mergeLead(updated);
   };
 
   const updateNotes = async (id: number, notes: string) => {
@@ -130,9 +148,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(`Notes update failed: ${res.status}`);
     }
     const updated = await res.json();
-    setSavedAgencies((prev) =>
-      prev.map((a) => (a.id === id ? updated : a)),
-    );
+    mergeLead(updated);
   };
 
   // Etsii sähköpostin liidin omalta sivustolta (backend: etusivu + max 3 yhteystietosivua)
@@ -142,7 +158,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(`Email search failed: ${res.status}`);
     }
     const updated: SavedAgency = await res.json();
-    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    mergeLead(updated);
     return updated;
   };
 
@@ -156,7 +172,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(`Update failed: ${res.status}`);
     }
     const updated: SavedAgency = await res.json();
-    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    mergeLead(updated);
   };
 
   // Timma-tiedot (jos on) + demo + julkaisu; backend merkitsee liidin tarkistettavaksi. Ei sähköpostia.
@@ -167,7 +183,11 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(body.detail ?? `Autodemo failed: ${res.status}`);
     }
     const demo: Demo = await res.json();
-    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? { ...a, review_before_contact: true } : a)));
+    setSavedAgencies((prev) =>
+      prev.map((a) =>
+        a.id === id ? { ...a, review_before_contact: true, demo_published: demo.status === 'published' } : a,
+      ),
+    );
     return demo;
   };
 
@@ -181,7 +201,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(`Update failed: ${res.status}`);
     }
     const updated: SavedAgency = await res.json();
-    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    mergeLead(updated);
   };
 
   const refreshTimma = async (id: number) => {
@@ -191,7 +211,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(body.detail ?? `Timma refresh failed: ${res.status}`);
     }
     const updated: SavedAgency = await res.json();
-    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    mergeLead(updated);
   };
 
   // Backend muuttaa Timma-yrityssivun kanoniseen muotoon (https://timma.fi/yritys/slug), jolloin Refresh Timma näkyy
@@ -205,7 +225,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       throw new Error(`Website update failed: ${res.status}`);
     }
     const updated: SavedAgency = await res.json();
-    setSavedAgencies((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    mergeLead(updated);
     return updated;
   };
 
@@ -250,6 +270,9 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         markReviewed,
         refreshTimma,
         updateWebsite,
+        setDemoPublished,
+        demoPublishedOnly,
+        setDemoPublishedOnly,
         refresh,
       }}
     >

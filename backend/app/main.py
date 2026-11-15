@@ -26,7 +26,7 @@ import requests
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
 from .models import (
-    Demo, Lead, LeadCreate, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
+    Demo, Lead, LeadCreate, LeadRead, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
     utc_now,
 )
 from .utils import unsplash
@@ -942,15 +942,21 @@ async def find_lead_email(
     return db_lead
 
 # 3. HAE TALLENNETUT LIIDIT (Database)
-@app.get("/leads", response_model=List[Lead])
+@app.get("/leads", response_model=List[LeadRead])
 def read_leads(
     session: Session = Depends(get_session),
     user: AuthUser = Depends(verify_token),
-):
+) -> list[LeadRead]:
     leads = session.exec(
         select(Lead).where(Lead.user_id == user.id).order_by(Lead.created_at.desc())
     ).all()
-    return leads
+    # Sama ehto kuin sähköpostin demolinkillä (get_published_demo): julkaistu eikä vanhentunut
+    published = {
+        demo.lead_id
+        for demo in session.exec(select(Demo).where(Demo.user_id == user.id, Demo.status == "published")).all()
+        if not _is_expired(demo)
+    }
+    return [LeadRead.model_validate(lead, update={"demo_published": lead.id in published}) for lead in leads]
 
 # 3b. CSV EXPORT
 @app.get("/leads/export")

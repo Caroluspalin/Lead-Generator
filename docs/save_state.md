@@ -1,6 +1,6 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-13)
+## Mihin jäätiin (päivitetty 2026-11-15)
 
 **Myyntityön sujuvoitus: Timma-osoitteet (2026-11-13), `main`**, commitit `84a52e5` (website-kentän muokkaus) ja
 `b84854b` (varaa.timma.fi). Testit: pytest 963 passed, `npm run lint && npm run build` ok. Ei migraatioita, ei
@@ -35,8 +35,25 @@ Worker-deployta. TIMMA_IMPORT_ENABLED, hideFromMarketplace-esto, MAX_SEARCH_CALL
   `https://timma.fi/yritys/…`, toast "Timma page detected" ja Refresh Timma ilmestyy. Status-merkki pysyy NO WEBSITE.
   (3) Refresh Timma → Autodemo → demossa Timman hinnasto ja varauslinkki. (4) Sähköpostissa yhä "Asiakas löytää teidät
   Google-kartalta…" (ei väitettä Googlen varauslinkistä). (5) Edit → tyhjennä → Save palauttaa None ja nappi katoaa.
-- **Vaihe 3 (Pipelinen "Demo published" -suodatin) odottaa päätöstä**: julkaistun demon tieto ei ole `GET /leads`
-  -vastauksessa (vain Demo-taulussa), joten tarvitaan uusi API-kenttä tai -endpoint (ei migraatiota).
+- **Pipelinen "Demo published" -suodatin (2026-11-15)**: Pipelinen otsikkorivillä valintaruutu. Päällä näytetään vain
+  liidit, joilla on julkaistu ja voimassa oleva demo, ilman do not contact -liidejä; myös vaiheiden välilehtien
+  lukumäärät suodattuvat. Valinta on `PipelineContext`issa (`demoPublishedOnly`), joten se säilyy välilehteä
+  vaihdettaessa (ei localStoragea; nollautuu sivun uudelleenlatauksessa). Suodattimen vaihto tyhjentää valitut kortit.
+  - Backend: `GET /leads` palauttaa `LeadRead`-mallin = Lead-kentät + laskettu `demo_published` (Demo-taulusta yhdellä
+    lisäkyselyllä; ehto sama kuin sähköpostin demolinkillä: status published eikä `expires_at` ohi). Ei saraketta,
+    ei migraatiota: `models.py`:ssä kentät siirrettiin `LeadBase`-pohjaan (`Lead(LeadBase, table=True)`,
+    `LeadRead(LeadBase)`), `alembic check` puhdas. Muut liidivastaukset (PATCH, Refresh, find-email) ovat ennallaan
+    ilman kenttää: frontend yhdistää ne vanhaan riviin (`mergeLead`), jotta tieto ei katoa.
+  - Frontend pitää tiedon ajan tasalla ilman listan uudelleenhakua: Demo-ikkuna (avaus, generointi, muokkaus,
+    julkaisu, offline, poisto) ja Autodemo (`setDemoPublished`). Jos suodatin on päällä ja demo otetaan offline,
+    kortti (ja sen Demo-ikkuna) poistuu listalta heti. Taustalla tapahtuva vanheneminen näkyy seuraavassa `GET /leads`
+    -haussa.
+  - Frontendillä ei ole testikehystä: tarkistettu `npm run lint && npm run build`. Backend: pytest 966 passed.
+- **Käsitesti, suodatin**: (1) Pipeline → rasti "Demo published": näkyvät vain julkaistun demon liidit, luvut
+  välilehdillä pienenevät, DNC-liidit puuttuvat. (2) Vaihda Search-välilehdelle ja takaisin: rasti ja suodatus
+  säilyvät. (3) Suodatin pois → Mini parturi (ei vielä demoa) → Autodemo → suodatin päälle: Mini parturi näkyy.
+  (4) Suodatin päällä → avaa demo → Take offline: kortti katoaa listalta. (5) Muokkaa suodatetun kortin
+  muistiinpanoja tai websitea: kortti pysyy listalla.
 
 **Premium-parturipohjan videohero (2026-11-11), haara `premium-pohja-video`** (haarautettu `premium-pohja`sta, ei
 mergetty, ei julkaistu). Testit: pytest 849 passed, worker `npm test` ok, `npm run lint && npm run build` ok,
@@ -273,7 +290,7 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 | POST | `/leads/{lead_id}/timma/refresh` | Hae Timma-tiedot uudelleen. 422 jos website ei ole `https://timma.fi/yritys/{slug}` eikä `http(s)://varaa.timma.fi/{slug}` (tai `/reservation/{slug}`), 503 jos `TIMMA_IMPORT_ENABLED=false`, 502 jos haku epäonnistui (ei tallennu) |
 | POST | `/leads/{lead_id}/autodemo` | Timma-tiedot (jos on) + `generate_demo` + `publish_demo` (samat funktiot kuin endpointeissa), sitten `review_before_contact = true`. Ei sähköpostia. 503 ennen AI-kutsua jos R2 puuttuu, 409 DNC, 428 profiili |
 | POST | `/leads/{lead_id}/find-email` | Hae sähköposti heti liidin sivustolta (422 jos sivu ei toimi). Palauttaa päivitetyn liidin; `email` null = ei löytynyt |
-| GET | `/leads` | Hae kaikki tallennetut liidit |
+| GET | `/leads` | Hae kaikki tallennetut liidit (`LeadRead`: Lead-kentät + laskettu `demo_published` = julkaistu eikä vanhentunut demo) |
 | GET | `/leads/export?ids=1,2,3` | CSV-export valituille liideille |
 | PATCH | `/leads/{lead_id}` | Päivitä status, notes, phone, website, email, do_not_contact (päivittää `updated_at`). website: trimmataan, tyhjä → null, Timma-yrityssivu kanoniseen muotoon; Timma-avaimen vaihtuessa `timma_data` tyhjennetään. `website_status`/`website_issue` eivät muutu |
 | DELETE | `/leads/{lead_id}` | Poista liidi |

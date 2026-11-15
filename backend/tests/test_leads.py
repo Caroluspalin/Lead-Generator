@@ -1,12 +1,15 @@
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app.models import Demo
 from app.scoring import lead_score
+from tests.conftest import USER_A, USER_B
 
 
 def test_create_lead_sets_owner_and_defaults(client_a: TestClient) -> None:
@@ -115,3 +118,45 @@ def test_create_lead_stores_places_fields_and_server_side_score(client_a: TestCl
     assert body["lead_score"] == lead_score("NO WEBSITE", 4.6, 120, "OPERATIONAL")
     assert body["lead_score"] > 1
     assert client_a.get("/leads").json()[0]["lead_score"] == body["lead_score"]
+
+
+# --- GET /leads: laskettu demo_published ---
+
+def _add_demo(session: Session, lead_id: int, user_id: str = USER_A, **fields: Any) -> None:
+    session.add(Demo(
+        user_id=user_id, lead_id=lead_id, template="barber", color_scheme="x", content_json="{}", html="<p></p>",
+        public_token=f"token-{lead_id}", **fields,
+    ))
+    session.commit()
+
+
+def test_list_leads_demo_published(client_a: TestClient, make_lead: Any, session: Session) -> None:
+    now = datetime.now(timezone.utc)
+    leads = {name: make_lead(name=name)["id"] for name in ("Ei demoa", "Luonnos", "Julkaistu", "Vanhentunut", "Expired", "Ilman päivää")}
+    _add_demo(session, leads["Luonnos"], status="draft")
+    _add_demo(session, leads["Julkaistu"], status="published", published_at=now, expires_at=now + timedelta(days=30))
+    _add_demo(session, leads["Vanhentunut"], status="published", expires_at=now - timedelta(minutes=1))
+    _add_demo(session, leads["Expired"], status="expired", expires_at=now - timedelta(days=1))
+    _add_demo(session, leads["Ilman päivää"], status="published")
+    flags = {lead["name"]: lead["demo_published"] for lead in client_a.get("/leads").json()}
+    assert flags == {
+        "Ei demoa": False, "Luonnos": False, "Julkaistu": True, "Vanhentunut": False, "Expired": False, "Ilman päivää": True,
+    }
+
+
+def test_list_leads_demo_published_is_per_user(
+    client_a: TestClient, client_b: TestClient, make_lead: Any, session: Session
+) -> None:
+    make_lead(name="A:n liidi")
+    lead_b = make_lead(client=client_b, name="B:n liidi")
+    _add_demo(session, lead_b["id"], user_id=USER_B, status="published")
+    assert [(l["name"], l["demo_published"]) for l in client_a.get("/leads").json()] == [("A:n liidi", False)]
+    assert [(l["name"], l["demo_published"]) for l in client_b.get("/leads").json()] == [("B:n liidi", True)]
+
+
+def test_list_leads_keeps_lead_fields(client_a: TestClient, make_lead: Any) -> None:
+    lead = make_lead(name="Kentät", website="https://timma.fi/yritys/x", rating=4.5)
+    listed = client_a.get("/leads").json()[0]
+    # Muut kentät samat kuin muissa liidivastauksissa (Lead): vain demo_published lisätty
+    assert {k: v for k, v in listed.items() if k != "demo_published"} == lead
+    assert listed["demo_published"] is False
