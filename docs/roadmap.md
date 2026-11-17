@@ -131,6 +131,8 @@
 
 - **Laajennus B (2026-11-17)**: Demon avausilmoitus: Worker kirjaa avaukset R2:een (`opens/…`, vain aika ja laite, botit ja `?preview=1` suodatetaan), `POST /leads/sync-opens` + `DemoOpen`-taulu (migraatio `f9163b4eb5f4`), kortin "Opened N× · last HH:MM", "Opened first" -järjestys ja toast. Worker vaatii deployn
 
+- **Laajennus D (2026-11-17)**: Ostosignaalit: PageSpeed-mittaus (Measure speed, mobiili LCP), sivun ©-vuosi (Site from YYYY), Few reviews (< 10), merkit ja suodattimet pipelineen ja hakuun, mitattu hidas latausaika sähköpostipromptiin. Migraatio `2d7b3a11de76`. Meta-mainostunnistus jätetty pois (vaatii henkilöllisyyden vahvistuksen)
+
 ## Seuraavaksi
 
 
