@@ -19,12 +19,121 @@ import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
 import { apiFetch } from '../lib/api';
 import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
+import { formatEur } from '../lib/money';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
 import CallScriptModal from './CallScriptModal';
 import DemoModal from './DemoModal';
 import { ScoreBadge, RatingDisplay, StatusBadge } from './ScoreBadge';
+
+const MAX_AMOUNT = 1_000_000;
+
+interface AmountRowProps {
+  label: string;
+  suffix?: string;
+  value: number | null | undefined;
+  ariaLabel: string;
+  onSave: (next: number | null) => Promise<void>;
+}
+
+// Edit -> Save kuten Website-rivi: Enter tallentaa, Esc peruu, tyhjä = ei arvoa
+const AmountRow: React.FC<AmountRowProps> = ({ label, suffix = '', value, ariaLabel, onSave }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const linkClass =
+    'rounded-sm underline decoration-fg-subtle/40 underline-offset-2 hover:decoration-fg transition-colors';
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = draft.trim();
+    let next: number | null = null;
+    if (text) {
+      if (!/^\d+$/.test(text) || Number(text) > MAX_AMOUNT) {
+        toast.error(`Enter a whole number between 0 and ${formatEur(MAX_AMOUNT)}`);
+        return;
+      }
+      next = Number(text);
+    }
+    if (next === (value ?? null)) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+      setEditing(false);
+    } catch {
+      toast.error(`Failed to save ${label.toLowerCase()}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <dt className="text-fg-subtle">{label}</dt>
+      <dd className="min-w-0">
+        {editing ? (
+          <form onSubmit={handleSave} className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              autoFocus
+              maxLength={7}
+              placeholder="€"
+              aria-label={ariaLabel}
+              className="w-24 min-w-0 h-control-sm px-2 font-mono text-xs bg-canvas border border-line rounded text-fg"
+            />
+            <button
+              type="submit"
+              disabled={saving}
+              className={`inline-flex items-center gap-1 text-xs text-fg disabled:opacity-60 ${linkClass}`}
+            >
+              {saving && <Loader2 size={11} className="animate-spin" />}
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              className={`text-xs text-fg-muted hover:text-fg ${linkClass}`}
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            {value != null ? (
+              <span className="text-xs text-fg tabular-nums">
+                {formatEur(value)}
+                {suffix}
+              </span>
+            ) : (
+              <span className="text-fg-subtle">None</span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(value != null ? String(value) : '');
+                setEditing(true);
+              }}
+              className={`ml-2.5 text-xs text-fg-muted hover:text-fg ${linkClass}`}
+            >
+              Edit
+            </button>
+          </>
+        )}
+      </dd>
+    </>
+  );
+};
 
 interface PipelineCardProps {
   agency: SavedAgency;
@@ -88,7 +197,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setEmailWithDemo(true);
     setEmailModalOpen(true);
   };
-  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, updateWebsite } = usePipeline();
+  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, updateWebsite, updateDealAmounts } = usePipeline();
   const [autodemoRunning, setAutodemoRunning] = useState(false);
   const [timmaRefreshing, setTimmaRefreshing] = useState(false);
   const [editingWebsite, setEditingWebsite] = useState(false);
@@ -363,6 +472,28 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             </button>
           )}
         </dd>
+
+        {agency.pipeline_status !== 'Rejected' && (
+          <AmountRow
+            label="Value"
+            value={agency.deal_value}
+            ariaLabel={`Deal value of ${agency.name} in euros`}
+            onSave={async (next) => {
+              await updateDealAmounts(agency.id, { deal_value: next });
+            }}
+          />
+        )}
+        {agency.pipeline_status === 'Hired' && (
+          <AmountRow
+            label="Maintenance"
+            suffix="/mo"
+            value={agency.recurring_monthly}
+            ariaLabel={`Monthly maintenance of ${agency.name} in euros`}
+            onSave={async (next) => {
+              await updateDealAmounts(agency.id, { recurring_monthly: next });
+            }}
+          />
+        )}
 
         <dt className="text-fg-subtle">Email</dt>
         <dd className="min-w-0">

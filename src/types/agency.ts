@@ -221,6 +221,8 @@ export interface SavedAgency {
   pipeline_status: PipelineStatus;
   source: string;
   notes?: string;
+  deal_value?: number | null;
+  recurring_monthly?: number | null;
   created_at: string;
   updated_at: string;
 }

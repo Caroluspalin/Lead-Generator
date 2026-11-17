@@ -16,6 +16,7 @@ import { PIPELINE_STATUSES } from '../types/agency';
 import type { PipelineStatus, SavedAgency } from '../types/agency';
 import { usePipeline } from '../context/PipelineContext';
 import { apiFetch } from '../lib/api';
+import { formatEur } from '../lib/money';
 import PipelineCard from './PipelineCard';
 
 const BATCH_SIZE = 5;
@@ -213,6 +214,15 @@ const PipelineBoard: React.FC = () => {
       .length;
   };
 
+  const getTabValue = (status: PipelineStatus) =>
+    visibleAgencies
+      .filter((agency) => agency.pipeline_status === status)
+      .reduce((sum, agency) => sum + (agency.deal_value ?? 0), 0);
+
+  const hiredMaintenance = visibleAgencies
+    .filter((agency) => agency.pipeline_status === 'Hired')
+    .reduce((sum, agency) => sum + (agency.recurring_monthly ?? 0), 0);
+
   const activeAgencies = visibleAgencies.filter(
     (agency) => agency.pipeline_status === activeTab,
   );
@@ -286,6 +296,7 @@ const PipelineBoard: React.FC = () => {
             <div className="flex gap-6 overflow-x-auto" role="tablist" aria-label="Pipeline stages">
               {PIPELINE_STATUSES.map((status) => {
                 const count = getTabCount(status);
+                const value = status === 'Rejected' ? 0 : getTabValue(status);
                 const isActive = activeTab === status;
                 return (
                   <button
@@ -303,6 +314,9 @@ const PipelineBoard: React.FC = () => {
                     <span className="min-w-[18px] px-1 rounded-sm bg-raised text-2xs tabular-nums text-fg-subtle">
                       {count}
                     </span>
+                    {value > 0 && (
+                      <span className="text-2xs tabular-nums text-fg-subtle">{formatEur(value)}</span>
+                    )}
                   </button>
                 );
               })}
@@ -315,6 +329,11 @@ const PipelineBoard: React.FC = () => {
             <div className="mb-3.5 flex items-center justify-between gap-3">
               <p className="text-sm text-fg-muted">
                 {statusDescriptions[activeTab]}
+                {activeTab === 'Hired' && hiredMaintenance > 0 && (
+                  <span className="ml-2 tabular-nums text-fg">
+                    Maintenance {formatEur(hiredMaintenance)}/mo total
+                  </span>
+                )}
               </p>
               {activeAgencies.length > 0 && (
                 <button
