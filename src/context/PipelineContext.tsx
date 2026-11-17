@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import type { Agency, Demo, SavedAgency, PipelineStatus } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { useAuth } from './AuthContext';
+import { parseUtc } from '../lib/followUps';
 
 interface PipelineContextValue {
   savedAgencies: SavedAgency[];
@@ -73,6 +74,32 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, []);
 
+  // Vastaukset (IMAP) näkyvät vasta listan haussa: ilmoitus kerran per vastaus (viimeksi nähty selaimessa)
+  const announceReplies = useCallback((leads: SavedAgency[]) => {
+    const key = 'followup-replied-seen';
+    let seen = 0;
+    try {
+      seen = Number(localStorage.getItem(key) ?? 0);
+    } catch {
+      return;
+    }
+    const repliedAt = (a: SavedAgency): number => (a.followup_replied_at ? parseUtc(a.followup_replied_at).getTime() : 0);
+    const fresh = leads.filter((a) => repliedAt(a) > seen);
+    if (fresh.length === 0) return;
+    const latest = Math.max(...fresh.map(repliedAt));
+    try {
+      localStorage.setItem(key, String(latest));
+    } catch {
+      // toast näytetään silti
+    }
+    // Ensimmäisellä kerralla ei tulvita vanhoista vastauksista
+    if (seen === 0) return;
+    const names = fresh.map((a) => a.name);
+    toast.success(fresh.length === 1 ? `${names[0]} replied` : `${fresh.length} leads replied`, {
+      description: fresh.length > 1 ? names.join(', ') : 'Follow-ups stopped.',
+    });
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!userId) {
       loadedForRef.current = null;
@@ -93,6 +120,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       }
       const data: SavedAgency[] = await res.json();
       setSavedAgencies(data);
+      announceReplies(data);
       loadedForRef.current = userId;
       setError('');
       if (data.some((a) => a.demo_published)) void syncOpens();
@@ -106,10 +134,13 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         setLoading(false);
       }
     }
-  }, [userId, syncOpens]);
+  }, [userId, syncOpens, announceReplies]);
 
   useEffect(() => {
     refresh();
+    // Backend kirjaa vastaukset taustalla: haetaan lista harvakseltaan, jotta ilmoitus tulee ilman sivun latausta
+    const timer = setInterval(() => void refresh(), 5 * 60 * 1000);
+    return () => clearInterval(timer);
   }, [refresh]);
 
   // Muut liidivastaukset kuin GET /leads eivät sisällä demo_published-kenttää: yhdistetään, ei korvata

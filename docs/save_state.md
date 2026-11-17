@@ -1,6 +1,44 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-17)
+## Mihin jäätiin (päivitetty 2026-11-17, seurantaviestit)
+
+**Automaattiset seurantaviestit (2026-11-17), haara `seurantaviestit`** (ei mergetty, ei deployattu). Migraatio `dc26706bcb28`
+(ei ajettu tuotantoon), `alembic check` puhdas. Testit: pytest 1047 passed, `npm run lint && npm run build` ok.
+**Oikea lähetys on oletuksena pois** (`FOLLOWUPS_SEND_ENABLED=false`), IMAP-luku pois (`IMAP_ENABLED=false`). Testeissä SMTP ja IMAP mockattu,
+OpenAI mockattu; oikeaa viestiä ei ole lähetetty missään vaiheessa eikä oikeaa tiliä vasten ole testattu.
+- **Sarja** (`FollowUpSequence`, `FollowUpStep`, `MailboxState`, kaikissa user_id paitsi MailboxState: tili on koko palvelun resurssi):
+  askel 0 = aloitusviesti (kirjataan lähetetyksi, kun `/send-email` lähettää viestin liidille; liidi Shortlisted -> Contacted),
+  askeleet 1 ja 2 = seuranta päivänä 3 ja viimeinen päivänä 8 aloituksesta, siirrettynä seuraavaan lähetyspäivään. Sarja
+  draft -> active vasta hyväksynnästä ("Approve series" kerralla koko sarja). Tilat: sarja draft/active/stopped/replied/completed,
+  askel scheduled/sending/sent/stopped/failed/needs_review. Uusi käsin lähetetty aloitusviesti pysäyttää vanhan sarjan (syy `resent`).
+- **Lähettäjä** (`app/followups.py`, taustasilmukka lifespanissa 60 s välein, vain kun `FOLLOWUPS_SEND_ENABLED=true`): vain arkisin
+  ma-pe 9:00-15:59 Suomen aikaa, ei suomalaisia pyhiä (kiinteä lista, `finnish_holidays`), päiväraja `FOLLOWUPS_DAILY_LIMIT` (oletus 20,
+  laskee myös sending-tilan), väli `FOLLOWUPS_MIN_DELAY_SECONDS` (90), yksi viesti per kierros. Idempotenssi: askel lukitaan
+  `UPDATE ... WHERE status='scheduled'` (scheduled -> sending) ja Message-ID tallennetaan ENNEN SMTP-kutsua. Jumiutunut sending (> 10 min,
+  esim. backend kaatui kesken) -> needs_review, ei automaattista uudelleenlähetystä; epäselvä virhe SEND-vaiheessa -> needs_review,
+  selvä kieltäytyminen -> failed, yhteys/kirjautumisvirhe ennen lähetystä -> uusi yritys 15 min päästä (max 3). Myöhästynyt askel
+  (> `FOLLOWUPS_LATE_GRACE_DAYS` = 2 pv) siirretään seuraavalle lähetyspäivälle (aikaisintaan huomenna, väli edelliseen väh. 2 pv), ei lähetetä heti.
+  Ennen lähetystä: liidi DNC -> sarja stopped (`dnc`), vastaanottajaosoite DNC-liidillä estää, demolinkin demo ei enää julkaistu -> needs_review.
+- **Viestit**: `Re: <aloituksen aihe>`, In-Reply-To/References aloitusviestiin, `List-Unsubscribe: <mailto:SMTP_FROM?subject=unsubscribe>`
+  (myös käsin lähetetyissä liidille menevissä viesteissä), näkyvä opt-out-rivi aina (PATCH lisää sen takaisin, jos muokkaus poisti).
+  Tekstin kirjoittaa `FOLLOWUP_SYSTEM_PROMPT` (malli vain 1-2 lausetta), loput koodista: "Hei," + teksti + demolinkki (jos julkaistu) +
+  viimeisessä "Tämä on viimeinen viestini asiasta..." + allekirjoitus + opt-out. Ei hintaa eikä määräaikaa.
+- **Vastaukset** (`app/replies.py`, IMAP INBOX vain luku, `BODY.PEEK`, `IMAP_ENABLED=true`, tunnukset oletuksena SMTP:n, host smtp. -> imap.,
+  5 min välein): yhdistys In-Reply-To/References -> sarjan Message-ID, muuten lähettäjän osoite = avoimen sarjan vastaanottaja. Vastaus ->
+  sarja replied, liidi jää vaiheeseensa (ei automaattista siirtoa), kortille "Replied" ja toast. Auto-vastaukset (Auto-Submitted, X-Autoreply,
+  Precedence bulk/auto_reply, X-Auto-Response-Suppress, List-Id, otsikko "Automatic reply"/"Poissa toimistolta", noreply/mailer-daemon)
+  eivät pysäytä. Vastaus joka alkaa "ei kiitos"/"unsubscribe"/"stop"/"ei kiinnosta" -> liidi DNC + sarja stopped (`opt_out`). Kova bounce
+  (DSN Status 5.x.x) -> sarja stopped (`bounced`), liidin email säilyy.
+- **API**: `GET /leads/{id}/followups`, `POST .../followups/generate|approve|stop`, `PATCH /followups/steps/{id}` (vain body), `GET /followups/status`.
+  `GET /leads` palauttaa lisäksi `followup_status`, `followup_next_at`, `followup_replied_at` (laskettuja, ei sarakkeita).
+- **UI**: sähköpostiluonnoksen alla "Add follow-ups" (`FollowUpsPanel`): muokattavat viestit ja päivät, Approve series, Regenerate,
+  Discard / Stop series. Kortilla tila ("Next follow-up pe 20.11." / Replied / Follow-ups stopped) ja Stop. Lista haetaan 5 min välein, joten
+  vastauksesta tulee toast ilman sivun latausta (viimeksi nähty `localStorage`ssa).
+- **Käyttöönotto**: `.env.example` listaa FOLLOWUPS_* ja IMAP_* -asetukset. Backendin pitää olla käynnissä arkisin 9-16, jotta viestit lähtevät;
+  kiinni olleen ajan myöhästyneet siirtyvät uudelle päivälle. Ennen ensimmäistä oikeaa lähetystä: `alembic upgrade head`, hyväksy
+  seurantatekstien prompti, testaa omaan osoitteeseen.
+
+## Aiempi: demon avausten seuranta (päivitetty 2026-11-17)
 
 **Demon avausten seuranta (2026-11-17), haara `demon-avaus`**: Pipeline-kortilla "Opened 2× · last 14:32", kun liidi on
 avannut julkaistun demon. Worker deployaamatta ja migraatio ajamatta (`alembic upgrade head`).
@@ -299,6 +337,12 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 | body | str | Sähköpostin teksti |
 | model | str | Käytetty AI-malli |
 | created_at | datetime | UTC-aikaleima |
+
+### FollowUpSequence / FollowUpStep / MailboxState
+
+Ks. "Mihin jäätiin" (seurantaviestit). FollowUpSequence: user_id, lead_id, status, stop_reason, approved_at, replied_at.
+FollowUpStep: user_id, sequence_id, lead_id, step_no (0 = aloitus), subject, body, demo_url, to_email, due_at, status, message_id,
+claimed_at, sent_at, attempts, last_error; uniikki (sequence_id, step_no). MailboxState: account (uniikki), uidvalidity, last_uid.
 
 ## API-endpointit
 

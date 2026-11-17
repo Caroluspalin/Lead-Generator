@@ -234,6 +234,7 @@ class LeadRead(LeadBase):
     # Laskettu FollowUpSequence-taulusta: uusimman sarjan tila ja seuraavan viestin aika
     followup_status: Optional[str] = None
     followup_next_at: Optional[datetime] = None
+    followup_replied_at: Optional[datetime] = None
 
 class LeadCreate(SQLModel):
     name: str

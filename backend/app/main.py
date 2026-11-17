@@ -1031,6 +1031,7 @@ def read_leads(
             update={
                 "followup_status": sequences[lead.id][0] if lead.id in sequences else None,
                 "followup_next_at": sequences[lead.id][1] if lead.id in sequences else None,
+                "followup_replied_at": sequences[lead.id][2] if lead.id in sequences else None,
                 "demo_published": lead.id in published,
                 "demo_open_count": opens[lead.id][0] if lead.id in opens else 0,
                 "demo_last_opened_at": opens[lead.id][1] if lead.id in opens else None,
@@ -3188,8 +3189,8 @@ class FollowUpStatusOut(BaseModel):
     in_send_window: bool
 
 
-def _followup_overview(session: Session, user_id: str) -> dict[int, tuple[str, Optional[datetime]]]:
-    """lead_id -> (uusimman sarjan tila, seuraavan ajastetun viestin aika). Kaksi kyselyä koko listalle."""
+def _followup_overview(session: Session, user_id: str) -> dict[int, tuple[str, Optional[datetime], Optional[datetime]]]:
+    """lead_id -> (uusimman sarjan tila, seuraavan ajastetun viestin aika, vastauksen aika). Kaksi kyselyä koko listalle."""
     latest: dict[int, FollowUpSequence] = {}
     for seq in session.exec(select(FollowUpSequence).where(FollowUpSequence.user_id == user_id).order_by(FollowUpSequence.id)).all():
         latest[seq.lead_id] = seq
@@ -3201,7 +3202,10 @@ def _followup_overview(session: Session, user_id: str) -> dict[int, tuple[str, O
             .group_by(FollowUpStep.sequence_id)
         ).all()
     }
-    return {lead_id: (seq.status, next_due.get(seq.id) if seq.status == "active" else None) for lead_id, seq in latest.items()}
+    return {
+        lead_id: (seq.status, next_due.get(seq.id) if seq.status == "active" else None, seq.replied_at)
+        for lead_id, seq in latest.items()
+    }
 
 
 def _followup_out(session: Session, sequence: FollowUpSequence) -> FollowUpOut:

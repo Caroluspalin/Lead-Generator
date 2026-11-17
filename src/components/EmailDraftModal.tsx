@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import type { Demo, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
+import { usePipeline } from '../context/PipelineContext';
+import FollowUpsPanel from './FollowUpsPanel';
 
 interface EmailDraftModalProps {
   isOpen: boolean;
@@ -28,6 +30,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
   requireDemoLink = false,
   onOpenCallScript,
 }) => {
+  const { refresh } = usePipeline();
   const [publicDemoUrl, setPublicDemoUrl] = useState<string | null>(null);
   const [addingLink, setAddingLink] = useState(false);
   const [draft, setDraft] = useState<EmailDraft | null>(null);
@@ -182,6 +185,8 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       }
       toast.success(`Email sent to ${recipientEmail}`);
       setRecipientEmail('');
+      // Lähetys siirtää liidin Contacted-vaiheeseen ja kirjaa aloitusviestin sarjalle
+      void refresh();
     } catch {
       toast.error('Email not sent: could not reach the backend.');
     } finally {
@@ -299,6 +304,8 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                   <p className="text-2xs text-fg-subtle text-right">
                     Model: {draft.model}
                   </p>
+
+                  <FollowUpsPanel agency={agency} onChanged={() => void refresh()} />
                 </>
               ) : null}
             </div>
