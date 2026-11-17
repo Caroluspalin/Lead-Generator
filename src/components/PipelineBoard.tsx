@@ -49,6 +49,8 @@ const PipelineBoard: React.FC = () => {
     refresh,
     demoPublishedOnly,
     setDemoPublishedOnly,
+    openedFirst,
+    setOpenedFirst,
   } = usePipeline();
   // "Demo published": vain julkaistun demon liidit, do not contact -liidit pois. Myös välilehtien luvut.
   const visibleAgencies = demoPublishedOnly
@@ -213,9 +215,17 @@ const PipelineBoard: React.FC = () => {
       .length;
   };
 
-  const activeAgencies = visibleAgencies.filter(
+  const tabAgencies = visibleAgencies.filter(
     (agency) => agency.pipeline_status === activeTab,
   );
+  // Avatut ensin, uusin avaus ylimpänä; muut säilyttävät keskinäisen järjestyksensä (sort on vakaa)
+  const activeAgencies = openedFirst
+    ? [...tabAgencies].sort(
+        (a, b) =>
+          (b.demo_last_opened_at ? Date.parse(b.demo_last_opened_at) : 0) -
+          (a.demo_last_opened_at ? Date.parse(a.demo_last_opened_at) : 0),
+      )
+    : tabAgencies;
 
   const toolbarButton =
     'flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-subtle transition-colors disabled:opacity-50';
@@ -226,15 +236,26 @@ const PipelineBoard: React.FC = () => {
         <h1 className="text-xl font-semibold tracking-tight text-fg">Pipeline</h1>
         <p className="text-sm text-fg-subtle">Track prospects from first contact to decision</p>
         {!loading && !error && savedAgencies.length > 0 && (
-          <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg transition-colors">
-            <input
-              type="checkbox"
-              checked={demoPublishedOnly}
-              onChange={(e) => toggleDemoPublishedOnly(e.target.checked)}
-              className="size-3.5 cursor-pointer"
-            />
-            Demo published
-          </label>
+          <div className="ml-auto flex items-center gap-4">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg transition-colors">
+              <input
+                type="checkbox"
+                checked={openedFirst}
+                onChange={(e) => setOpenedFirst(e.target.checked)}
+                className="size-3.5 cursor-pointer"
+              />
+              Opened first
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg transition-colors">
+              <input
+                type="checkbox"
+                checked={demoPublishedOnly}
+                onChange={(e) => toggleDemoPublishedOnly(e.target.checked)}
+                className="size-3.5 cursor-pointer"
+              />
+              Demo published
+            </label>
+          </div>
         )}
       </header>
 

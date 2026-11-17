@@ -212,6 +212,9 @@ export interface SavedAgency {
   timma_fetched_at?: string | null;
   // Julkaistu ja voimassa oleva demo. Vain GET /leads -vastauksessa (laskettu Demo-taulusta)
   demo_published?: boolean;
+  // Julkaistun demon avaukset (vain GET /leads): ei botteja eikä omia esikatseluja
+  demo_open_count?: number;
+  demo_last_opened_at?: string | null;
   rating?: number | null;
   review_count?: number | null;
   business_status?: BusinessStatus | null;

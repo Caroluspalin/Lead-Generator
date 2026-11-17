@@ -1,6 +1,28 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-15)
+## Mihin jäätiin (päivitetty 2026-11-17)
+
+**Demon avausten seuranta (2026-11-17), haara `demon-avaus`**: Pipeline-kortilla "Opened 2× · last 14:32", kun liidi on
+avannut julkaistun demon. Worker deployaamatta ja migraatio ajamatta (`alembic upgrade head`).
+- **Worker** (`worker/src/index.ts`): onnistunut GET kirjaa R2:een tyhjän objektin `opens/<polku>/<10 min ämpäri>-<mobile|desktop>`
+  (`ctx.waitUntil`, virhe ei vaikuta vastaukseen). Aika = objektin LastModified. Ei IP:tä, UA:ta eikä maata. Ei kirjata:
+  `?preview=1`, HEAD, 404/410, tyhjä UA tai bottiregex (`BOT_RE`: linkkiskannerit, esikatselijat, curl/python, headless),
+  `Purpose`/`Sec-Purpose` prefetch, Accept ilman `text/html`. Sama ämpäri + laite = sama avain (dedup). Ei uutta bindingiä.
+  Ei saa kiinni: selainta jäljittelevät skannerit (Defender Safe Links, Apple Mail Privacy Protection, iMessage-esikatselu
+  Safari-UA:lla).
+- **Backend**: taulu `demoopen` (demo_id, user_id, opened_at, device, slot; unique demo+slot+laite, migraatio `f9163b4eb5f4`).
+  `POST /leads/sync-opens` (throttle 30 s / käyttäjä, muistissa) listaa `opens/` R2:sta (`asyncio.to_thread`), tuo vain
+  kirjautuneen käyttäjän demojen avaukset (polku -> Demo.user_id), poistaa käsitellyt objektit, palauttaa `new_opens`
+  (lead_id, name, count). Toisen käyttäjän tai tuntemattoman demon objekteja ei kosketa. R2-virhe 502, ei R2-asetuksia -> tyhjä.
+  `GET /leads` (`LeadRead`) saa `demo_open_count` ja `demo_last_opened_at` yhdellä ryhmitellyllä kyselyllä; GET ei koske R2:een.
+  Demon/liidin poisto poistaa avaukset. Orpoja `opens/`-objekteja (poistettu demo) jää R2:een, ei haittaa.
+- **UI**: kortin merkki, "Opened first" -valintaruutu Pipelinen otsikossa (PipelineContext `openedFirst`, järjestää välilehden
+  uusimman avauksen mukaan), sonner-toast kun `refresh()` (listan haku) huomaa uuden avauksen; sync vain jos listassa on
+  julkaistu demo, ei taustapollausta. DemoModalin julkaistun osoitteen linkki avataan `?preview=1`:llä; kopioitu linkki ja
+  sähköpostin linkki ovat puhtaita.
+- Testit: pytest 975+ (uusi `tests/test_demo_opens.py`), worker `npm test` 28, `npm run lint && npm run build` ok, `alembic check` puhdas.
+
+## Edellinen tila (päivitetty 2026-11-15)
 
 **Myyntityön sujuvoitus: Timma-osoitteet (2026-11-13), `main`**, commitit `84a52e5` (website-kentän muokkaus) ja
 `b84854b` (varaa.timma.fi). Testit: pytest 963 passed, `npm run lint && npm run build` ok. Ei migraatioita, ei
@@ -309,6 +331,7 @@ Places-sisältö: aukioloajat haetaan vain generoinnin hetkellä ja tallentuvat 
 | DELETE | `/leads/{lead_id}/demo` | Poista demo (linkki lakkaa toimimasta) |
 | GET | `/demo/{public_path}` | Julkinen esikatselu ilman kirjautumista (slug tai vanha token, vain tarkka osuma): HTML + `X-Robots-Tag: noindex, nofollow`, CSP demon muodon mukaan (versio 1: `style-src 'unsafe-inline'`; versio 2: `style-src 'self'; script-src 'self'; font-src 'self'`), `no-store`. 404 tuntematon, 410 vanhentunut |
 | GET | `/demo/a/{ryhmä}/{tiedosto}` | Version 2 demon CSS/JS/fontti esikatselua varten (vain paketin tiedostot, CORS `*` fonttien vuoksi) |
+| POST | `/leads/sync-opens` | Tuo julkaistujen demojen avaukset R2:sta (throttle 30 s) → `{new_opens: [{lead_id, name, count}]}` |
 | POST | `/leads/{lead_id}/email/demo-link` | Lisää julkaistun demon linkki valmiiseen luonnokseen tarjouskohtaan ilman AI-kutsua (`{body}` → `{body, demo_url}`), 409 jos ei julkaistua demoa tai DNC |
 | POST | `/send-email` | Lähetä sähköposti SMTP:llä (`to`, `subject`, `body`, valinnainen `lead_id`). 409 jos `lead_id`:n liidi tai vastaanottajaosoite kuuluu käyttäjän do_not_contact-liidille |
 
