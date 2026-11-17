@@ -27,7 +27,7 @@ import requests
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
 from .models import (
-    Demo, DemoOpen, Lead, LeadCreate, LeadRead, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
+    Demo, DemoOpen, FollowUpSequence, FollowUpStep, Lead, LeadCreate, LeadRead, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
     utc_now,
 )
 from .utils import unsplash
@@ -100,6 +100,7 @@ from .utils.timma import (
     timma_source,
 )
 from .utils.contact_finder import find_contact_email
+from . import followups
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
 from .text_quality import FORBIDDEN_PATTERNS, PRICE_RE, find_forbidden_words, word_count  # noqa: F401
@@ -127,6 +128,9 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "").strip()
 SMTP_BCC = os.getenv("SMTP_BCC", "").strip()
+# Seurantaviestit: oikea lähetys pois päältä kunnes FOLLOWUPS_SEND_ENABLED=true
+FOLLOWUP_SETTINGS = followups.FollowUpSettings.from_env()
+FOLLOWUP_TICK_SECONDS = 60
 
 # Safety Limits
 MAX_SEARCH_CALLS = 15      # Geocode + Text Search -sivut yhteensä, ehdoton raja per haku
@@ -189,14 +193,42 @@ async def _demo_expiry_loop() -> None:
         await asyncio.sleep(DEMO_EXPIRY_INTERVAL_SECONDS)
 
 
+def _followup_sender_deps() -> Optional[followups.SenderDeps]:
+    if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM]):
+        return None
+
+    def demo_ok(session: Session, lead: Lead, url: str) -> bool:
+        demo = get_published_demo(session, lead)
+        return demo is not None and demo_public_url(demo) == url
+
+    cfg = SmtpConfig(host=SMTP_HOST, port=SMTP_PORT, user=SMTP_USER, password=SMTP_PASSWORD, from_addr=SMTP_FROM)
+    return followups.SenderDeps(smtp=cfg, from_name=SMTP_FROM_NAME, bcc=SMTP_BCC, demo_ok=demo_ok)
+
+
+async def _followup_send_loop() -> None:
+    # Pieni viive käynnistyksen jälkeen; yksi viesti per kierros, joten viive viestien välillä syntyy kierrosvälistä
+    await asyncio.sleep(30)
+    while True:
+        try:
+            deps = _followup_sender_deps()
+            if deps is not None:
+                await asyncio.to_thread(followups.run_once, engine, utc_now(), FOLLOWUP_SETTINGS, deps)
+        except Exception as e:
+            logger.error(f"Seurantaviestien lähetysajo epäonnistui: {type(e).__name__}")
+        await asyncio.sleep(FOLLOWUP_TICK_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Tietokannan alustus käynnistyessä
     create_db_and_tables()
     expiry_task = asyncio.create_task(_demo_expiry_loop()) if get_object_store() else None
+    followup_task = asyncio.create_task(_followup_send_loop()) if FOLLOWUP_SETTINGS.send_enabled else None
     yield
     if expiry_task:
         expiry_task.cancel()
+    if followup_task:
+        followup_task.cancel()
 
 
 # App Initialization
@@ -960,10 +992,13 @@ def read_leads(
         if not _is_expired(demo)
     }
     opens = _open_stats(session, user.id)
+    sequences = _followup_overview(session, user.id)
     return [
         LeadRead.model_validate(
             lead,
             update={
+                "followup_status": sequences[lead.id][0] if lead.id in sequences else None,
+                "followup_next_at": sequences[lead.id][1] if lead.id in sequences else None,
                 "demo_published": lead.id in published,
                 "demo_open_count": opens[lead.id][0] if lead.id in opens else 0,
                 "demo_last_opened_at": opens[lead.id][1] if lead.id in opens else None,
@@ -1216,6 +1251,8 @@ def update_lead(
     for key, value in lead_data.items():
         setattr(db_lead, key, value)
     db_lead.updated_at = utc_now()
+    if db_lead.do_not_contact:
+        followups.stop_lead_sequences(session, user.id, lead_id, "dnc")
 
     session.add(db_lead)
     session.commit()
@@ -1271,6 +1308,10 @@ def _remove_lead(session: Session, lead: Lead) -> None:
         _take_offline(demo)
         _delete_opens(session, demo)
         session.delete(demo)
+    for step in session.exec(select(FollowUpStep).where(FollowUpStep.lead_id == lead.id, FollowUpStep.user_id == lead.user_id)).all():
+        session.delete(step)
+    for sequence in session.exec(select(FollowUpSequence).where(FollowUpSequence.lead_id == lead.id, FollowUpSequence.user_id == lead.user_id)).all():
+        session.delete(sequence)
     session.delete(lead)
 
 
@@ -2985,7 +3026,10 @@ async def send_email(
         raise HTTPException(500, "SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD and SMTP_FROM in .env")
 
     cfg = SmtpConfig(host=SMTP_HOST, port=SMTP_PORT, user=SMTP_USER, password=SMTP_PASSWORD, from_addr=SMTP_FROM)
-    msg = build_message(SMTP_FROM, req.to, req.subject, req.body, from_name=SMTP_FROM_NAME)
+    msg = build_message(
+        SMTP_FROM, req.to, req.subject, req.body, from_name=SMTP_FROM_NAME,
+        headers=followups.unsubscribe_headers(SMTP_FROM) if req.lead_id is not None else None,
+    )
     try:
         await asyncio.to_thread(send_mail, cfg, msg, bcc=SMTP_BCC)
     except SmtpFailure as f:
@@ -2993,4 +3037,302 @@ async def send_email(
         logger.error(f"SMTP {f.kind} failure at {f.stage}: {f.user_message()}")
         raise HTTPException(502, f.user_message())
 
+    if req.lead_id is not None:
+        # Viesti on jo lähtenyt: kirjausvirhe ei saa näkyä käyttäjälle lähetysvirheenä
+        try:
+            lead = session.get(Lead, req.lead_id)
+            if lead is not None:
+                followups.record_initial_send(
+                    session, lead, to=req.to.strip(), subject=req.subject, body=req.body,
+                    message_id=str(msg["Message-ID"]), now=utc_now(),
+                )
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Lähetetyn viestin kirjaus epäonnistui (liidi {req.lead_id}): {type(e).__name__}")
+
     return SendEmailResponse(ok=True, message=f"Email sent to {req.to}")
+
+
+# 8. SEURANTAVIESTISARJA
+
+FOLLOWUP_MODEL_MAX_WORDS = 40
+
+FOLLOWUP_SYSTEM_PROMPT = f"""Kirjoitat suomeksi hyvin lyhyen seurantaviestin paikalliselle yritykselle. Lähettäjä (tiedot LÄHETTÄJÄ-kohdassa)
+on jo lähettänyt yritykselle sähköpostin ja luonnoksen nettisivuista, eikä vastausta ole tullut. Teksti tulee viestissä
+heti tervehdyksen ("Hei,") jälkeen. Muut osat (tervehdys, linkki luonnokseen, lopetus, allekirjoitus, opt-out-rivi)
+lisätään automaattisesti — älä kirjoita niitä.
+
+VIESTIN VAIHE kerrotaan VAIHE-kohdassa:
+VAIHE 1 (muistutus): 1–2 lausetta. Viittaa omaan aiempaan viestiisi ("Lähetin teille aiemmin viestin nettisivuista")
+   ja sano, että luonnoksen voi vaihtaa tai muokata toiveidenne mukaan, jos haluatte. Älä toista ensimmäisen viestin
+   sisältöä.
+VAIHE 2 (viimeinen): 1 lause. Viittaa aiempaan viestiin ja sano, ettei teidän tarvitse vastata. Koodi lisää perään
+   lauseen, että tämä on viimeinen viesti.
+
+SÄÄNNÖT:
+- Te-muoto johdonmukaisesti (teidän, teille, voitte). Ei koskaan sinä-muotoa.
+- Ei painostusta, ei syyllistämistä ("en saanut vastausta"), ei kiirettä, ei määräaikoja, ei hintaa tai tarjousta,
+  ei lupauksia.
+- EI kysymyksiä lainkaan.
+- Älä mainitse linkkiä, luonnosta (paitsi VAIHEEN 1 ohjeen mukainen viittaus) äläkä kirjoita verkko-osoitteita.
+- Ei tervehdystä, ei lopputervehdystä, ei allekirjoitusta.
+- Yhteensä enintään noin {FOLLOWUP_MODEL_MAX_WORDS} sanaa.
+- KIELLETYT sanat ja fraasit: ihana, upea, mahtava, ainutlaatuinen, intohimo, ratkaisu, kokonaisvaltainen,
+  digitaalinen läsnäolo, nostaa seuraavalle tasolle, innovatiivinen, räätälöity, huippu-, saumaton, synergia,
+  liiketoiminnan kasvu, keskustella tarkemmin, saattaa.
+- Palauta VAIN viestin teksti."""
+
+FOLLOWUP_DEMO_LINE = "Luonnos on yhä nähtävillä täällä:\n{url}"
+FOLLOWUP_FINAL_LINE = "Tämä on viimeinen viestini asiasta, enkä kirjoita tämän jälkeen enää."
+
+
+def build_followup_user_prompt(
+    lead: Lead, profile: SenderProfile, step_no: int, first_subject: str, instruction: Optional[str] = None
+) -> str:
+    parts = [
+        "LÄHETTÄJÄ (minä):",
+        f"- Nimi: {profile.name}",
+        f"- Yritys: {profile.brand_name or profile.company_name or '(ei yritysnimeä, esiinny omalla nimellä)'}",
+        "",
+        "VASTAANOTTAJA:",
+        f"- Yritys: {lead.name}",
+        f"- Kaupunki: {lead.city}",
+        "",
+        f"AIEMMAN VIESTIN AIHE: {first_subject}",
+        f"VAIHE: {step_no} ({'muistutus' if step_no < followups.FINAL_STEP_NO else 'viimeinen viesti'})",
+        "\nKirjoita viestin teksti.",
+    ]
+    if instruction:
+        parts.append(f"\nLisäohje: {instruction}")
+    return "\n".join(parts)
+
+
+def build_followup_body(text: str, profile: SenderProfile, step_no: int, demo_url: Optional[str]) -> str:
+    """Hei + mallin teksti + demolinkki (koodista) + viimeisen viestin lause + allekirjoitus + opt-out."""
+    paragraphs = clean_demo_paragraphs(text)[:2]
+    parts = ["Hei,", *paragraphs]
+    if demo_url:
+        parts.append(FOLLOWUP_DEMO_LINE.format(url=demo_url))
+    if step_no >= followups.FINAL_STEP_NO:
+        parts.append(FOLLOWUP_FINAL_LINE)
+    return "\n\n".join(parts) + f"\n\n{SIGN_OFF}\n{build_signature(profile)}\n\n{OPT_OUT_LINE}"
+
+
+class FollowUpStepOut(BaseModel):
+    id: int
+    step_no: int
+    subject: str
+    body: str
+    status: str
+    due_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class FollowUpOut(BaseModel):
+    id: int
+    lead_id: int
+    status: str
+    stop_reason: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    replied_at: Optional[datetime] = None
+    send_enabled: bool
+    steps: List[FollowUpStepOut]
+
+
+class FollowUpGenerateRequest(BaseModel):
+    instruction: Optional[str] = None
+
+
+class FollowUpStepUpdate(BaseModel):
+    body: str
+
+
+class FollowUpStatusOut(BaseModel):
+    send_enabled: bool
+    daily_limit: int
+    sent_today: int
+    in_send_window: bool
+
+
+def _followup_overview(session: Session, user_id: str) -> dict[int, tuple[str, Optional[datetime]]]:
+    """lead_id -> (uusimman sarjan tila, seuraavan ajastetun viestin aika). Kaksi kyselyä koko listalle."""
+    latest: dict[int, FollowUpSequence] = {}
+    for seq in session.exec(select(FollowUpSequence).where(FollowUpSequence.user_id == user_id).order_by(FollowUpSequence.id)).all():
+        latest[seq.lead_id] = seq
+    next_due = {
+        seq_id: due
+        for seq_id, due in session.exec(
+            select(FollowUpStep.sequence_id, func.min(FollowUpStep.due_at))
+            .where(FollowUpStep.user_id == user_id, FollowUpStep.status == "scheduled", FollowUpStep.step_no > 0)
+            .group_by(FollowUpStep.sequence_id)
+        ).all()
+    }
+    return {lead_id: (seq.status, next_due.get(seq.id) if seq.status == "active" else None) for lead_id, seq in latest.items()}
+
+
+def _followup_out(session: Session, sequence: FollowUpSequence) -> FollowUpOut:
+    steps = followups.sequence_steps(session, sequence)
+    return FollowUpOut(
+        id=sequence.id,  # type: ignore[arg-type]
+        lead_id=sequence.lead_id,
+        status=sequence.status,
+        stop_reason=sequence.stop_reason,
+        approved_at=sequence.approved_at,
+        replied_at=sequence.replied_at,
+        send_enabled=FOLLOWUP_SETTINGS.send_enabled,
+        steps=[FollowUpStepOut.model_validate(s, from_attributes=True) for s in steps if s.step_no > 0],
+    )
+
+
+def _latest_sequence(session: Session, user_id: str, lead_id: int) -> Optional[FollowUpSequence]:
+    return session.exec(
+        select(FollowUpSequence)
+        .where(FollowUpSequence.user_id == user_id, FollowUpSequence.lead_id == lead_id)
+        .order_by(FollowUpSequence.id.desc())  # type: ignore[attr-defined]
+    ).first()
+
+
+@app.get("/followups/status", response_model=FollowUpStatusOut)
+def followup_status(
+    session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> FollowUpStatusOut:
+    now = utc_now()
+    return FollowUpStatusOut(
+        send_enabled=FOLLOWUP_SETTINGS.send_enabled,
+        daily_limit=FOLLOWUP_SETTINGS.daily_limit,
+        sent_today=followups.sent_today(session, user.id, now),
+        in_send_window=followups.in_send_window(now),
+    )
+
+
+@app.get("/leads/{lead_id}/followups", response_model=Optional[FollowUpOut])
+def get_followups(
+    lead_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> Optional[FollowUpOut]:
+    lead = session.get(Lead, lead_id)
+    if not lead or lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+    sequence = _latest_sequence(session, user.id, lead_id)
+    return _followup_out(session, sequence) if sequence else None
+
+
+@app.post("/leads/{lead_id}/followups/generate", response_model=FollowUpOut)
+async def generate_followups(
+    lead_id: int,
+    req: FollowUpGenerateRequest = FollowUpGenerateRequest(),
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> FollowUpOut:
+    """Luo (tai kirjoittaa uudelleen) sarjan luonnoksen: seuranta päivänä 3 ja viimeinen päivänä 8. Mitään ei lähde."""
+    lead = _get_contactable_lead(session, lead_id, user)
+    profile = _require_sender_profile(session, user)
+    if not OPENAI_API_KEY:
+        raise HTTPException(500, "OPENAI_API_KEY not configured")
+    sequence = followups.open_sequence(session, user.id, lead_id)
+    if sequence is not None and sequence.status == "active":
+        raise HTTPException(409, "Follow-ups are already approved: stop the sequence to write new ones")
+
+    existing = followups.sequence_steps(session, sequence) if sequence else []
+    first = next((s for s in existing if s.step_no == 0), None)
+    if first is not None:
+        first_subject = first.subject
+    else:
+        draft = session.exec(
+            select(EmailDraft).where(EmailDraft.lead_id == lead_id, EmailDraft.user_id == user.id).order_by(EmailDraft.created_at.desc())  # type: ignore[attr-defined]
+        ).first()
+        first_subject = draft.subject if draft else email_subject(lead)
+    demo = get_published_demo(session, lead)
+    demo_url = demo_public_url(demo) if demo else None
+
+    generated: list[tuple[int, str, str]] = []
+    for step_no in sorted(followups.STEP_OFFSET_DAYS):
+        result = await _chat_completion(
+            FOLLOWUP_SYSTEM_PROMPT,
+            build_followup_user_prompt(lead, profile, step_no, first_subject, req.instruction),
+            max_tokens=200,
+        )
+        check_generated_text(result.text, kind="seurantaviesti", lead_id=lead_id, model=result.model, max_words=FOLLOWUP_MODEL_MAX_WORDS)
+        generated.append((step_no, build_followup_body(result.text, profile, step_no, demo_url), result.model))
+
+    if sequence is None:
+        sequence = FollowUpSequence(user_id=user.id, lead_id=lead_id)
+        session.add(sequence)
+        session.flush()
+    for step in existing:
+        if step.step_no > 0:
+            session.delete(step)
+    session.flush()
+    subject = f"Re: {first_subject}" if not first_subject.lower().startswith("re:") else first_subject
+    for step_no, body, model in generated:
+        session.add(FollowUpStep(
+            user_id=user.id, sequence_id=sequence.id, lead_id=lead_id, step_no=step_no,  # type: ignore[arg-type]
+            subject=subject, body=body, model=model, demo_url=demo_url,
+        ))
+    sequence.updated_at = utc_now()
+    session.add(sequence)
+    session.commit()
+    followups.schedule_steps(session, sequence)
+    session.commit()
+    return _followup_out(session, sequence)
+
+
+@app.patch("/followups/steps/{step_id}", response_model=FollowUpStepOut)
+def update_followup_step(
+    step_id: int,
+    req: FollowUpStepUpdate,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> FollowUpStepOut:
+    step = session.get(FollowUpStep, step_id)
+    if not step or step.user_id != user.id or step.step_no == 0:
+        raise HTTPException(404, "Step not found")
+    sequence = session.get(FollowUpSequence, step.sequence_id)
+    if step.status != "scheduled" or sequence is None or sequence.status not in ("draft", "active"):
+        raise HTTPException(409, "Only unsent messages of an open sequence can be edited")
+    body = req.body.strip()
+    if not body:
+        raise HTTPException(422, "Message body cannot be empty")
+    # Opt-out-rivi on pakollinen jokaisessa viestissä, joten se palautetaan jos muokkaus poisti sen
+    if OPT_OUT_LINE not in body:
+        body = f"{body}\n\n{OPT_OUT_LINE}"
+    step.body = body
+    session.add(step)
+    session.commit()
+    session.refresh(step)
+    return FollowUpStepOut.model_validate(step, from_attributes=True)
+
+
+@app.post("/leads/{lead_id}/followups/approve", response_model=FollowUpOut)
+def approve_followups(
+    lead_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> FollowUpOut:
+    """Hyväksyy koko sarjan kerralla. Vasta tämän jälkeen mikään askel voi lähteä (jos lähetys on päällä)."""
+    _get_contactable_lead(session, lead_id, user)
+    sequence = followups.open_sequence(session, user.id, lead_id)
+    if sequence is None or sequence.status != "draft":
+        raise HTTPException(409, "No follow-up draft to approve")
+    pending = [s for s in followups.sequence_steps(session, sequence) if s.step_no > 0 and s.status == "scheduled"]
+    if not pending:
+        raise HTTPException(409, "The sequence has no follow-up messages")
+    if any(OPT_OUT_LINE not in s.body for s in pending):
+        raise HTTPException(422, "Every message must keep the opt-out line")
+    followups.approve_sequence(session, sequence, utc_now())
+    session.commit()
+    return _followup_out(session, sequence)
+
+
+@app.post("/leads/{lead_id}/followups/stop", response_model=FollowUpOut)
+def stop_followups(
+    lead_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> FollowUpOut:
+    lead = session.get(Lead, lead_id)
+    if not lead or lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+    sequence = followups.open_sequence(session, user.id, lead_id)
+    if sequence is None:
+        raise HTTPException(409, "No open sequence")
+    followups.stop_sequence(session, sequence, "manual")
+    session.commit()
+    return _followup_out(session, sequence)

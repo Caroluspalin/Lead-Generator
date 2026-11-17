@@ -172,7 +172,16 @@ def open_smtp(
         raise
 
 
-def build_message(from_addr: str, to: str, subject: str, body: str, from_name: str = "") -> MIMEText:
+def build_message(
+    from_addr: str,
+    to: str,
+    subject: str,
+    body: str,
+    from_name: str = "",
+    *,
+    message_id: Optional[str] = None,
+    headers: Optional[dict[str, str]] = None,
+) -> MIMEText:
     # Date ja Message-ID mukaan: ilman niitä viesti näyttää roskapostilta ja palvelin voi katkaista DATA-vaiheessa
     msg = MIMEText(body, "plain", "utf-8")
     # formataddr koodaa ääkköset (RFC 2047); Message-ID:n domain ja kirjekuori tulevat pelkästä osoitteesta
@@ -181,7 +190,9 @@ def build_message(from_addr: str, to: str, subject: str, body: str, from_name: s
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
     domain = from_addr.rsplit("@", 1)[-1] if "@" in from_addr else None
-    msg["Message-ID"] = make_msgid(domain=domain)
+    msg["Message-ID"] = message_id or make_msgid(domain=domain)
+    for name, value in (headers or {}).items():
+        msg[name] = value
     return msg
 
 
