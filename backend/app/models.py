@@ -141,6 +141,10 @@ class LeadBase(SQLModel):
     source: str = Field(default="API")  # API tai MANUAL
     notes: Optional[str] = None
 
+    # Diilin arvo euroina: syötetään käsin, ei päätellä mistään
+    deal_value: Optional[int] = None  # kertaluontoinen
+    recurring_monthly: Optional[int] = None  # ylläpito €/kk
+
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -183,3 +187,5 @@ class LeadUpdate(SQLModel):
     do_not_contact: Optional[bool] = None
     website: Optional[str] = None
     review_before_contact: Optional[bool] = None
+    deal_value: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    recurring_monthly: Optional[int] = Field(default=None, ge=0, le=1_000_000)

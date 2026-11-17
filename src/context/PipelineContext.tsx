@@ -19,6 +19,10 @@ interface PipelineContextValue {
   markReviewed: (id: number) => Promise<void>;
   refreshTimma: (id: number) => Promise<void>;
   updateWebsite: (id: number, website: string | null) => Promise<SavedAgency>;
+  updateDealAmounts: (
+    id: number,
+    amounts: { deal_value?: number | null; recurring_monthly?: number | null },
+  ) => Promise<SavedAgency>;
   setDemoPublished: (id: number, value: boolean) => void;
   // Pipelinen "Demo published" -suodatin: täällä, jotta valinta säilyy välilehteä vaihdettaessa
   demoPublishedOnly: boolean;
@@ -229,6 +233,23 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     return updated;
   };
 
+  const updateDealAmounts = async (
+    id: number,
+    amounts: { deal_value?: number | null; recurring_monthly?: number | null },
+  ): Promise<SavedAgency> => {
+    const res = await apiFetch(`/leads/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(amounts),
+    });
+    if (!res.ok) {
+      throw new Error(`Amount update failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    mergeLead(updated);
+    return updated;
+  };
+
   const removeFromPipeline = async (id: number) => {
     const res = await apiFetch(`/leads/${id}`, {
       method: 'DELETE',
@@ -270,6 +291,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         markReviewed,
         refreshTimma,
         updateWebsite,
+        updateDealAmounts,
         setDemoPublished,
         demoPublishedOnly,
         setDemoPublishedOnly,
