@@ -157,8 +157,9 @@ def test_list_leads_demo_published_is_per_user(
 def test_list_leads_keeps_lead_fields(client_a: TestClient, make_lead: Any) -> None:
     lead = make_lead(name="Kentät", website="https://timma.fi/yritys/x", rating=4.5)
     listed = client_a.get("/leads").json()[0]
-    # Muut kentät samat kuin muissa liidivastauksissa (Lead): vain demo_published lisätty
-    assert {k: v for k, v in listed.items() if k != "demo_published"} == lead
+    # Muut kentät samat kuin muissa liidivastauksissa (Lead): vain lasketut demo-kentät lisätty
+    computed = {"demo_published", "demo_open_count", "demo_last_opened_at"}
+    assert {k: v for k, v in listed.items() if k not in computed} == lead
     assert listed["demo_published"] is False
 
 

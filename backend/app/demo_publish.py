@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 OBJECT_PREFIX = "demos/"
 ASSET_PREFIX = "assets/"
+OPENS_PREFIX = "opens/"
 HTML_CONTENT_TYPE = "text/html; charset=utf-8"
 ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
@@ -82,6 +83,7 @@ class ObjectStore(Protocol):
     ) -> None: ...
     def exists(self, key: str) -> bool: ...
     def delete(self, key: str) -> None: ...
+    def list_objects(self, prefix: str) -> list[tuple[str, datetime]]: ...
 
 
 class R2ObjectStore:
@@ -145,6 +147,14 @@ class R2ObjectStore:
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
+    def list_objects(self, prefix: str) -> list[tuple[str, datetime]]:
+        """Avain + LastModified (UTC) kaikille prefiksin objekteille."""
+        found: list[tuple[str, datetime]] = []
+        for page in self._client.get_paginator("list_objects_v2").paginate(Bucket=self._bucket, Prefix=prefix):
+            for item in page.get("Contents", []):
+                found.append((item["Key"], item["LastModified"]))
+        return found
+
 
 class PublishError(Exception):
     pass
@@ -191,3 +201,23 @@ def unpublish(store: ObjectStore, public_path: str) -> bool:
     except Exception as e:
         logger.error(f"R2-poisto epäonnistui ({object_key(public_path)}): {e}")
         return False
+
+
+@dataclass(frozen=True)
+class OpenRecord:
+    key: str
+    path: str
+    slot: int
+    device: str
+    opened_at: datetime
+
+
+def parse_open_key(key: str, last_modified: datetime) -> Optional[OpenRecord]:
+    """opens/<polku>/<ämpäri>-<laite> (Workerin openKey). Väärän muotoinen avain -> None."""
+    parts = key.split("/")
+    if len(parts) != 3 or parts[0] != OPENS_PREFIX.rstrip("/") or not parts[1]:
+        return None
+    slot, _, device = parts[2].partition("-")
+    if not slot.isdigit() or device not in ("mobile", "desktop"):
+        return None
+    return OpenRecord(key=key, path=parts[1], slot=int(slot), device=device, opened_at=last_modified)

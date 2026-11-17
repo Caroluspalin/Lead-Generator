@@ -129,6 +129,8 @@
 
 - **Laajennus A (2026-11-17)**: Diilin arvo ja ylläpito: `Lead.deal_value` ja `recurring_monthly` (migraatio `7c448c96a69d`), Value/Maintenance-rivit pipeline-kortilla, vaiheen summa välilehdellä, Hired-vaiheen ylläpito yhteensä €/kk
 
+- **Laajennus B (2026-11-17)**: Demon avausilmoitus: Worker kirjaa avaukset R2:een (`opens/…`, vain aika ja laite, botit ja `?preview=1` suodatetaan), `POST /leads/sync-opens` + `DemoOpen`-taulu (migraatio `f9163b4eb5f4`), kortin "Opened N× · last HH:MM", "Opened first" -järjestys ja toast. Worker vaatii deployn
+
 ## Seuraavaksi
 
 

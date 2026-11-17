@@ -145,6 +145,16 @@ interface PipelineCardProps {
   onDismiss: (agency: SavedAgency) => void;
 }
 
+// Backend palauttaa UTC-ajan; tänään pelkkä kellonaika, muuten päivä + kellonaika
+function formatOpenTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(/(?:Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`);
+  const time = date.toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' });
+  return date.toDateString() === new Date().toDateString()
+    ? time
+    : `${date.toLocaleDateString('fi-FI', { day: 'numeric', month: 'numeric' })} ${time}`;
+}
+
 const PipelineCard: React.FC<PipelineCardProps> = ({
   agency,
   selected,
@@ -380,6 +390,15 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           <StatusBadge status={agency.website_status} title={agency.website_issue ?? undefined} />
         )}
         <RatingDisplay rating={agency.rating} reviewCount={agency.review_count} />
+        {agency.demo_open_count ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-sm bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success"
+            title="Demo opens (bots and your own previews excluded; link previews may still count)"
+          >
+            <Eye size={12} />
+            Opened {agency.demo_open_count}× · last {formatOpenTime(agency.demo_last_opened_at)}
+          </span>
+        ) : null}
       </div>
       {agency.website_issue && (
         <p className="mt-1 text-xs text-fg-subtle">{agency.website_issue}</p>

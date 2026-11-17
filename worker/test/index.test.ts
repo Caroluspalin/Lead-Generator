@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleRequest, isDemoPath, isExpired, SECURITY_HEADERS } from '../src/index.ts';
+import { deviceType, handleRequest, isDemoPath, isExpired, openKey, SECURITY_HEADERS } from '../src/index.ts';
 import type { DemoBucket, DemoObject } from '../src/index.ts';
 
 const TOKEN = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43 merkkiä
@@ -14,6 +14,14 @@ class FakeBucket implements DemoBucket {
   async get(key: string): Promise<DemoObject | null> {
     this.keys.push(key);
     return this.objects.get(key) ?? null;
+  }
+
+  puts: string[] = [];
+  failPut = false;
+  async put(key: string): Promise<unknown> {
+    if (this.failPut) throw new Error('R2 down');
+    this.puts.push(key);
+    return undefined;
   }
 }
 
@@ -236,4 +244,106 @@ test('malformed asset paths and missing version are 404 without touching R2', as
 test('unknown asset version is 404', async () => {
   const bucket = new FakeBucket();
   assert.equal((await handleRequest(get('/a/cafe/tyylit.css?v=0123456789'), env(bucket), NOW)).status, 404);
+});
+
+// --- Avausten kirjaus ---
+
+const CHROME = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+function openRequest(path: string, headers: Record<string, string>, method = 'GET'): Request {
+  return new Request(`https://demo.example.fi${path}`, {
+    method,
+    headers: { accept: 'text/html,application/xhtml+xml', ...headers },
+  });
+}
+
+async function openPuts(request: Request, setup?: (b: FakeBucket) => void): Promise<{ bucket: FakeBucket; res: Response; waited: Promise<unknown>[] }> {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'ok' });
+  setup?.(bucket);
+  const waited: Promise<unknown>[] = [];
+  const res = await handleRequest(request, env(bucket), NOW, { waitUntil: (p) => void waited.push(p) });
+  await Promise.all(waited);
+  return { bucket, res, waited };
+}
+
+test('records a normal open with bucket and device only', async () => {
+  const { bucket, res } = await openPuts(openRequest(`/${SLUG}`, { 'user-agent': CHROME }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(bucket.puts, [openKey(SLUG, 'desktop', NOW)]);
+  assert.match(bucket.puts[0], /^opens\/taina-lantiainen-k7x2m\/\d+-desktop$/);
+});
+
+test('mobile device from user agent and from client hint', async () => {
+  const { bucket } = await openPuts(openRequest(`/${SLUG}`, { 'user-agent': IPHONE }));
+  assert.match(bucket.puts[0], /-mobile$/);
+  assert.equal(deviceType(new Headers({ 'sec-ch-ua-mobile': '?0', 'user-agent': IPHONE })), 'desktop');
+});
+
+test('same bucket and device gives the same key (dedup), new bucket a new key', () => {
+  const later = new Date(NOW.getTime() + 5 * 60 * 1000);
+  const muchLater = new Date(NOW.getTime() + 11 * 60 * 1000);
+  const base = openKey(SLUG, 'desktop', NOW);
+  assert.equal(base, openKey(SLUG, 'desktop', later));
+  assert.notEqual(openKey(SLUG, 'desktop', NOW), openKey(SLUG, 'mobile', NOW));
+  assert.notEqual(openKey(SLUG, 'desktop', NOW), openKey(SLUG, 'desktop', muchLater));
+});
+
+test('own opens with ?preview=1 are not recorded', async () => {
+  const { bucket, res } = await openPuts(openRequest(`/${SLUG}?preview=1`, { 'user-agent': CHROME }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(bucket.puts, []);
+});
+
+test('bots and link previewers are not recorded', async () => {
+  const agents = [
+    '',
+    'facebookexternalhit/1.1',
+    'WhatsApp/2.23.20 A',
+    'Slackbot-LinkExpanding 1.0',
+    'Googlebot/2.1',
+    'Mozilla/5.0 (Macintosh) Mimecast Link Scanner',
+    'python-requests/2.31',
+    'curl/8.0',
+    'Mozilla/5.0 AppleWebKit/537.36 HeadlessChrome/120.0 Safari/537.36',
+    'Mozilla/5.0 (compatible; Microsoft Office Protocol Discovery)',
+  ];
+  for (const ua of agents) {
+    const { bucket, res } = await openPuts(openRequest(`/${SLUG}`, { 'user-agent': ua }));
+    assert.equal(res.status, 200, ua);
+    assert.deepEqual(bucket.puts, [], ua);
+  }
+});
+
+test('prefetch, non-html accept, HEAD, 404 and 410 are not recorded', async () => {
+  const cases: Request[] = [
+    openRequest(`/${SLUG}`, { 'user-agent': CHROME, purpose: 'prefetch' }),
+    openRequest(`/${SLUG}`, { 'user-agent': CHROME, 'sec-purpose': 'prefetch;prerender' }),
+    openRequest(`/${SLUG}`, { 'user-agent': CHROME, accept: '*/*' }),
+    openRequest(`/${SLUG}`, { 'user-agent': CHROME }, 'HEAD'),
+    openRequest('/ei-olemassa-k7x2m', { 'user-agent': CHROME }),
+  ];
+  for (const request of cases) {
+    const { bucket } = await openPuts(request);
+    assert.deepEqual(bucket.puts, [], request.url);
+  }
+  const { bucket } = await openPuts(openRequest(`/${SLUG}`, { 'user-agent': CHROME }), (b) =>
+    b.objects.set(`demos/${SLUG}.html`, { body: 'x', customMetadata: { 'expires-at': '2026-11-01T00:00:00+00:00' } }),
+  );
+  assert.deepEqual(bucket.puts, []);
+});
+
+test('recording is deferred via waitUntil and a failing write does not break the page', async () => {
+  const bucket = new FakeBucket();
+  bucket.objects.set(`demos/${SLUG}.html`, { body: 'ok' });
+  bucket.failPut = true;
+  const waited: Promise<unknown>[] = [];
+  const res = await handleRequest(openRequest(`/${SLUG}`, { 'user-agent': CHROME }), env(bucket), NOW, {
+    waitUntil: (p) => void waited.push(p),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), 'ok');
+  assert.equal(waited.length, 1);
+  await assert.doesNotReject(Promise.all(waited));
 });

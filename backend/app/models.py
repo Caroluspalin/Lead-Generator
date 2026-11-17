@@ -75,6 +75,19 @@ class Demo(SQLModel, table=True):
     expires_at: Optional[datetime] = None
 
 
+class DemoOpen(SQLModel, table=True):
+    # Julkaistun demon avaus (Worker kirjaa R2:een, POST /leads/sync-opens tuo tänne). Vain aika ja laite.
+    # slot = Workerin 10 min ämpäri: sama demo + laite + ämpäri on yksi avaus (idempotentti tuonti).
+    __table_args__ = (UniqueConstraint("demo_id", "slot", "device", name="uq_demoopen_slot"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    demo_id: int = Field(index=True)
+    user_id: str = Field(index=True)
+    opened_at: datetime
+    device: str
+    slot: int
+
+
 class SenderProfile(SQLModel, table=True):
     # Yksi per käyttäjä: lähettäjän tiedot sähköposti- ja puhelinprompteihin + allekirjoitus
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -161,6 +174,9 @@ class LeadRead(LeadBase):
     id: int
     # Laskettu Demo-taulusta (ei saraketta): julkaistu ja voimassa oleva demo
     demo_published: bool = False
+    # Laskettu DemoOpen-taulusta: liidin julkaistun demon avaukset (ei botteja, ei omia esikatseluja)
+    demo_open_count: int = 0
+    demo_last_opened_at: Optional[datetime] = None
 
 class LeadCreate(SQLModel):
     name: str

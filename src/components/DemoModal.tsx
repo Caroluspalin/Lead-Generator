@@ -622,7 +622,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                           <div className="flex items-center gap-2 px-2.5 py-1.5 rounded border border-success/30 bg-success/10">
                             <Globe size={13} className="text-success shrink-0" />
                             <a
-                              href={demo.public_url}
+                              href={`${demo.public_url}?preview=1`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="rounded-sm text-xs text-fg font-medium truncate underline decoration-fg-subtle/40 underline-offset-2 hover:decoration-fg"

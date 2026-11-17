@@ -6,6 +6,7 @@ import io
 import logging
 import re
 import threading
+import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from collections import OrderedDict, deque
@@ -26,7 +27,7 @@ import requests
 # Tuodaan omat moduulit
 from .database import create_db_and_tables, get_session
 from .models import (
-    Demo, Lead, LeadCreate, LeadRead, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
+    Demo, DemoOpen, Lead, LeadCreate, LeadRead, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
     utc_now,
 )
 from .utils import unsplash
@@ -35,8 +36,10 @@ from .demo_publish import (
     ObjectStore,
     PublishError,
     R2Config,
+    OPENS_PREFIX,
     R2ObjectStore,
     load_r2_config,
+    parse_open_key,
     publish_html,
     unpublish,
 )
@@ -956,7 +959,107 @@ def read_leads(
         for demo in session.exec(select(Demo).where(Demo.user_id == user.id, Demo.status == "published")).all()
         if not _is_expired(demo)
     }
-    return [LeadRead.model_validate(lead, update={"demo_published": lead.id in published}) for lead in leads]
+    opens = _open_stats(session, user.id)
+    return [
+        LeadRead.model_validate(
+            lead,
+            update={
+                "demo_published": lead.id in published,
+                "demo_open_count": opens[lead.id][0] if lead.id in opens else 0,
+                "demo_last_opened_at": opens[lead.id][1] if lead.id in opens else None,
+            },
+        )
+        for lead in leads
+    ]
+
+
+def _open_stats(session: Session, user_id: str) -> dict[int, tuple[int, datetime]]:
+    """lead_id -> (avausten määrä, viimeisin avaus). Yksi ryhmitelty kysely, user_id Demo-rivin omistajasta."""
+    rows = session.exec(
+        select(Demo.lead_id, func.count(DemoOpen.id), func.max(DemoOpen.opened_at))
+        .join(DemoOpen, DemoOpen.demo_id == Demo.id)
+        .where(Demo.user_id == user_id, DemoOpen.user_id == user_id)
+        .group_by(Demo.lead_id)
+    ).all()
+    return {lead_id: (count, last) for lead_id, count, last in rows}
+
+
+class NewOpenOut(BaseModel):
+    lead_id: int
+    name: str
+    count: int
+
+
+class SyncOpensOut(BaseModel):
+    new_opens: list[NewOpenOut]
+
+
+# Palvelinpuolen throttle: R2-listaus enintään kerran / 30 s / käyttäjä
+SYNC_OPENS_MIN_INTERVAL_SECONDS = 30.0
+_last_opens_sync: dict[str, float] = {}
+
+
+@app.post("/leads/sync-opens", response_model=SyncOpensOut)
+async def sync_opens(
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> SyncOpensOut:
+    """Tuo Workerin R2:een kirjaamat demoavaukset käyttäjän julkaistuille demoille. Idempotentti."""
+    store = get_object_store()
+    now = time.monotonic()
+    last = _last_opens_sync.get(user.id)
+    if store is None or (last is not None and now - last < SYNC_OPENS_MIN_INTERVAL_SECONDS):
+        return SyncOpensOut(new_opens=[])
+    _last_opens_sync[user.id] = now
+
+    demos = session.exec(select(Demo).where(Demo.user_id == user.id)).all()
+    by_path = {demo_path(demo): demo for demo in demos}
+    try:
+        listed = await asyncio.to_thread(store.list_objects, OPENS_PREFIX)
+    except Exception as e:
+        logger.error(f"Avausten listaus R2:sta epäonnistui: {e}")
+        _last_opens_sync.pop(user.id, None)
+        raise HTTPException(502, "Could not read demo opens")
+
+    new_counts: dict[int, int] = {}
+    handled: list[str] = []
+    for key, modified in listed:
+        record = parse_open_key(key, modified)
+        demo = by_path.get(record.path) if record else None
+        # Toisen käyttäjän tai tuntemattoman demon avauksia ei kosketa
+        if record is None or demo is None or demo.id is None:
+            continue
+        exists = session.exec(
+            select(DemoOpen.id).where(
+                DemoOpen.demo_id == demo.id, DemoOpen.slot == record.slot, DemoOpen.device == record.device
+            )
+        ).first()
+        if exists is None:
+            session.add(DemoOpen(
+                demo_id=demo.id, user_id=user.id, opened_at=record.opened_at, device=record.device, slot=record.slot,
+            ))
+            new_counts[demo.lead_id] = new_counts.get(demo.lead_id, 0) + 1
+        handled.append(key)
+    session.commit()
+    for key in handled:
+        try:
+            await asyncio.to_thread(store.delete, key)
+        except Exception as e:
+            # Seuraava tuonti ohittaa saman ämpärin, joten pelkkä lokitus riittää
+            logger.warning(f"Avausobjektin poisto epäonnistui ({key}): {e}")
+
+    names = {
+        lead.id: lead.name
+        for lead in session.exec(select(Lead).where(Lead.user_id == user.id, Lead.id.in_(list(new_counts)))).all()
+    } if new_counts else {}
+    return SyncOpensOut(new_opens=[
+        NewOpenOut(lead_id=lead_id, name=names.get(lead_id, ""), count=count) for lead_id, count in new_counts.items()
+    ])
+
+
+def _delete_opens(session: Session, demo: Demo) -> None:
+    for row in session.exec(select(DemoOpen).where(DemoOpen.demo_id == demo.id, DemoOpen.user_id == demo.user_id)).all():
+        session.delete(row)
 
 # 3b. CSV EXPORT
 @app.get("/leads/export")
@@ -1166,6 +1269,7 @@ def _remove_lead(session: Session, lead: Lead) -> None:
     """Poistaa liidin ja sen demon (julkaistu demo otetaan ensin pois R2:sta). Ei commitoi."""
     for demo in session.exec(select(Demo).where(Demo.lead_id == lead.id, Demo.user_id == lead.user_id)).all():
         _take_offline(demo)
+        _delete_opens(session, demo)
         session.delete(demo)
     session.delete(lead)
 
@@ -2779,6 +2883,7 @@ def delete_demo(
 ):
     _, demo = _get_owned_demo(session, lead_id, user)
     _take_offline(demo)
+    _delete_opens(session, demo)
     session.delete(demo)
     session.commit()
     return {"ok": True}

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 import type { Agency, Demo, SavedAgency, PipelineStatus } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { useAuth } from './AuthContext';
@@ -27,6 +28,9 @@ interface PipelineContextValue {
   // Pipelinen "Demo published" -suodatin: täällä, jotta valinta säilyy välilehteä vaihdettaessa
   demoPublishedOnly: boolean;
   setDemoPublishedOnly: (value: boolean) => void;
+  // Pipelinen "Opened first" -järjestys (demon avanneet ensin)
+  openedFirst: boolean;
+  setOpenedFirst: (value: boolean) => void;
   refresh: () => Promise<void>;
 }
 
@@ -43,9 +47,31 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [demoPublishedOnly, setDemoPublishedOnly] = useState(false);
+  const [openedFirst, setOpenedFirst] = useState(false);
   // Käyttäjä, jonka liidit on ladattu. Myöhemmät haut päivittävät listan taustalla:
   // luurangot tai virhepaneeli sulkisivat avoimen modaalin ja nollaisivat scrollin.
   const loadedForRef = useRef<string | null>(null);
+
+  // Tuo Workerin kirjaamat demoavaukset (palvelin throttlaa). Ei taustapollausta: kutsutaan listan haun yhteydessä.
+  const syncOpens = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/leads/sync-opens`, { method: 'POST' });
+      if (!res.ok) return;
+      const { new_opens }: { new_opens: { lead_id: number; name: string; count: number }[] } = await res.json();
+      if (new_opens.length === 0) return;
+      const listRes = await apiFetch(`/leads`);
+      if (listRes.ok) setSavedAgencies(await listRes.json());
+      const names = new_opens.map((o) => o.name).filter(Boolean);
+      toast.success(
+        new_opens.length === 1
+          ? `${names[0] ?? 'A lead'} opened their demo`
+          : `${new_opens.length} leads opened their demo`,
+        { description: new_opens.length > 1 ? names.join(', ') : undefined },
+      );
+    } catch (err) {
+      console.error('Failed to sync demo opens:', err);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!userId) {
@@ -69,6 +95,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       setSavedAgencies(data);
       loadedForRef.current = userId;
       setError('');
+      if (data.some((a) => a.demo_published)) void syncOpens();
     } catch (err) {
       console.error('Failed to fetch leads:', err);
       if (firstLoad) {
@@ -79,7 +106,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         setLoading(false);
       }
     }
-  }, [userId]);
+  }, [userId, syncOpens]);
 
   useEffect(() => {
     refresh();
@@ -295,6 +322,8 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         setDemoPublished,
         demoPublishedOnly,
         setDemoPublishedOnly,
+        openedFirst,
+        setOpenedFirst,
         refresh,
       }}
     >
