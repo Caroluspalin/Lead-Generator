@@ -135,6 +135,8 @@
 
 - **Laajennus C (2026-11-17)**: Seurantaviestit: sarjat (päivät 3 ja 8, ma–pe 9–16, pyhät pois, päiväraja), idempotentti lähettäjä, IMAP-vastausten tunnistus (auto-vastaukset, opt-out, bounce), UI (Add follow-ups, tila kortilla). Migraatio `dc26706bcb28`. Oikea lähetys pois (`FOLLOWUPS_SEND_ENABLED`, `IMAP_ENABLED` oletuksena false), suostumus- ja iCloud-rajat tarkistettava ennen käyttöönottoa
 
+- **Laajennus E (2026-11-17)**: Tarjous linkkinä: palvelukatalogi (alvittomat hinnat, alv per rivi), tarjousversiot ja lukitus, tarjoussivu `demo.palinweb.fi/q/<token>` Workerilla (noindex, tulostus PDF:ksi), avausseuranta `sync-opens`in kautta, hyväksyntä nimellä + piirretyllä allekirjoituksella + Workerin ajalla + SHA-256-tiivisteellä (R2 `acceptances/`, ei IP:tä), Hired-siirto, tarjouslinkki sähköpostiin, Y-tunnus profiiliin. Migraatiot `6d212db6455a`, `80a9fb5c7ac4`. Avoin: acceptances-objektien säilytysaika
+
 ## Seuraavaksi
 
 
