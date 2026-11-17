@@ -12,6 +12,10 @@
  * Vanhentunut (customMetadata expires-at menneisyydessä) -> 410, vaikka backendin
  * poistoajo olisi myöhässä. Polku on domainista riippumaton: sama koodi toimii
  * workers.dev-osoitteessa ja omassa domainissa.
+ *
+ * Avaukset: onnistunut demon GET kirjataan R2-avaimeen opens/<polku>/<10 min ämpäri>-<laite> (backend
+ * hakee ne S3-API:lla). Vain aika (objektin LastModified) ja laite, ei IP:tä, UA:ta eikä maata.
+ * Ei kirjata: ?preview=1 (omat avaukset), HEAD, botit ja linkkiesikatselut, prefetch. Kirjoitus ctx.waitUntilissa.
  */
 
 // Minimaaliset R2-tyypit (ei @cloudflare/workers-types -riippuvuutta)
@@ -22,6 +26,11 @@ export interface DemoObject {
 
 export interface DemoBucket {
   get(key: string): Promise<DemoObject | null>;
+  put(key: string, value: string): Promise<unknown>;
+}
+
+export interface Ctx {
+  waitUntil(promise: Promise<unknown>): void;
 }
 
 export interface Env {
@@ -75,6 +84,34 @@ const ASSET_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
 };
 
+export const OPEN_BUCKET_MS = 10 * 60 * 1000;
+
+// Linkkiskannerit, esikatselijat ja koneet. Selainta jäljittelevät skannerit (Defender, Apple MPP) menevät läpi.
+const BOT_RE =
+  /bot|crawl|spider|preview|fetch|monitor|headless|curl|wget|python|go-http|axios|java|scan|slurp|facebookexternalhit|whatsapp|skypeuri|googleimageproxy|barracuda|mimecast|proofpoint|zoominfo|ms-office|microsoft office|outlook|lighthouse|pingdom|uptime/i;
+
+export function isBotRequest(headers: Headers): boolean {
+  const ua = headers.get('user-agent') ?? '';
+  if (ua.trim() === '' || BOT_RE.test(ua)) return true;
+  const purpose = `${headers.get('purpose') ?? ''} ${headers.get('sec-purpose') ?? ''} ${headers.get('x-moz') ?? ''}`;
+  if (/prefetch|prerender/i.test(purpose)) return true;
+  return !(headers.get('accept') ?? '').includes('text/html');
+}
+
+export function deviceType(headers: Headers): 'mobile' | 'desktop' {
+  const hint = headers.get('sec-ch-ua-mobile');
+  if (hint !== null) return hint === '?1' ? 'mobile' : 'desktop';
+  return /Mobi|Android|iPhone|iPad/i.test(headers.get('user-agent') ?? '') ? 'mobile' : 'desktop';
+}
+
+export function openKey(path: string, device: string, now: Date): string {
+  return `opens/${path}/${Math.floor(now.getTime() / OPEN_BUCKET_MS)}-${device}`;
+}
+
+export function shouldRecordOpen(request: Request, url: URL): boolean {
+  return request.method === 'GET' && !url.searchParams.has('preview') && !isBotRequest(request.headers);
+}
+
 const textResponse = (status: number, text: string): Response =>
   new Response(text, {
     status,
@@ -88,7 +125,12 @@ export function isExpired(metadata: Record<string, string> | undefined, now: Dat
   return !Number.isNaN(expires) && expires <= now.getTime();
 }
 
-export async function handleRequest(request: Request, env: Env, now: Date = new Date()): Promise<Response> {
+export async function handleRequest(
+  request: Request,
+  env: Env,
+  now: Date = new Date(),
+  ctx?: Ctx,
+): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return textResponse(405, 'Method not allowed');
   }
@@ -123,6 +165,11 @@ export async function handleRequest(request: Request, env: Env, now: Date = new 
     return textResponse(410, 'Tämä luonnos ei ole enää saatavilla.');
   }
 
+  if (ctx && shouldRecordOpen(request, url)) {
+    // Kirjoitusvirhe ei saa vaikuttaa vastaukseen
+    ctx.waitUntil(env.DEMOS.put(openKey(demoPath, deviceType(request.headers), now), '').catch(() => undefined));
+  }
+
   const csp = object.customMetadata?.['format'] === '2' ? CSP_V2 : SECURITY_HEADERS['Content-Security-Policy'];
   return new Response(request.method === 'HEAD' ? null : object.body, {
     status: 200,
@@ -131,7 +178,7 @@ export async function handleRequest(request: Request, env: Env, now: Date = new 
 }
 
 export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return handleRequest(request, env);
+  fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> {
+    return handleRequest(request, env, new Date(), ctx);
   },
 };
