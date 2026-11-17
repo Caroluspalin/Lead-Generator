@@ -98,6 +98,7 @@ export interface SenderProfileInput {
   short_intro: string;
   // Tarjouksen ehdot vapaana tekstinä; tyhjä = ei ehto-osiota tarjoussivulla
   quote_terms: string | null;
+  business_id: string | null;
 }
 
 // GET /sender-profile

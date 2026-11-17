@@ -219,6 +219,7 @@ class SenderProfile(SQLModel, table=True):
     brand_name: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None  # portfolio
+    business_id: Optional[str] = None  # Y-tunnus, näkyy tarjoussivulla
     # Tarjouksen ehdot (maksuehto, toimitusaika jne.) vapaana tekstinä, käyttäjän kirjoittama. Tyhjä = ei ehto-osiota
     quote_terms: Optional[str] = None
     short_intro: str  # esim. "teen nettisivuja paikallisille yrityksille Espoossa"
@@ -233,6 +234,7 @@ class SenderProfileUpdate(SQLModel):
     website: Optional[str] = Field(default=None, max_length=200)
     short_intro: str = Field(min_length=5, max_length=200)
     quote_terms: Optional[str] = Field(default=None, max_length=3000)
+    business_id: Optional[str] = Field(default=None, max_length=20)
 
 
 class LeadBase(SQLModel):

@@ -32,8 +32,7 @@ MAX_SEARCH_CALLS, field mask ja demoputki ennallaan; ei uusia maksullisia kutsuj
   New version) ja tilamerkki "Quote: Draft / Sent / Opened / Accepted" (Opened = lähetetty + avattu). EmailDraftModal: "Add quote link to this draft".
 - **Auki**: (1) `acceptances/` ja `quotes/` jäävät R2:een pysyvästi, säilytysaika päätetään myöhemmin (henkilötieto: nimi, allekirjoitus), (2) hyväksynnän juridinen
   riittävyys (piirretty allekirjoitus + nimi + aika + tiiviste, ei IP:tä) on Palin päätettävissä, (3) sähköpostilause ja tarjoussivun Finnish-tekstit ovat asiakkaalle
-  lähtevää tekstiä: Palin hyväksyy, (4) tarjoussivun 390 px -ulkoasua ei ole katsottu selaimessa (ei Playwrightia), (5) Worker deployaamatta, (6) tarjouksessa ei ole y-tunnusta
-  (profiilissa ei ole kenttää).
+  lähtevää tekstiä: Palin hyväksyy, (4) tarjoussivun 390 px -ulkoasua ei ole katsottu selaimessa (ei Playwrightia), (5) Worker deployaamatta, (6) Y-tunnus: `SenderProfile.business_id` (migraatio `80a9fb5c7ac4`, Settings "Business ID (Y-tunnus)") näkyy tarjoussivulla myyjän tietojen yhteydessä ja on mukana content_hashin seller-datassa; tyhjä = ei näy.
 
 ## Edellinen: seurantaviestit (päivitetty 2026-11-17)
 

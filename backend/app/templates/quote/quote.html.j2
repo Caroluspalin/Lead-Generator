@@ -49,6 +49,7 @@ button:disabled{opacity:.5;cursor:default}
 <div class="seller">{{ seller.brand or seller.name }}</div>
 {% if seller.company and seller.company != seller.brand %}<div class="muted">{{ seller.company }}</div>{% endif %}
 <div class="muted">{{ seller.name if seller.brand else '' }}{% if seller.phone %}{{ ' · ' if seller.brand else '' }}{{ seller.phone }}{% endif %}{% if seller.website %} · {{ seller.website }}{% endif %}</div>
+{% if seller.business_id %}<div class="muted">Y-tunnus: {{ seller.business_id }}</div>{% endif %}
 <h1 style="margin-top:16px">Tarjous{% if version > 1 %} (versio {{ version }}){% endif %}</h1>
 <dl>
 <dt>Vastaanottaja</dt><dd>{{ recipient }}</dd>

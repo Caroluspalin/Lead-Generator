@@ -13,6 +13,7 @@ const EMPTY: SenderProfileInput = {
   website: '',
   short_intro: '',
   quote_terms: '',
+  business_id: '',
 };
 
 const inputClass =
@@ -337,6 +338,7 @@ const SettingsView: React.FC = () => {
           website: data.website ?? '',
           short_intro: data.short_intro,
           quote_terms: data.quote_terms ?? '',
+          business_id: data.business_id ?? '',
         });
       } catch {
         toast.error('Failed to load sender profile');
@@ -476,6 +478,12 @@ const SettingsView: React.FC = () => {
               </label>
               <input id="sender-phone" value={form.phone ?? ''} onChange={update('phone')} maxLength={40} className={inputClass} />
             </div>
+          </div>
+          <div>
+            <label htmlFor="sender-business-id" className={labelClass}>
+              Business ID (Y-tunnus)
+            </label>
+            <input id="sender-business-id" value={form.business_id ?? ''} onChange={update('business_id')} maxLength={20} className={inputClass} placeholder="1234567-8" />
           </div>
           <div>
             <label htmlFor="sender-terms" className={labelClass}>

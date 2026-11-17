@@ -1259,6 +1259,7 @@ def upsert_sender_profile(
     profile.phone = _clean(data.phone)
     profile.website = _clean(data.website)
     profile.quote_terms = _clean(data.quote_terms)
+    profile.business_id = _clean(data.business_id)
     profile.updated_at = utc_now()
     session.add(profile)
     session.commit()
@@ -3822,6 +3823,7 @@ def _seller_snapshot(profile: SenderProfile) -> dict[str, Optional[str]]:
     return {
         "brand": profile.brand_name, "company": profile.company_name, "name": profile.name,
         "phone": profile.phone, "website": display_website(profile.website) if profile.website else None,
+        "business_id": profile.business_id,
     }
 
 

@@ -324,3 +324,52 @@ def test_quote_link_tenant_isolation(client_a: TestClient, client_b: TestClient,
     lead = make_lead()
     _send(client_a, _quote(client_a, lead["id"], [(_item(client_a)["id"], 1)])["id"])
     assert client_b.post(f"/leads/{lead['id']}/email/quote-link", json={"body": "x"}).status_code == 404
+
+
+# --- Y-tunnus ---
+
+def _profile(sender_profile: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    return {"name": sender_profile["name"], "short_intro": sender_profile["short_intro"], **extra}
+
+
+def test_business_id_saved_trimmed_and_shown_on_page(
+    client_a: TestClient, make_lead: Any, store: OpensStore, sender_profile: dict[str, Any]
+) -> None:
+    saved = client_a.put("/sender-profile", json=_profile(sender_profile, business_id="  1234567-8 ")).json()
+    assert saved["business_id"] == "1234567-8"
+    assert client_a.put("/sender-profile", json=_profile(sender_profile, business_id="x" * 21)).status_code == 422
+    lead = make_lead()
+    sent = _send(client_a, _quote(client_a, lead["id"], [(_item(client_a)["id"], 1)])["id"])
+    token = sent["public_url"].rsplit("/", 1)[1]
+    html = store.objects[f"quotes/{token}.html"][0].decode()
+    assert "Y-tunnus: 1234567-8" in html
+
+
+def test_business_id_is_in_content_hash(
+    client_a: TestClient, make_lead: Any, store: OpensStore, sender_profile: dict[str, Any]
+) -> None:
+    item = _item(client_a)
+    hashes = []
+    for bid in (None, "1234567-8"):
+        client_a.put("/sender-profile", json=_profile(sender_profile, business_id=bid))
+        lead = make_lead(name=f"L{bid}")
+        hashes.append(_digest(store, _send(client_a, _quote(client_a, lead["id"], [(item["id"], 1)])["id"])))
+    assert hashes[0] != hashes[1]
+
+
+def test_empty_business_id_not_shown(
+    client_a: TestClient, make_lead: Any, store: OpensStore, sender_profile: dict[str, Any]
+) -> None:
+    saved = client_a.put("/sender-profile", json=_profile(sender_profile, business_id="   ")).json()
+    assert saved["business_id"] is None
+    lead = make_lead()
+    sent = _send(client_a, _quote(client_a, lead["id"], [(_item(client_a)["id"], 1)])["id"])
+    assert "Y-tunnus" not in store.objects[f"quotes/{sent['public_url'].rsplit('/', 1)[1]}.html"][0].decode()
+
+
+def test_business_id_tenant_isolation(client_a: TestClient, client_b: TestClient, sender_profile: dict[str, Any]) -> None:
+    client_a.put("/sender-profile", json=_profile(sender_profile, business_id="1234567-8"))
+    assert client_b.get("/sender-profile").status_code == 404
+    other = client_b.put("/sender-profile", json=_profile(sender_profile)).json()
+    assert other["business_id"] is None
+    assert client_a.get("/sender-profile").json()["business_id"] == "1234567-8"
