@@ -16,7 +16,21 @@
  * Avaukset: onnistunut demon GET kirjataan R2-avaimeen opens/<polku>/<10 min ämpäri>-<laite> (backend
  * hakee ne S3-API:lla). Vain aika (objektin LastModified) ja laite, ei IP:tä, UA:ta eikä maata.
  * Ei kirjata: ?preview=1 (omat avaukset), HEAD, botit ja linkkiesikatselut, prefetch. Kirjoitus ctx.waitUntilissa.
+ *
+ * Tarjoussivut (src/quote.ts): GET /q/<token>, POST /q/<token>/accept, GET /q/quote.js. Avaukset samalla
+ * mekanismilla avaimeen opens/q-<token>/<ämpäri>-<laite>.
  */
+import {
+  QUOTE_CSP,
+  QUOTE_JS,
+  QUOTE_PATH_RE,
+  acceptanceKey,
+  handleAccept,
+  parseAcceptance,
+  quoteKey,
+  readText,
+  withAcceptance,
+} from './quote.ts';
 
 // Minimaaliset R2-tyypit (ei @cloudflare/workers-types -riippuvuutta)
 export interface DemoObject {
@@ -24,9 +38,15 @@ export interface DemoObject {
   customMetadata?: Record<string, string>;
 }
 
+export interface PutOptions {
+  onlyIf?: { etagDoesNotMatch?: string };
+  httpMetadata?: { contentType?: string };
+}
+
 export interface DemoBucket {
   get(key: string): Promise<DemoObject | null>;
-  put(key: string, value: string): Promise<unknown>;
+  // Palauttaa null, jos onlyIf-ehto ei täyty
+  put(key: string, value: string, options?: PutOptions): Promise<unknown>;
 }
 
 export interface Ctx {
@@ -125,17 +145,61 @@ export function isExpired(metadata: Record<string, string> | undefined, now: Dat
   return !Number.isNaN(expires) && expires <= now.getTime();
 }
 
+async function handleQuote(
+  request: Request,
+  env: Env,
+  quotePath: string,
+  now: Date,
+  ctx: Ctx | undefined,
+  url: URL,
+): Promise<Response> {
+  const match = QUOTE_PATH_RE.exec(quotePath);
+  if (!match) return textResponse(404, 'Not found');
+  const token = match[1];
+  const headers = { ...SECURITY_HEADERS, 'Content-Security-Policy': QUOTE_CSP };
+  if (match[2]) {
+    return request.method === 'POST' ? handleAccept(request, env.DEMOS, token, now, headers) : textResponse(405, 'Method not allowed');
+  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') return textResponse(405, 'Method not allowed');
+
+  const object = await env.DEMOS.get(quoteKey(token));
+  if (object === null) return textResponse(404, 'Not found');
+  const acceptanceObject = await env.DEMOS.get(acceptanceKey(token));
+  const acceptance = acceptanceObject === null ? null : parseAcceptance(await readText(acceptanceObject));
+  // Hyväksytty tarjous pysyy nähtävillä vanhenemisen jälkeenkin, muuten vanhentunut -> 410
+  if (acceptance === null && isExpired(object.customMetadata, now)) {
+    return textResponse(410, 'Tämä tarjous ei ole enää voimassa.');
+  }
+  if (ctx && shouldRecordOpen(request, url)) {
+    ctx.waitUntil(env.DEMOS.put(openKey(`q-${token}`, deviceType(request.headers), now), '').catch(() => undefined));
+  }
+  let body: ReadableStream | string | Uint8Array = object.body;
+  if (acceptance !== null) body = withAcceptance(await readText(object), acceptance);
+  return new Response(request.method === 'HEAD' ? null : body, {
+    status: 200,
+    headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
 export async function handleRequest(
   request: Request,
   env: Env,
   now: Date = new Date(),
   ctx?: Ctx,
 ): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const trimmed = path.replace(/^\/+|\/+$/g, '');
+  if (trimmed === 'q/quote.js' && (request.method === 'GET' || request.method === 'HEAD')) {
+    return new Response(request.method === 'HEAD' ? null : QUOTE_JS, {
+      status: 200,
+      headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+  if (trimmed.startsWith('q/')) return handleQuote(request, env, trimmed, now, ctx, url);
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return textResponse(405, 'Method not allowed');
   }
-  const url = new URL(request.url);
-  const path = url.pathname;
   if (path === '/robots.txt') {
     return textResponse(200, 'User-agent: *\nDisallow: /\n');
   }
