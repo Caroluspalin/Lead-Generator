@@ -26,6 +26,8 @@ import urllib3
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.utils.signals import extract_copyright_year
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "AgencyHunter"
@@ -71,6 +73,7 @@ class SitePage:
 class SiteScan:
     pages: list[SitePage]
     blocked: list[str]  # robots.txt:n estämät osoitteet (lokiin ja testeihin)
+    copyright_year: Optional[int] = None  # etusivun ©-vuosi (signals.extract_copyright_year)
 
     @property
     def homepage_text(self) -> Optional[str]:
@@ -288,6 +291,12 @@ def find_subpages(soup: BeautifulSoup, base_url: str) -> list[tuple[str, str]]:
     return sorted(found.items(), key=lambda kv: order.index(kv[0]))
 
 
+def fetch_copyright_year(website: str) -> Optional[int]:
+    """Yksi etusivun GET (julkinen osoite, uudelleenohjaukset tarkistettu) pelkän ©-vuoden lukuun."""
+    soup = _html(_get(_with_scheme(website.strip())))
+    return extract_copyright_year(soup) if soup else None
+
+
 def scan_site(website: str) -> Optional[SiteScan]:
     """Etusivu + enintään 3 alasivua. None jos etusivua ei saa (estetty, ei vastaa, ei tekstiä).
 
@@ -308,6 +317,8 @@ def scan_site(website: str) -> Optional[SiteScan]:
     if soup is None or home_response is None:
         return None
     final_url = home_response.url or base
+    # Ennen _page_textiä: se poistaa footerin, jossa ©-vuosi yleensä on
+    copyright_year = extract_copyright_year(soup)
     subpages = find_subpages(soup, final_url)
     home_text = _page_text(soup)
     pages: list[SitePage] = []
@@ -327,7 +338,7 @@ def scan_site(website: str) -> Optional[SiteScan]:
             pages.append(SitePage(kind, response.url or url, text))
     if blocked:
         logger.info(f"Sivuston skannaus: robots.txt estää {len(blocked)} alasivua ({final_url})")
-    return SiteScan(pages=pages, blocked=blocked)
+    return SiteScan(pages=pages, blocked=blocked, copyright_year=copyright_year)
 
 
 # --- AI:n vastauksen tarkistus ---
