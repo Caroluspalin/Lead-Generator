@@ -127,6 +127,8 @@
   - `PlaceStatus` (seen / in_pipeline / dismissed, vain place_id + tila, migraatio `cd994575ba52`); Hylkää hakutuloksissa ja pipelinessa, Asetuksissa hylättyjen lista ja palautus. Pipelinessa olevat eivät enää näy hakutuloksissa
   - Laajennettu Deep Scan osittain toimiville sivuille (robots.txt, viive, etusivu + max 3 alasivua): palvelut, hinnat ja esittely tarkistettuina `Lead.website_facts`iin (migraatio `abdec4f1ad33`). Demo käyttää niitä ensisijaisesti; hinnat vain omalta sivulta merkinnällä "Hinnat nykyiseltä sivultanne"; kuvat edelleen Unsplashista. Sähköpostiin "Tein luonnoksen nykyisten tietojenne pohjalta"
 
+- **Laajennus A (2026-11-17)**: Diilin arvo ja ylläpito: `Lead.deal_value` ja `recurring_monthly` (migraatio `7c448c96a69d`), Value/Maintenance-rivit pipeline-kortilla, vaiheen summa välilehdellä, Hired-vaiheen ylläpito yhteensä €/kk
+
 ## Seuraavaksi
 
 
