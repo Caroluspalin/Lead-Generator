@@ -48,6 +48,10 @@ class FakeStore:
     def exists(self, key: str) -> bool:
         return key in self.objects
 
+    def get(self, key: str) -> Optional[bytes]:
+        found = self.objects.get(key)
+        return found[0] if found else None
+
     def delete(self, key: str) -> None:
         if self.fail_delete:
             raise RuntimeError("R2 down")

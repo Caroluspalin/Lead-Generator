@@ -88,6 +88,73 @@ class DemoOpen(SQLModel, table=True):
     slot: int
 
 
+# Tarjouksen tila. superseded = korvattu uudemmalla lähetetyllä versiolla (ei hyväksyttävissä)
+QUOTE_STATUSES = ["draft", "sent", "accepted", "superseded"]
+
+
+class ServiceCatalogItem(SQLModel, table=True):
+    # Palvelukatalogi (Settings): ainoa hintojen lähde. Hinnat alvittomina senteissä, alv-kanta sadasosaprosentteina (2550 = 25,5 %)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    name: str
+    description: Optional[str] = None
+    unit_price_cents: int
+    vat_rate_bp: int
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class Quote(SQLModel, table=True):
+    # Tarjousversio liidille. Lähetetty sisältö on lukittu: muutos = uusi versio (version + 1).
+    __table_args__ = (UniqueConstraint("lead_id", "version", name="uq_quote_lead_version"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    lead_id: int = Field(index=True)
+    version: int = 1
+    status: str = Field(default="draft", index=True)
+    public_token: str = Field(index=True, unique=True)
+    valid_days: int = 30
+    valid_until: Optional[datetime] = None
+    # Lähetyshetken tilannekuva (sama sisältö kuin sivulla ja tiivisteessä)
+    terms: Optional[str] = None
+    seller_json: Optional[str] = None
+    net_cents: int = 0
+    vat_cents: int = 0
+    gross_cents: int = 0
+    content_hash: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    sent_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    accepted_name: Optional[str] = None
+    # Piirretty allekirjoitus PNG data-URL:ina (Workerin tallentama)
+    signature: Optional[str] = None
+
+
+class QuoteLine(SQLModel, table=True):
+    # Kopio katalogirivistä tarjouksen luontihetkellä: katalogin muutos ei muuta tarjousta
+    id: Optional[int] = Field(default=None, primary_key=True)
+    quote_id: int = Field(index=True)
+    user_id: str = Field(index=True)
+    position: int
+    name: str
+    description: Optional[str] = None
+    unit_price_cents: int
+    quantity: int = 1
+    vat_rate_bp: int
+
+
+class QuoteOpen(SQLModel, table=True):
+    # Tarjoussivun avaus (sama R2-mekanismi kuin DemoOpen)
+    __table_args__ = (UniqueConstraint("quote_id", "slot", "device", name="uq_quoteopen_slot"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    quote_id: int = Field(index=True)
+    user_id: str = Field(index=True)
+    opened_at: datetime
+    device: str
+    slot: int
+
+
 # Sarjan tila: draft = ei vielä hyväksytty (mitään ei lähde), active = hyväksytty, stopped / replied / completed = päättynyt
 SEQUENCE_STATUSES = ["draft", "active", "stopped", "replied", "completed"]
 OPEN_SEQUENCE_STATUSES = ["draft", "active"]
@@ -152,6 +219,8 @@ class SenderProfile(SQLModel, table=True):
     brand_name: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None  # portfolio
+    # Tarjouksen ehdot (maksuehto, toimitusaika jne.) vapaana tekstinä, käyttäjän kirjoittama. Tyhjä = ei ehto-osiota
+    quote_terms: Optional[str] = None
     short_intro: str  # esim. "teen nettisivuja paikallisille yrityksille Espoossa"
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -163,6 +232,7 @@ class SenderProfileUpdate(SQLModel):
     phone: Optional[str] = Field(default=None, max_length=40)
     website: Optional[str] = Field(default=None, max_length=200)
     short_intro: str = Field(min_length=5, max_length=200)
+    quote_terms: Optional[str] = Field(default=None, max_length=3000)
 
 
 class LeadBase(SQLModel):
@@ -241,6 +311,13 @@ class LeadRead(LeadBase):
     followup_status: Optional[str] = None
     followup_next_at: Optional[datetime] = None
     followup_replied_at: Optional[datetime] = None
+    # Lasketaan Quote-taulusta: liidin uusin tarjousversio ja sen avaukset
+    quote_id: Optional[int] = None
+    quote_version: Optional[int] = None
+    quote_status: Optional[str] = None
+    quote_net_cents: Optional[int] = None
+    quote_open_count: int = 0
+    quote_last_opened_at: Optional[datetime] = None
 
 class LeadCreate(SQLModel):
     name: str

@@ -3,6 +3,8 @@ import asyncio
 import csv
 import hashlib
 import io
+import json
+import secrets
 import logging
 import re
 import threading
@@ -28,6 +30,7 @@ import requests
 from .database import create_db_and_tables, get_session
 from .models import (
     Demo, DemoOpen, FollowUpSequence, FollowUpStep, Lead, LeadCreate, LeadRead, LeadUpdate, PlaceStatus, SearchHistoryEntry, EmailDraft, SenderProfile, SenderProfileUpdate,
+    Quote, QuoteLine, QuoteOpen, ServiceCatalogItem,
     utc_now,
 )
 from .utils import unsplash
@@ -102,7 +105,7 @@ from .utils.timma import (
 )
 from .utils.contact_finder import find_contact_email
 from .utils.signals import SLOW_LCP_SECONDS, SpeedTestUnavailable, is_few_reviews, measure_pagespeed
-from . import followups, replies
+from . import followups, quotes, replies
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
 from .text_quality import FORBIDDEN_PATTERNS, PRICE_RE, find_forbidden_words, word_count  # noqa: F401
@@ -1034,6 +1037,8 @@ def read_leads(
         if not _is_expired(demo)
     }
     opens = _open_stats(session, user.id)
+    latest_quotes = _latest_quotes(session, user.id)
+    quote_opens = _quote_open_stats(session, user.id)
     sequences = _followup_overview(session, user.id)
     return [
         LeadRead.model_validate(
@@ -1045,6 +1050,7 @@ def read_leads(
                 "demo_published": lead.id in published,
                 "demo_open_count": opens[lead.id][0] if lead.id in opens else 0,
                 "demo_last_opened_at": opens[lead.id][1] if lead.id in opens else None,
+                **_quote_fields(latest_quotes.get(lead.id), quote_opens),
             },
         )
         for lead in leads
@@ -1062,6 +1068,13 @@ def _open_stats(session: Session, user_id: str) -> dict[int, tuple[int, datetime
     return {lead_id: (count, last) for lead_id, count, last in rows}
 
 
+class AcceptedQuoteOut(BaseModel):
+    lead_id: int
+    name: str
+    quote_id: int
+    moved_to_hired: bool
+
+
 class NewOpenOut(BaseModel):
     lead_id: int
     name: str
@@ -1070,6 +1083,8 @@ class NewOpenOut(BaseModel):
 
 class SyncOpensOut(BaseModel):
     new_opens: list[NewOpenOut]
+    new_quote_opens: list[NewOpenOut] = []
+    accepted_quotes: list[AcceptedQuoteOut] = []
 
 
 # Palvelinpuolen throttle: R2-listaus enintään kerran / 30 s / käyttäjä
@@ -1092,6 +1107,8 @@ async def sync_opens(
 
     demos = session.exec(select(Demo).where(Demo.user_id == user.id)).all()
     by_path = {demo_path(demo): demo for demo in demos}
+    quote_rows = session.exec(select(Quote).where(Quote.user_id == user.id)).all()
+    quotes_by_path = {quotes.open_path(q.public_token): q for q in quote_rows if q.status != "draft"}
     try:
         listed = await asyncio.to_thread(store.list_objects, OPENS_PREFIX)
     except Exception as e:
@@ -1101,8 +1118,23 @@ async def sync_opens(
 
     new_counts: dict[int, int] = {}
     handled: list[str] = []
+    new_quote_counts: dict[int, int] = {}
     for key, modified in listed:
         record = parse_open_key(key, modified)
+        quote = quotes_by_path.get(record.path) if record else None
+        if record is not None and quote is not None and quote.id is not None:
+            if session.exec(
+                select(QuoteOpen.id).where(
+                    QuoteOpen.quote_id == quote.id, QuoteOpen.slot == record.slot, QuoteOpen.device == record.device
+                )
+            ).first() is None:
+                session.add(QuoteOpen(
+                    quote_id=quote.id, user_id=user.id, opened_at=record.opened_at, device=record.device,
+                    slot=record.slot,
+                ))
+                new_quote_counts[quote.lead_id] = new_quote_counts.get(quote.lead_id, 0) + 1
+            handled.append(key)
+            continue
         demo = by_path.get(record.path) if record else None
         # Toisen käyttäjän tai tuntemattoman demon avauksia ei kosketa
         if record is None or demo is None or demo.id is None:
@@ -1118,6 +1150,7 @@ async def sync_opens(
             ))
             new_counts[demo.lead_id] = new_counts.get(demo.lead_id, 0) + 1
         handled.append(key)
+    accepted = await _import_acceptances(session, store, user.id, quote_rows)
     session.commit()
     for key in handled:
         try:
@@ -1126,13 +1159,21 @@ async def sync_opens(
             # Seuraava tuonti ohittaa saman ämpärin, joten pelkkä lokitus riittää
             logger.warning(f"Avausobjektin poisto epäonnistui ({key}): {e}")
 
+    lead_ids = list(set(new_counts) | set(new_quote_counts))
     names = {
         lead.id: lead.name
-        for lead in session.exec(select(Lead).where(Lead.user_id == user.id, Lead.id.in_(list(new_counts)))).all()
-    } if new_counts else {}
-    return SyncOpensOut(new_opens=[
-        NewOpenOut(lead_id=lead_id, name=names.get(lead_id, ""), count=count) for lead_id, count in new_counts.items()
-    ])
+        for lead in session.exec(select(Lead).where(Lead.user_id == user.id, Lead.id.in_(lead_ids))).all()
+    } if lead_ids else {}
+    return SyncOpensOut(
+        new_opens=[
+            NewOpenOut(lead_id=lead_id, name=names.get(lead_id, ""), count=count) for lead_id, count in new_counts.items()
+        ],
+        new_quote_opens=[
+            NewOpenOut(lead_id=lead_id, name=names.get(lead_id, ""), count=count)
+            for lead_id, count in new_quote_counts.items()
+        ],
+        accepted_quotes=accepted,
+    )
 
 
 def _delete_opens(session: Session, demo: Demo) -> None:
@@ -1217,6 +1258,7 @@ def upsert_sender_profile(
     profile.brand_name = _clean(data.brand_name)
     profile.phone = _clean(data.phone)
     profile.website = _clean(data.website)
+    profile.quote_terms = _clean(data.quote_terms)
     profile.updated_at = utc_now()
     session.add(profile)
     session.commit()
@@ -1391,6 +1433,8 @@ def _remove_lead(session: Session, lead: Lead) -> None:
         _take_offline(demo)
         _delete_opens(session, demo)
         session.delete(demo)
+    for quote in session.exec(select(Quote).where(Quote.lead_id == lead.id, Quote.user_id == lead.user_id)).all():
+        _delete_quote_rows(session, quote)
     for step in session.exec(select(FollowUpStep).where(FollowUpStep.lead_id == lead.id, FollowUpStep.user_id == lead.user_id)).all():
         session.delete(step)
     for sequence in session.exec(select(FollowUpSequence).where(FollowUpSequence.lead_id == lead.id, FollowUpSequence.user_id == lead.user_id)).all():
@@ -3448,3 +3492,428 @@ def stop_followups(
     followups.stop_sequence(session, sequence, "manual")
     session.commit()
     return _followup_out(session, sequence)
+
+
+# --- Tarjous (palvelukatalogi, tarjousversiot, hyväksyntä) ---
+
+class CatalogItemIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    unit_price_cents: int = Field(ge=0, le=quotes.MAX_UNIT_PRICE_CENTS)
+    vat_rate_bp: int = Field(ge=0, le=quotes.MAX_VAT_BP)
+
+
+class QuoteLineIn(BaseModel):
+    catalog_item_id: int
+    quantity: int = Field(default=1, ge=1, le=quotes.MAX_QUANTITY)
+
+
+class QuoteIn(BaseModel):
+    lines: list[QuoteLineIn] = Field(min_length=1, max_length=quotes.MAX_LINES)
+    valid_days: int = Field(default=30, ge=1, le=365)
+
+
+class QuoteLineOut(BaseModel):
+    name: str
+    description: Optional[str]
+    unit_price_cents: int
+    quantity: int
+    vat_rate_bp: int
+
+
+class QuoteOut(BaseModel):
+    id: int
+    lead_id: int
+    version: int
+    status: str
+    valid_days: int
+    valid_until: Optional[datetime]
+    net_cents: int
+    vat_cents: int
+    gross_cents: int
+    sent_at: Optional[datetime]
+    accepted_at: Optional[datetime]
+    accepted_name: Optional[str]
+    public_url: Optional[str]
+    open_count: int
+    last_opened_at: Optional[datetime]
+    lines: list[QuoteLineOut]
+
+
+def _catalog_item(session: Session, item_id: int, user: AuthUser) -> ServiceCatalogItem:
+    item = session.get(ServiceCatalogItem, item_id)
+    if item is None or item.user_id != user.id:
+        raise HTTPException(404, "Catalog item not found")
+    return item
+
+
+@app.get("/service-catalog", response_model=list[ServiceCatalogItem])
+def list_service_catalog(
+    session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> list[ServiceCatalogItem]:
+    return list(session.exec(
+        select(ServiceCatalogItem).where(ServiceCatalogItem.user_id == user.id).order_by(ServiceCatalogItem.id)  # type: ignore[arg-type]
+    ).all())
+
+
+@app.post("/service-catalog", response_model=ServiceCatalogItem)
+def create_catalog_item(
+    data: CatalogItemIn, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> ServiceCatalogItem:
+    item = ServiceCatalogItem(
+        user_id=user.id, name=data.name.strip(), description=_clean(data.description),
+        unit_price_cents=data.unit_price_cents, vat_rate_bp=data.vat_rate_bp,
+    )
+    if not item.name:
+        raise HTTPException(422, "name is required")
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+@app.put("/service-catalog/{item_id}", response_model=ServiceCatalogItem)
+def update_catalog_item(
+    item_id: int, data: CatalogItemIn, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> ServiceCatalogItem:
+    # Jo luodut tarjoukset käyttävät rivikopioita, joten muutos ei vaikuta niihin
+    item = _catalog_item(session, item_id, user)
+    item.name = data.name.strip()
+    if not item.name:
+        raise HTTPException(422, "name is required")
+    item.description = _clean(data.description)
+    item.unit_price_cents, item.vat_rate_bp = data.unit_price_cents, data.vat_rate_bp
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+@app.delete("/service-catalog/{item_id}")
+def delete_catalog_item(
+    item_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> dict[str, bool]:
+    session.delete(_catalog_item(session, item_id, user))
+    session.commit()
+    return {"ok": True}
+
+
+def _quote_public_url(quote: Quote) -> Optional[str]:
+    config = get_r2_config()
+    if quote.status == "draft" or config is None:
+        return None
+    return config.public_url(f"{quotes.QUOTE_PATH_PREFIX}{quote.public_token}")
+
+
+def _quote_lines(session: Session, quote: Quote) -> list[QuoteLine]:
+    return list(session.exec(
+        select(QuoteLine).where(QuoteLine.quote_id == quote.id, QuoteLine.user_id == quote.user_id)
+        .order_by(QuoteLine.position)  # type: ignore[arg-type]
+    ).all())
+
+
+def _line_inputs(rows: list[QuoteLine]) -> list[quotes.LineInput]:
+    return [
+        quotes.LineInput(r.name, r.description, r.unit_price_cents, r.quantity, r.vat_rate_bp) for r in rows
+    ]
+
+
+def _quote_out(session: Session, quote: Quote) -> QuoteOut:
+    count, last = 0, None
+    if quote.id is not None:
+        count, last = session.exec(
+            select(func.count(QuoteOpen.id), func.max(QuoteOpen.opened_at))
+            .where(QuoteOpen.quote_id == quote.id, QuoteOpen.user_id == quote.user_id)
+        ).one()
+    return QuoteOut(
+        id=quote.id or 0, lead_id=quote.lead_id, version=quote.version, status=quote.status,
+        valid_days=quote.valid_days, valid_until=quote.valid_until, net_cents=quote.net_cents,
+        vat_cents=quote.vat_cents, gross_cents=quote.gross_cents, sent_at=quote.sent_at,
+        accepted_at=quote.accepted_at, accepted_name=quote.accepted_name, public_url=_quote_public_url(quote),
+        open_count=count, last_opened_at=last,
+        lines=[QuoteLineOut(**row.model_dump(include={"name", "description", "unit_price_cents", "quantity", "vat_rate_bp"}))
+               for row in _quote_lines(session, quote)],
+    )
+
+
+def _owned_quote(session: Session, quote_id: int, user: AuthUser) -> Quote:
+    quote = session.get(Quote, quote_id)
+    if quote is None or quote.user_id != user.id:
+        raise HTTPException(404, "Quote not found")
+    return quote
+
+
+def _require_draft(quote: Quote) -> None:
+    # Lähetetty ja hyväksytty sisältö on lukittu: muutos tehdään uutena versiona
+    if quote.status != "draft":
+        raise HTTPException(409, "Quote is locked, create a new version instead")
+
+
+def _set_quote_lines(session: Session, quote: Quote, data: QuoteIn, user: AuthUser) -> None:
+    """Hinnat vain katalogista: rivi = katalogirivin kopio + määrä. Katalogin ulkopuolisia hintoja ei hyväksytä."""
+    items: list[ServiceCatalogItem] = []
+    for line in data.lines:
+        items.append(_catalog_item(session, line.catalog_item_id, user))
+    for old in _quote_lines(session, quote):
+        session.delete(old)
+    session.flush()
+    for position, (line, item) in enumerate(zip(data.lines, items)):
+        session.add(QuoteLine(
+            quote_id=quote.id or 0, user_id=user.id, position=position, name=item.name,
+            description=item.description, unit_price_cents=item.unit_price_cents, quantity=line.quantity,
+            vat_rate_bp=item.vat_rate_bp,
+        ))
+    quote.valid_days = data.valid_days
+    session.flush()
+    totals = quotes.compute_totals([
+        quotes.LineInput(i.name, i.description, i.unit_price_cents, l.quantity, i.vat_rate_bp)
+        for l, i in zip(data.lines, items)
+    ])
+    quote.net_cents, quote.vat_cents, quote.gross_cents = totals.net_cents, totals.vat_cents, totals.gross_cents
+
+
+def _next_version(session: Session, lead: Lead) -> int:
+    latest = session.exec(select(func.max(Quote.version)).where(Quote.lead_id == lead.id, Quote.user_id == lead.user_id)).one()
+    return (latest or 0) + 1
+
+
+@app.get("/leads/{lead_id}/quotes", response_model=list[QuoteOut])
+def list_quotes(
+    lead_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> list[QuoteOut]:
+    lead = session.get(Lead, lead_id)
+    if not lead or lead.user_id != user.id:
+        raise HTTPException(404, "Lead not found")
+    rows = session.exec(
+        select(Quote).where(Quote.lead_id == lead_id, Quote.user_id == user.id).order_by(Quote.version.desc())  # type: ignore[attr-defined]
+    ).all()
+    return [_quote_out(session, q) for q in rows]
+
+
+@app.post("/leads/{lead_id}/quotes", response_model=QuoteOut)
+def create_quote(
+    lead_id: int, data: QuoteIn, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> QuoteOut:
+    lead = _get_contactable_lead(session, lead_id, user)
+    quote = Quote(
+        user_id=user.id, lead_id=lead_id, version=_next_version(session, lead),
+        public_token=secrets.token_urlsafe(32),
+    )
+    session.add(quote)
+    session.flush()
+    _set_quote_lines(session, quote, data, user)
+    session.add(quote)
+    session.commit()
+    session.refresh(quote)
+    return _quote_out(session, quote)
+
+
+@app.put("/quotes/{quote_id}", response_model=QuoteOut)
+def update_quote(
+    quote_id: int, data: QuoteIn, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> QuoteOut:
+    quote = _owned_quote(session, quote_id, user)
+    _require_draft(quote)
+    _set_quote_lines(session, quote, data, user)
+    session.add(quote)
+    session.commit()
+    session.refresh(quote)
+    return _quote_out(session, quote)
+
+
+@app.post("/quotes/{quote_id}/new-version", response_model=QuoteOut)
+def new_quote_version(
+    quote_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> QuoteOut:
+    """Uusi luonnos vanhan tarjouksen riveistä (hinnat kopioituna sellaisenaan, ei katalogista uudelleen)."""
+    source = _owned_quote(session, quote_id, user)
+    lead = _get_contactable_lead(session, source.lead_id, user)
+    quote = Quote(
+        user_id=user.id, lead_id=lead.id or 0, version=_next_version(session, lead),
+        public_token=secrets.token_urlsafe(32), valid_days=source.valid_days,
+    )
+    session.add(quote)
+    session.flush()
+    rows = _quote_lines(session, source)
+    for row in rows:
+        session.add(QuoteLine(
+            quote_id=quote.id or 0, user_id=user.id, position=row.position, name=row.name,
+            description=row.description, unit_price_cents=row.unit_price_cents, quantity=row.quantity,
+            vat_rate_bp=row.vat_rate_bp,
+        ))
+    totals = quotes.compute_totals(_line_inputs(rows))
+    quote.net_cents, quote.vat_cents, quote.gross_cents = totals.net_cents, totals.vat_cents, totals.gross_cents
+    session.add(quote)
+    session.commit()
+    session.refresh(quote)
+    return _quote_out(session, quote)
+
+
+def _delete_quote_rows(session: Session, quote: Quote) -> None:
+    for row in _quote_lines(session, quote):
+        session.delete(row)
+    for opened in session.exec(select(QuoteOpen).where(QuoteOpen.quote_id == quote.id, QuoteOpen.user_id == quote.user_id)).all():
+        session.delete(opened)
+    if quote.status != "draft":
+        store = get_object_store()
+        if store is not None and quote.status != "accepted":
+            try:
+                store.delete(quotes.quote_object_key(quote.public_token))
+            except Exception as e:
+                logger.error(f"Tarjouksen poisto R2:sta epäonnistui ({quote.public_token}): {e}")
+    session.delete(quote)
+
+
+@app.delete("/quotes/{quote_id}")
+def delete_quote(
+    quote_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> dict[str, bool]:
+    quote = _owned_quote(session, quote_id, user)
+    _require_draft(quote)
+    _delete_quote_rows(session, quote)
+    session.commit()
+    return {"ok": True}
+
+
+def _seller_snapshot(profile: SenderProfile) -> dict[str, Optional[str]]:
+    return {
+        "brand": profile.brand_name, "company": profile.company_name, "name": profile.name,
+        "phone": profile.phone, "website": display_website(profile.website) if profile.website else None,
+    }
+
+
+def _render_quote(quote: Quote, lead_name: str, rows: list[QuoteLine], *, superseded: bool = False) -> str:
+    seller: dict[str, Optional[str]] = json.loads(quote.seller_json or "{}")
+    lines = _line_inputs(rows)
+    return quotes.render_quote_html(
+        seller=seller, recipient=lead_name, version=quote.version, sent_at=_as_utc(quote.sent_at or utc_now()),
+        valid_until=_as_utc(quote.valid_until or utc_now()), lines=lines, totals=quotes.compute_totals(lines),
+        terms=quote.terms, digest=quote.content_hash or "", superseded=superseded,
+    )
+
+
+def _publish_quote_page(store: ObjectStore, quote: Quote, html: str, state: str) -> None:
+    store.put(
+        quotes.quote_object_key(quote.public_token), html.encode("utf-8"),
+        expires_at=_as_utc(quote.valid_until) if quote.valid_until else None,
+        metadata={"content-hash": quote.content_hash or "", "state": state},
+    )
+
+
+@app.post("/quotes/{quote_id}/send", response_model=QuoteOut)
+async def send_quote(
+    quote_id: int, session: Session = Depends(get_session), user: AuthUser = Depends(verify_token)
+) -> QuoteOut:
+    """Julkaisee tarjoussivun R2:een ja lukitsee sisällön. Liidin deal_value = alviton summa; vanhat versiot
+    korvataan (sivu näyttää, ettei niitä voi enää hyväksyä). Hyväksyttyyn versioon ei kosketa."""
+    quote = _owned_quote(session, quote_id, user)
+    _require_draft(quote)
+    lead = _get_contactable_lead(session, quote.lead_id, user)
+    profile = _require_sender_profile(session, user)
+    store = get_object_store()
+    if store is None:
+        raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")
+    rows = _quote_lines(session, quote)
+    if not rows:
+        raise HTTPException(422, "Quote has no lines")
+
+    now = utc_now()
+    lines = _line_inputs(rows)
+    totals = quotes.compute_totals(lines)
+    quote.sent_at, quote.valid_until = now, now + timedelta(days=quote.valid_days)
+    quote.seller_json = json.dumps(_seller_snapshot(profile), ensure_ascii=False)
+    quote.terms = (profile.quote_terms or "").strip() or None
+    quote.net_cents, quote.vat_cents, quote.gross_cents = totals.net_cents, totals.vat_cents, totals.gross_cents
+    quote.content_hash = quotes.content_hash(
+        version=quote.version, recipient=lead.name, seller=json.loads(quote.seller_json), lines=lines,
+        totals=totals, terms=quote.terms, valid_until=quote.valid_until,
+    )
+    try:
+        await asyncio.to_thread(_publish_quote_page, store, quote, _render_quote(quote, lead.name, rows), "open")
+    except Exception as e:
+        raise HTTPException(502, f"R2 upload failed: {e}")
+    quote.status = "sent"
+    session.add(quote)
+
+    older = session.exec(
+        select(Quote).where(Quote.lead_id == lead.id, Quote.user_id == user.id, Quote.id != quote.id, Quote.status == "sent")
+    ).all()
+    for old in older:
+        old.status = "superseded"
+        session.add(old)
+        try:
+            page = _render_quote(old, lead.name, _quote_lines(session, old), superseded=True)
+            await asyncio.to_thread(_publish_quote_page, store, old, page, "superseded")
+        except Exception as e:
+            # Vanha sivu jää auki R2:ssa, mutta backend ei tuo sen hyväksyntää uudelle versiolle
+            logger.error(f"Vanhan tarjoussivun päivitys epäonnistui ({old.public_token}): {e}")
+    lead.deal_value = quotes.deal_value_euros(totals.net_cents)
+    lead.updated_at = now
+    session.add(lead)
+    session.commit()
+    session.refresh(quote)
+    return _quote_out(session, quote)
+
+
+async def _import_acceptances(
+    session: Session, store: ObjectStore, user_id: str, rows: list[Quote]
+) -> list[AcceptedQuoteOut]:
+    """Hakee Workerin R2:een kirjoittamat hyväksynnät avoimille tarjouksille. Objektit jätetään R2:een todisteeksi."""
+    open_quotes = [q for q in rows if q.status in ("sent", "superseded") and q.id is not None]
+    if not open_quotes:
+        return []
+    listed = {key for key, _ in await asyncio.to_thread(store.list_objects, quotes.ACCEPTANCE_PREFIX)}
+    accepted: list[AcceptedQuoteOut] = []
+    for quote in open_quotes:
+        key = quotes.acceptance_key(quote.public_token)
+        if key not in listed:
+            continue
+        raw = await asyncio.to_thread(store.get, key)
+        record = quotes.parse_acceptance(raw, quote.content_hash) if raw is not None else None
+        if record is None:
+            logger.warning(f"Virheellinen hyväksyntä ohitettu ({key})")
+            continue
+        lead = session.get(Lead, quote.lead_id)
+        if lead is None or lead.user_id != user_id:
+            continue
+        quote.status = "accepted"
+        quote.accepted_at, quote.accepted_name, quote.signature = record.accepted_at, record.name, record.signature
+        session.add(quote)
+        for other in rows:
+            if other.id != quote.id and other.lead_id == quote.lead_id and other.status == "sent":
+                other.status = "superseded"
+                session.add(other)
+        lead.deal_value = quotes.deal_value_euros(quote.net_cents)
+        # Rejected ja do-not-contact -liidit eivät siirry automaattisesti
+        moved = lead.pipeline_status in ("Contacted", "Proposal Received") and not lead.do_not_contact
+        if moved:
+            lead.pipeline_status = "Hired"
+        lead.updated_at = utc_now()
+        session.add(lead)
+        accepted.append(AcceptedQuoteOut(lead_id=lead.id or 0, name=lead.name, quote_id=quote.id or 0, moved_to_hired=moved))
+    return accepted
+
+
+def _latest_quotes(session: Session, user_id: str) -> dict[int, Quote]:
+    latest: dict[int, Quote] = {}
+    for quote in session.exec(select(Quote).where(Quote.user_id == user_id).order_by(Quote.version)).all():  # type: ignore[arg-type]
+        latest[quote.lead_id] = quote
+    return latest
+
+
+def _quote_open_stats(session: Session, user_id: str) -> dict[int, tuple[int, datetime]]:
+    rows = session.exec(
+        select(QuoteOpen.quote_id, func.count(QuoteOpen.id), func.max(QuoteOpen.opened_at))
+        .where(QuoteOpen.user_id == user_id).group_by(QuoteOpen.quote_id)
+    ).all()
+    return {quote_id: (count, last) for quote_id, count, last in rows}
+
+
+def _quote_fields(quote: Optional[Quote], opens: dict[int, tuple[int, datetime]]) -> dict[str, object]:
+    if quote is None:
+        return {}
+    count, last = opens.get(quote.id or 0, (0, None))
+    return {
+        "quote_id": quote.id, "quote_version": quote.version, "quote_status": quote.status,
+        "quote_net_cents": quote.net_cents, "quote_open_count": count, "quote_last_opened_at": last,
+    }
