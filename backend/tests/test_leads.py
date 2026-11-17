@@ -160,3 +160,39 @@ def test_list_leads_keeps_lead_fields(client_a: TestClient, make_lead: Any) -> N
     # Muut kentät samat kuin muissa liidivastauksissa (Lead): vain demo_published lisätty
     assert {k: v for k, v in listed.items() if k != "demo_published"} == lead
     assert listed["demo_published"] is False
+
+
+def test_deal_value_defaults_empty_and_saves(client_a: TestClient, make_lead: Any) -> None:
+    lead = make_lead()
+    assert lead["deal_value"] is None
+    assert lead["recurring_monthly"] is None
+
+    res = client_a.patch(f"/leads/{lead['id']}", json={"deal_value": 1200, "recurring_monthly": 49})
+    assert res.status_code == 200
+    assert res.json()["deal_value"] == 1200
+    assert res.json()["recurring_monthly"] == 49
+    listed = next(item for item in client_a.get("/leads").json() if item["id"] == lead["id"])
+    assert (listed["deal_value"], listed["recurring_monthly"]) == (1200, 49)
+
+
+def test_deal_value_can_be_cleared_and_partial_patch_keeps_other(client_a: TestClient, make_lead: Any) -> None:
+    lead = make_lead()
+    client_a.patch(f"/leads/{lead['id']}", json={"deal_value": 500, "recurring_monthly": 20})
+    res = client_a.patch(f"/leads/{lead['id']}", json={"deal_value": None})
+    assert res.json()["deal_value"] is None
+    assert res.json()["recurring_monthly"] == 20
+
+
+@pytest.mark.parametrize("field", ["deal_value", "recurring_monthly"])
+@pytest.mark.parametrize("value", [-1, 1_000_001, 12.5, "abc"])
+def test_deal_value_validation(client_a: TestClient, make_lead: Any, field: str, value: Any) -> None:
+    lead = make_lead()
+    res = client_a.patch(f"/leads/{lead['id']}", json={field: value})
+    assert res.status_code == 422
+    assert client_a.get("/leads").json()[0][field] is None
+
+
+def test_deal_value_limits_are_inclusive(client_a: TestClient, make_lead: Any) -> None:
+    lead = make_lead()
+    res = client_a.patch(f"/leads/{lead['id']}", json={"deal_value": 0, "recurring_monthly": 1_000_000})
+    assert res.status_code == 200

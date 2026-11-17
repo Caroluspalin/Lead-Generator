@@ -57,3 +57,11 @@ def test_b_cannot_delete_a_search_history(
     assert client_b.delete(f"/search-history/{entry_id}").status_code == 404
     assert session.exec(select(SearchHistoryEntry)).first() is not None
     assert client_a.delete(f"/search-history/{entry_id}").json() == {"ok": True}
+
+
+def test_b_cannot_set_a_lead_deal_value(client_a: TestClient, client_b: TestClient, make_lead: Any) -> None:
+    lead = make_lead()
+    res = client_b.patch(f"/leads/{lead['id']}", json={"deal_value": 999, "recurring_monthly": 9})
+    assert res.status_code == 404
+    mine = client_a.get("/leads").json()[0]
+    assert mine["deal_value"] is None and mine["recurring_monthly"] is None
