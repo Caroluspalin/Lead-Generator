@@ -133,7 +133,7 @@ def test_r2_failure_is_502_and_retryable(client_a: TestClient, store: OpensStore
 def test_not_configured_is_empty(client_a: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     main._last_opens_sync.clear()
     monkeypatch.setattr("app.main.get_object_store", lambda: None)
-    assert client_a.post("/leads/sync-opens").json() == {"new_opens": []}
+    assert client_a.post("/leads/sync-opens").json() == {"new_opens": [], "new_quote_opens": [], "accepted_quotes": []}
 
 
 def test_deleting_demo_removes_its_opens(client_a: TestClient, store: OpensStore, demo: dict[str, Any]) -> None:
