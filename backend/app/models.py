@@ -88,6 +88,60 @@ class DemoOpen(SQLModel, table=True):
     slot: int
 
 
+# Sarjan tila: draft = ei vielä hyväksytty (mitään ei lähde), active = hyväksytty, stopped / replied / completed = päättynyt
+SEQUENCE_STATUSES = ["draft", "active", "stopped", "replied", "completed"]
+OPEN_SEQUENCE_STATUSES = ["draft", "active"]
+# Askeleen tila. sending = lukittu lähetykseen (ei koskaan lähetetä uudelleen automaattisesti), needs_review = ihmisen tarkistettava
+STEP_STATUSES = ["scheduled", "sending", "sent", "stopped", "replied", "failed", "needs_review"]
+
+
+class FollowUpSequence(SQLModel, table=True):
+    # Yksi sähköpostisarja liidille: askel 0 = aloitusviesti, 1..n = seurantaviestit
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    lead_id: int = Field(index=True)
+    status: str = Field(default="draft", index=True)
+    stop_reason: Optional[str] = None  # replied / dnc / opt_out / bounced / manual / demo_expired / resent
+    approved_at: Optional[datetime] = None
+    replied_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class FollowUpStep(SQLModel, table=True):
+    # Ajastettu lähetys. message_id tallennetaan ennen SMTP-kutsua (vastausten tunnistus + tupla-esto).
+    __table_args__ = (UniqueConstraint("sequence_id", "step_no", name="uq_followupstep_seq_no"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    sequence_id: int = Field(index=True)
+    lead_id: int = Field(index=True)
+    step_no: int
+    subject: str
+    body: str
+    model: str = ""
+    # Demolinkki, jonka viesti sisältää: jos demo ei ole enää julkaistu, askel ei lähde (needs_review)
+    demo_url: Optional[str] = None
+    to_email: Optional[str] = None
+    due_at: Optional[datetime] = None
+    status: str = Field(default="scheduled", index=True)
+    message_id: Optional[str] = Field(default=None, index=True)
+    claimed_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
+    attempts: int = 0
+    last_error: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class MailboxState(SQLModel, table=True):
+    # IMAP-tilin lukukohta. Postilaatikko on koko palvelun resurssi, ei yhden käyttäjän data, joten avain on tili.
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account: str = Field(unique=True, index=True)
+    uidvalidity: Optional[int] = None
+    last_uid: int = 0
+    checked_at: Optional[datetime] = None
+
+
 class SenderProfile(SQLModel, table=True):
     # Yksi per käyttäjä: lähettäjän tiedot sähköposti- ja puhelinprompteihin + allekirjoitus
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -183,6 +237,10 @@ class LeadRead(LeadBase):
     # Laskettu DemoOpen-taulusta: liidin julkaistun demon avaukset (ei botteja, ei omia esikatseluja)
     demo_open_count: int = 0
     demo_last_opened_at: Optional[datetime] = None
+    # Laskettu FollowUpSequence-taulusta: uusimman sarjan tila ja seuraavan viestin aika
+    followup_status: Optional[str] = None
+    followup_next_at: Optional[datetime] = None
+    followup_replied_at: Optional[datetime] = None
 
 class LeadCreate(SQLModel):
     name: str

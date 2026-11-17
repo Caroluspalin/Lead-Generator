@@ -193,6 +193,31 @@ export interface Agency {
   already_saved?: boolean;
 }
 
+export type FollowUpSequenceStatus = 'draft' | 'active' | 'stopped' | 'replied' | 'completed';
+export type FollowUpStepStatus = 'scheduled' | 'sending' | 'sent' | 'stopped' | 'replied' | 'failed' | 'needs_review';
+
+export interface FollowUpStep {
+  id: number;
+  step_no: number;
+  subject: string;
+  body: string;
+  status: FollowUpStepStatus;
+  due_at: string | null;
+  sent_at: string | null;
+  last_error: string | null;
+}
+
+export interface FollowUpSequence {
+  id: number;
+  lead_id: number;
+  status: FollowUpSequenceStatus;
+  stop_reason: string | null;
+  approved_at: string | null;
+  replied_at: string | null;
+  send_enabled: boolean;
+  steps: FollowUpStep[];
+}
+
 // Tallennettu liidi backendissa (vastaa Lead-taulua)
 export interface SavedAgency {
   id: number;
@@ -220,6 +245,10 @@ export interface SavedAgency {
   // Julkaistun demon avaukset (vain GET /leads): ei botteja eikä omia esikatseluja
   demo_open_count?: number;
   demo_last_opened_at?: string | null;
+  // Uusimman seurantasarjan tila ja seuraavan viestin aika (vain GET /leads)
+  followup_status?: FollowUpSequenceStatus | null;
+  followup_next_at?: string | null;
+  followup_replied_at?: string | null;
   rating?: number | null;
   review_count?: number | null;
   business_status?: BusinessStatus | null;

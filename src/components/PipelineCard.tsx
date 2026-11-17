@@ -15,12 +15,14 @@ import {
   RefreshCw,
   Eye,
   Gauge,
+  CalendarClock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
 import { apiFetch } from '../lib/api';
 import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
 import { formatEur } from '../lib/money';
+import { followUpStatusLabel } from '../lib/followUps';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
@@ -208,8 +210,21 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setEmailWithDemo(true);
     setEmailModalOpen(true);
   };
-  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, measureSpeed, updateWebsite, updateDealAmounts } = usePipeline();
+  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, measureSpeed, updateWebsite, updateDealAmounts, refresh } = usePipeline();
   const [measuring, setMeasuring] = useState(false);
+  const stopFollowUps = async () => {
+    try {
+      const res = await apiFetch(`/leads/${agency.id}/followups/stop`, { method: 'POST' });
+      if (!res.ok) {
+        toast.error((await readDetail(res)) || 'Could not stop the follow-ups');
+        return;
+      }
+      toast.success('Follow-ups stopped');
+      void refresh();
+    } catch {
+      toast.error('Could not reach the backend.');
+    }
+  };
   const [autodemoRunning, setAutodemoRunning] = useState(false);
   const [timmaRefreshing, setTimmaRefreshing] = useState(false);
   const [editingWebsite, setEditingWebsite] = useState(false);
@@ -419,6 +434,26 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             Opened {agency.demo_open_count}× · last {formatOpenTime(agency.demo_last_opened_at)}
           </span>
         ) : null}
+        {followUpStatusLabel(agency.followup_status, agency.followup_next_at) && (
+          <span
+            className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs font-medium ${
+              agency.followup_status === 'replied' ? 'bg-success/10 text-success' : 'bg-raised text-fg-muted'
+            }`}
+            title="Email follow-up series. Open the email draft to approve or stop it."
+          >
+            <CalendarClock size={12} />
+            {followUpStatusLabel(agency.followup_status, agency.followup_next_at)}
+            {agency.followup_status === 'active' && (
+              <button
+                onClick={stopFollowUps}
+                className="ml-1 underline hover:text-fg"
+                aria-label="Stop follow-up series"
+              >
+                Stop
+              </button>
+            )}
+          </span>
+        )}
       </div>
       {agency.website_issue && (
         <p className="mt-1 text-xs text-fg-subtle">{agency.website_issue}</p>
