@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, RefreshCw, Sparkles, Send, Loader2, AlertTriangle, PhoneCall, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Demo, SavedAgency } from '../types/agency';
+import type { Demo, Quote, SavedAgency } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
 import { usePipeline } from '../context/PipelineContext';
+import { parseUtc } from '../lib/followUps';
 import FollowUpsPanel from './FollowUpsPanel';
 
 interface EmailDraftModalProps {
@@ -33,6 +34,8 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
   const { refresh } = usePipeline();
   const [publicDemoUrl, setPublicDemoUrl] = useState<string | null>(null);
   const [addingLink, setAddingLink] = useState(false);
+  const [hasSentQuote, setHasSentQuote] = useState(false);
+  const [addingQuoteLink, setAddingQuoteLink] = useState(false);
   const [draft, setDraft] = useState<EmailDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState<'scan' | 'generate'>('generate');
@@ -102,6 +105,48 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
       cancelled = true;
     };
   }, [isOpen, agency.id]);
+
+  // Voimassa oleva lähetetty tarjous: "Add quote link" luonnokseen
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    apiFetch(`/leads/${agency.id}/quotes`)
+      .then(async (res) => {
+        if (cancelled) return;
+        const quotes: Quote[] = res.ok ? await res.json() : [];
+        const now = new Date();
+        const live = quotes.some((q) => q.status === 'sent' && q.valid_until !== null && parseUtc(q.valid_until) > now);
+        if (!cancelled) setHasSentQuote(live);
+      })
+      .catch(() => {
+        if (!cancelled) setHasSentQuote(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, agency.id]);
+
+  const addQuoteLink = async () => {
+    if (!draft) return;
+    setAddingQuoteLink(true);
+    try {
+      const res = await apiFetch(`/leads/${agency.id}/email/quote-link`, {
+        method: 'POST',
+        body: JSON.stringify({ body: draft.body }),
+      });
+      if (!res.ok) {
+        toast.error(res.status === 409 ? 'No sent quote is valid: publish a quote first.' : 'Failed to add the quote link');
+        return;
+      }
+      const data: { body: string } = await res.json();
+      setDraft({ ...draft, body: data.body });
+      toast.success('Quote link added');
+    } catch {
+      toast.error('Failed to add the quote link');
+    } finally {
+      setAddingQuoteLink(false);
+    }
+  };
 
   const addDemoLink = async () => {
     if (!draft) return;
@@ -343,6 +388,17 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({
                   >
                     {addingLink ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
                     Add demo link to this draft
+                  </button>
+                )}
+
+                {hasSentQuote && (
+                  <button
+                    onClick={addQuoteLink}
+                    disabled={addingQuoteLink}
+                    className={`${secondaryButton} w-full`}
+                  >
+                    {addingQuoteLink ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                    Add quote link to this draft
                   </button>
                 )}
 

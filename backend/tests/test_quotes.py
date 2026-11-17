@@ -302,3 +302,25 @@ def test_lead_delete_removes_quotes(client_a: TestClient, make_lead: Any, store:
     token = sent["public_url"].rsplit("/", 1)[1]
     assert client_a.delete(f"/leads/{lead['id']}").status_code == 200
     assert f"quotes/{token}.html" not in store.objects
+
+
+# --- Sähköpostin tarjouslinkki ---
+
+def test_quote_link_in_email_draft(client_a: TestClient, make_lead: Any, store: OpensStore, sender_profile: dict[str, Any]) -> None:
+    lead = make_lead()
+    body = f"Hei,\n\nTeksti.\n\n{main.SIGN_OFF}\nMatti"
+    assert client_a.post(f"/leads/{lead['id']}/email/quote-link", json={"body": body}).status_code == 409
+    quote = _quote(client_a, lead["id"], [(_item(client_a)["id"], 1)])
+    assert client_a.post(f"/leads/{lead['id']}/email/quote-link", json={"body": body}).status_code == 409  # luonnos
+    sent = _send(client_a, quote["id"])
+    res = client_a.post(f"/leads/{lead['id']}/email/quote-link", json={"body": body}).json()
+    assert res["quote_url"] == sent["public_url"]
+    assert res["body"] == f"Hei,\n\nTeksti.\n\nTarjouksen löydätte täältä: {sent['public_url']}\n\n{main.SIGN_OFF}\nMatti"
+    # Idempotentti
+    assert client_a.post(f"/leads/{lead['id']}/email/quote-link", json={"body": res["body"]}).json()["body"] == res["body"]
+
+
+def test_quote_link_tenant_isolation(client_a: TestClient, client_b: TestClient, make_lead: Any, store: OpensStore, sender_profile: dict[str, Any]) -> None:
+    lead = make_lead()
+    _send(client_a, _quote(client_a, lead["id"], [(_item(client_a)["id"], 1)])["id"])
+    assert client_b.post(f"/leads/{lead['id']}/email/quote-link", json={"body": "x"}).status_code == 404

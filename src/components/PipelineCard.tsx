@@ -16,6 +16,7 @@ import {
   Eye,
   Gauge,
   CalendarClock,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
@@ -23,11 +24,13 @@ import { apiFetch } from '../lib/api';
 import { outreachErrorMessage, readDetail } from '../lib/apiErrors';
 import { formatEur } from '../lib/money';
 import { followUpStatusLabel } from '../lib/followUps';
+import { quoteStatusLabel } from '../lib/quotes';
 import { PIPELINE_STATUSES } from '../types/agency';
 import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
 import CallScriptModal from './CallScriptModal';
 import DemoModal from './DemoModal';
+import QuoteModal from './QuoteModal';
 import { ScoreBadge, RatingDisplay, StatusBadge, SignalBadges } from './ScoreBadge';
 
 const MAX_AMOUNT = 1_000_000;
@@ -175,6 +178,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [findingEmail, setFindingEmail] = useState(false);
   const [callScriptOpen, setCallScriptOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
+  const [quoteOpen, setQuoteOpen] = useState(false);
   const [preparingDemo, setPreparingDemo] = useState(false);
   // true kun sähköposti avataan "Publish & create email" -ketjusta: backend vaatii julkaistun demon
   const [emailWithDemo, setEmailWithDemo] = useState(false);
@@ -434,6 +438,17 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             Opened {agency.demo_open_count}× · last {formatOpenTime(agency.demo_last_opened_at)}
           </span>
         ) : null}
+        {quoteStatusLabel(agency.quote_status, agency.quote_open_count) && (
+          <span
+            className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs font-medium ${
+              agency.quote_status === 'accepted' ? 'bg-success/10 text-success' : 'bg-raised text-fg-muted'
+            }`}
+            title={`Quote v${agency.quote_version ?? 1}`}
+          >
+            <FileText size={12} />
+            Quote: {quoteStatusLabel(agency.quote_status, agency.quote_open_count)}
+          </span>
+        )}
         {followUpStatusLabel(agency.followup_status, agency.followup_next_at) && (
           <span
             className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs font-medium ${
@@ -709,7 +724,16 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           {preparingDemo ? 'Preparing…' : 'Demo'}
         </button>
       </div>
-      <div className="mt-1.5 flex">
+      <div className="mt-1.5 flex gap-1.5">
+        <button
+          onClick={() => setQuoteOpen(true)}
+          disabled={agency.do_not_contact}
+          title={agency.do_not_contact ? 'This lead is marked do not contact' : 'Quote from your service catalog'}
+          className={actionClass}
+        >
+          <FileText size={13} className="shrink-0" />
+          {agency.quote_status ? 'Quote' : 'Create quote'}
+        </button>
         <button
           onClick={handleAutodemo}
           disabled={agency.do_not_contact || autodemoRunning}
@@ -752,6 +776,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         onClose={() => setCallScriptOpen(false)}
         agency={agency}
       />
+      <QuoteModal isOpen={quoteOpen} onClose={() => setQuoteOpen(false)} agency={agency} />
       <DemoModal isOpen={demoOpen} onClose={() => setDemoOpen(false)} agency={agency} onCreateEmail={openEmailWithDemo} />
     </motion.div>
   );

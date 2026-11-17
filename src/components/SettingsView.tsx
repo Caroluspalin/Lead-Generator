@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, ExternalLink, Loader2, RotateCcw, Save, UserCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, ExternalLink, ListPlus, Loader2, Pencil, Plus, RotateCcw, Save, Trash2, UserCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import type { DismissedPlace, SenderProfile, SenderProfileInput } from '../types/agency';
+import type { DismissedPlace, SenderProfile, SenderProfileInput, ServiceCatalogItem } from '../types/agency';
 import { apiFetch } from '../lib/api';
+import { formatCents, formatVatRate, hundredthsToInput, parseDecimalToHundredths } from '../lib/quotes';
 
 const EMPTY: SenderProfileInput = {
   name: '',
@@ -11,6 +12,7 @@ const EMPTY: SenderProfileInput = {
   phone: '',
   website: '',
   short_intro: '',
+  quote_terms: '',
 };
 
 const inputClass =
@@ -109,6 +111,208 @@ const DismissedPlaces: React.FC = () => {
   );
 };
 
+interface CatalogForm {
+  id: number | null;
+  name: string;
+  description: string;
+  price: string;
+  vat: string;
+}
+
+const EMPTY_CATALOG_FORM: CatalogForm = { id: null, name: '', description: '', price: '', vat: '25,5' };
+
+// Palvelukatalogi: ainoa hintojen lähde tarjouksille. Hinnat alvittomina, alv-kanta per palvelu.
+const ServiceCatalog: React.FC = () => {
+  const [items, setItems] = useState<ServiceCatalogItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<CatalogForm | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await apiFetch('/service-catalog');
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data: ServiceCatalogItem[] = await res.json();
+        if (!cancelled) setItems(data);
+      } catch {
+        toast.error('Failed to load service catalog');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const edit = (item: ServiceCatalogItem) =>
+    setForm({
+      id: item.id,
+      name: item.name,
+      description: item.description ?? '',
+      price: hundredthsToInput(item.unit_price_cents),
+      vat: hundredthsToInput(item.vat_rate_bp),
+    });
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form) return;
+    const price = parseDecimalToHundredths(form.price);
+    const vat = parseDecimalToHundredths(form.vat);
+    if (!form.name.trim()) {
+      toast.error('Service name is required');
+      return;
+    }
+    if (price === null || vat === null || vat > 10000) {
+      toast.error('Enter the price as euros (e.g. 390 or 390,50) and VAT as a percentage (0 to 100)');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await apiFetch(form.id === null ? '/service-catalog' : `/service-catalog/${form.id}`, {
+        method: form.id === null ? 'POST' : 'PUT',
+        body: JSON.stringify({
+          name: form.name.trim(),
+          description: form.description.trim() || null,
+          unit_price_cents: price,
+          vat_rate_bp: vat,
+        }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const saved: ServiceCatalogItem = await res.json();
+      setItems((prev) => (form.id === null ? [...prev, saved] : prev.map((i) => (i.id === saved.id ? saved : i))));
+      setForm(null);
+      toast.success('Service saved. Existing quotes keep their own prices.');
+    } catch {
+      toast.error('Failed to save service');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (item: ServiceCatalogItem) => {
+    try {
+      const res = await apiFetch(`/service-catalog/${item.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch {
+      toast.error('Failed to delete service');
+    }
+  };
+
+  const field = (key: keyof CatalogForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((prev) => (prev ? { ...prev, [key]: e.target.value } : prev));
+
+  return (
+    <section className="mt-6 bg-surface rounded border border-line" aria-labelledby="catalog-title">
+      <div className="flex items-center gap-2 px-card py-3 border-b border-line">
+        <ListPlus size={15} className="text-fg-muted" />
+        <h2 id="catalog-title" className="text-sm font-semibold text-fg">
+          Service catalog
+        </h2>
+        <button
+          type="button"
+          onClick={() => setForm(EMPTY_CATALOG_FORM)}
+          className="ml-auto inline-flex items-center gap-1.5 h-control-sm px-2.5 text-xs font-medium text-fg border border-line-strong rounded hover:bg-raised transition-colors"
+        >
+          <Plus size={12} />
+          Add service
+        </button>
+      </div>
+      <p className="px-card pt-3 text-xs text-fg-subtle">
+        The only source of prices on quotes. Prices exclude VAT; VAT is added per service.
+      </p>
+      {form && (
+        <form onSubmit={save} className="m-card p-card space-y-3 rounded border border-line bg-canvas">
+          <div>
+            <label htmlFor="catalog-name" className={labelClass}>
+              Name *
+            </label>
+            <input id="catalog-name" value={form.name} onChange={field('name')} maxLength={120} className={inputClass} />
+          </div>
+          <div>
+            <label htmlFor="catalog-description" className={labelClass}>
+              Description
+            </label>
+            <input id="catalog-description" value={form.description} onChange={field('description')} maxLength={1000} className={inputClass} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="catalog-price" className={labelClass}>
+                Price (€, excl. VAT) *
+              </label>
+              <input id="catalog-price" value={form.price} onChange={field('price')} inputMode="decimal" className={inputClass} placeholder="390" />
+            </div>
+            <div>
+              <label htmlFor="catalog-vat" className={labelClass}>
+                VAT % *
+              </label>
+              <input id="catalog-vat" value={form.vat} onChange={field('vat')} inputMode="decimal" className={inputClass} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setForm(null)}
+              className="h-control-sm px-3 text-xs font-medium text-fg border border-line-strong rounded hover:bg-raised transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 h-control-sm px-3 bg-accent hover:bg-accent-hover text-accent-fg text-xs font-medium rounded transition-colors disabled:opacity-60"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              Save service
+            </button>
+          </div>
+        </form>
+      )}
+      {loading ? (
+        <div className="p-card flex justify-center">
+          <Loader2 size={16} className="animate-spin text-fg-subtle" />
+        </div>
+      ) : items.length === 0 ? (
+        <p className="p-card text-sm text-fg-subtle">No services yet. Add the services you sell to create quotes.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-start gap-3 px-card py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-fg">{item.name}</p>
+                {item.description && <p className="text-xs text-fg-subtle">{item.description}</p>}
+              </div>
+              <span className="shrink-0 text-sm text-fg tabular-nums">
+                {formatCents(item.unit_price_cents)} <span className="text-xs text-fg-subtle">+ VAT {formatVatRate(item.vat_rate_bp)}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => edit(item)}
+                aria-label={`Edit ${item.name}`}
+                className="grid size-control-sm shrink-0 place-content-center rounded text-fg-subtle hover:text-fg hover:bg-raised transition-colors"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(item)}
+                aria-label={`Delete ${item.name}`}
+                className="grid size-control-sm shrink-0 place-content-center rounded text-fg-subtle hover:text-danger hover:bg-danger/10 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
+
 const SettingsView: React.FC = () => {
   const [form, setForm] = useState<SenderProfileInput>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -132,6 +336,7 @@ const SettingsView: React.FC = () => {
           phone: data.phone ?? '',
           website: data.website ?? '',
           short_intro: data.short_intro,
+          quote_terms: data.quote_terms ?? '',
         });
       } catch {
         toast.error('Failed to load sender profile');
@@ -147,6 +352,9 @@ const SettingsView: React.FC = () => {
 
   const update = (key: keyof SenderProfileInput) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  const updateTerms = (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+    setForm((prev) => ({ ...prev, quote_terms: e.target.value }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,6 +477,23 @@ const SettingsView: React.FC = () => {
               <input id="sender-phone" value={form.phone ?? ''} onChange={update('phone')} maxLength={40} className={inputClass} />
             </div>
           </div>
+          <div>
+            <label htmlFor="sender-terms" className={labelClass}>
+              Quote terms
+            </label>
+            <textarea
+              id="sender-terms"
+              value={form.quote_terms ?? ''}
+              onChange={updateTerms}
+              maxLength={3000}
+              rows={4}
+              className="w-full text-sm bg-canvas border border-line-strong rounded px-3 py-2 text-fg transition-colors"
+              aria-describedby="sender-terms-help"
+            />
+            <p id="sender-terms-help" className="mt-1 text-xs text-fg-subtle">
+              Payment terms, delivery time and so on, shown on the quote page exactly as written. Empty = no terms section.
+            </p>
+          </div>
         </div>
         <div className="flex justify-end px-card py-3 border-t border-line">
           <button
@@ -281,6 +506,8 @@ const SettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      <ServiceCatalog />
 
       <DismissedPlaces />
     </div>

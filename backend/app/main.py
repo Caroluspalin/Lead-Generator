@@ -2459,6 +2459,49 @@ def add_demo_link(
     return DemoLinkResponse(body=add_demo_link_to_body(req.body, url), demo_url=url)
 
 
+class QuoteLinkResponse(BaseModel):
+    body: str
+    quote_url: str
+
+
+# Asiakkaalle lähtevä lause, kiinteä (ei AI:ta)
+QUOTE_LINK_SENTENCE = "Tarjouksen löydätte täältä: {url}"
+
+
+def add_quote_link_to_body(body: str, quote_url: str) -> str:
+    """Valmiiseen luonnokseen (allekirjoitus + opt-out mukana) tarjouslinkki omaksi kappaleekseen ennen allekirjoitusta."""
+    if quote_url in body:
+        return body
+    sentence = QUOTE_LINK_SENTENCE.format(url=quote_url)
+    head, sep, tail = body.partition(f"\n\n{SIGN_OFF}\n")
+    if not sep:
+        return f"{body.rstrip()}\n\n{sentence}"
+    return f"{head.rstrip()}\n\n{sentence}{sep}{tail}"
+
+
+@app.post("/leads/{lead_id}/email/quote-link", response_model=QuoteLinkResponse)
+def add_quote_link(
+    lead_id: int,
+    req: DemoLinkRequest,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+) -> QuoteLinkResponse:
+    """Lisää lähetetyn, voimassa olevan tarjouksen linkin jo kirjoitettuun luonnokseen (ei AI-kutsua)."""
+    lead = _get_contactable_lead(session, lead_id, user)
+    now = utc_now()
+    sent = [
+        q for q in session.exec(
+            select(Quote).where(Quote.lead_id == lead.id, Quote.user_id == user.id, Quote.status == "sent")
+            .order_by(Quote.version.desc())  # type: ignore[attr-defined]
+        ).all()
+        if q.valid_until is not None and _as_utc(q.valid_until) > now
+    ]
+    url = _quote_public_url(sent[0]) if sent else None
+    if url is None:
+        raise HTTPException(409, "Quote is not sent: send it before adding the link")
+    return QuoteLinkResponse(body=add_quote_link_to_body(req.body, url), quote_url=url)
+
+
 # 6b. PUHELINSKRIPTI (AI)
 @app.post("/leads/{lead_id}/generate-call-script", response_model=CallScriptResponse)
 async def generate_call_script(

@@ -96,6 +96,8 @@ export interface SenderProfileInput {
   phone: string | null;
   website: string | null;
   short_intro: string;
+  // Tarjouksen ehdot vapaana tekstinä; tyhjä = ei ehto-osiota tarjoussivulla
+  quote_terms: string | null;
 }
 
 // GET /sender-profile
@@ -249,6 +251,13 @@ export interface SavedAgency {
   followup_status?: FollowUpSequenceStatus | null;
   followup_next_at?: string | null;
   followup_replied_at?: string | null;
+  // Uusin tarjousversio ja sen avaukset (vain GET /leads)
+  quote_id?: number | null;
+  quote_version?: number | null;
+  quote_status?: QuoteStatus | null;
+  quote_net_cents?: number | null;
+  quote_open_count?: number;
+  quote_last_opened_at?: string | null;
   rating?: number | null;
   review_count?: number | null;
   business_status?: BusinessStatus | null;
@@ -264,3 +273,41 @@ export interface SavedAgency {
   updated_at: string;
 }
 
+
+export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'superseded';
+
+// Hinnat senteissä ilman alv:ia, alv-kanta sadasosaprosentteina (2550 = 25,5 %)
+export interface ServiceCatalogItem {
+  id: number;
+  name: string;
+  description: string | null;
+  unit_price_cents: number;
+  vat_rate_bp: number;
+}
+
+export interface QuoteLine {
+  name: string;
+  description: string | null;
+  unit_price_cents: number;
+  quantity: number;
+  vat_rate_bp: number;
+}
+
+export interface Quote {
+  id: number;
+  lead_id: number;
+  version: number;
+  status: QuoteStatus;
+  valid_days: number;
+  valid_until: string | null;
+  net_cents: number;
+  vat_cents: number;
+  gross_cents: number;
+  sent_at: string | null;
+  accepted_at: string | null;
+  accepted_name: string | null;
+  public_url: string | null;
+  open_count: number;
+  last_opened_at: string | null;
+  lines: QuoteLine[];
+}
