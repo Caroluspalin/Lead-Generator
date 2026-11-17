@@ -134,6 +134,12 @@ class LeadBase(SQLModel):
     # Timma-tuonti (app/utils/timma.py): TimmaSnapshot JSONina + hakupäivä. Haetaan kerran, uudelleen vain Refreshistä
     timma_data: Optional[str] = None
     timma_fetched_at: Optional[datetime] = None
+    # Ostosignaalit (app/utils/signals.py): PageSpeed Insights -mittaus (mobiili) ja sivun ©-vuosi.
+    # Vain mitattu/luettu arvo, tyhjä = ei mitattu
+    pagespeed_lcp_s: Optional[float] = None
+    pagespeed_score: Optional[int] = None
+    pagespeed_at: Optional[datetime] = None
+    site_copyright_year: Optional[int] = None
     # Autodemo julkaisi demon automaattisesti: tarkista demo ennen yhteydenottoa
     review_before_contact: bool = Field(default=False)
 

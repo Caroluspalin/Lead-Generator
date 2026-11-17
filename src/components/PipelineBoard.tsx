@@ -17,6 +17,8 @@ import type { PipelineStatus, SavedAgency } from '../types/agency';
 import { usePipeline } from '../context/PipelineContext';
 import { apiFetch } from '../lib/api';
 import { formatEur } from '../lib/money';
+import { FEW_REVIEWS_BELOW, OLD_SITE_MIN_AGE_YEARS, SLOW_LCP_SECONDS, matchesSignalFilters } from '../lib/signals';
+import type { SignalFilter } from '../lib/signals';
 import PipelineCard from './PipelineCard';
 
 const BATCH_SIZE = 5;
@@ -38,6 +40,12 @@ async function processInBatches<T>(
   return { ok, failed };
 }
 
+const SIGNAL_FILTER_OPTIONS: { value: SignalFilter; label: string; title: string }[] = [
+  { value: 'slow', label: 'Slow site', title: `Measured mobile load time over ${SLOW_LCP_SECONDS} s` },
+  { value: 'old', label: 'Old site', title: `Website © year at least ${OLD_SITE_MIN_AGE_YEARS} years old` },
+  { value: 'few', label: 'Few reviews', title: `Fewer than ${FEW_REVIEWS_BELOW} Google reviews` },
+];
+
 const PipelineBoard: React.FC = () => {
   const {
     savedAgencies,
@@ -52,11 +60,13 @@ const PipelineBoard: React.FC = () => {
     setDemoPublishedOnly,
     openedFirst,
     setOpenedFirst,
+    signalFilters,
+    toggleSignalFilter,
   } = usePipeline();
   // "Demo published": vain julkaistun demon liidit, do not contact -liidit pois. Myös välilehtien luvut.
-  const visibleAgencies = demoPublishedOnly
-    ? savedAgencies.filter((a) => a.demo_published && !a.do_not_contact)
-    : savedAgencies;
+  const visibleAgencies = savedAgencies.filter(
+    (a) => (!demoPublishedOnly || (a.demo_published && !a.do_not_contact)) && matchesSignalFilters(a, signalFilters),
+  );
   const [activeTab, setActiveTab] = useState<PipelineStatus>('Shortlisted');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -90,6 +100,11 @@ const PipelineBoard: React.FC = () => {
   const clearSelection = () => setSelectedIds(new Set());
 
   // Valinnat tyhjennetään, ettei massatoiminto osu suodatuksen piilottamiin liideihin
+  const handleToggleSignal = (filter: SignalFilter) => {
+    toggleSignalFilter(filter);
+    clearSelection();
+  };
+
   const toggleDemoPublishedOnly = (value: boolean) => {
     setDemoPublishedOnly(value);
     clearSelection();
@@ -246,7 +261,7 @@ const PipelineBoard: React.FC = () => {
         <h1 className="text-xl font-semibold tracking-tight text-fg">Pipeline</h1>
         <p className="text-sm text-fg-subtle">Track prospects from first contact to decision</p>
         {!loading && !error && savedAgencies.length > 0 && (
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg transition-colors">
               <input
                 type="checkbox"
@@ -265,6 +280,21 @@ const PipelineBoard: React.FC = () => {
               />
               Demo published
             </label>
+            {SIGNAL_FILTER_OPTIONS.map(({ value, label, title }) => (
+              <label
+                key={value}
+                title={title}
+                className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={signalFilters.includes(value)}
+                  onChange={() => handleToggleSignal(value)}
+                  className="size-3.5 cursor-pointer"
+                />
+                {label}
+              </label>
+            ))}
           </div>
         )}
       </header>

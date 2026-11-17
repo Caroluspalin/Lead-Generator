@@ -86,6 +86,7 @@ from .utils.site_content import (
     SITE_FACTS_SYSTEM_PROMPT,
     SiteFacts,
     facts_prompt,
+    fetch_copyright_year,
     scan_site,
     should_scan,
     verify_site_facts,
@@ -100,6 +101,7 @@ from .utils.timma import (
     timma_source,
 )
 from .utils.contact_finder import find_contact_email
+from .utils.signals import SLOW_LCP_SECONDS, SpeedTestUnavailable, is_few_reviews, measure_pagespeed
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
 from .text_quality import FORBIDDEN_PATTERNS, PRICE_RE, find_forbidden_words, word_count  # noqa: F401
@@ -606,6 +608,7 @@ class SearchFilters(BaseModel):
     statuses: List[str] = Field(default_factory=list)  # tyhjä = kaikki tilat
     min_score: int = 0
     exclude_closed: bool = False
+    few_reviews: bool = False  # alle FEW_REVIEWS_BELOW arvostelua (None = 0)
 
 
 def status_categories(website_status: Optional[str], website_issue: Optional[str]) -> set[str]:
@@ -625,6 +628,8 @@ def status_categories(website_status: Optional[str], website_issue: Optional[str
 def matches_filters(result: GoogleSearchResult, filters: SearchFilters) -> bool:
     if filters.exclude_closed and result.business_status == "CLOSED_TEMPORARILY":
         return False
+    if filters.few_reviews and not is_few_reviews(result.review_count):
+        return False
     if filters.statuses and not (status_categories(result.website_status, result.website_issue) & set(filters.statuses)):
         return False
     return result.lead_score >= filters.min_score
@@ -633,6 +638,8 @@ def matches_filters(result: GoogleSearchResult, filters: SearchFilters) -> bool:
 def could_match(place: Dict, filters: SearchFilters) -> bool:
     """Voiko paikka vielä täyttää suodattimet sivuanalyysin jälkeen? Säästää hitaat sivupyynnöt."""
     if filters.exclude_closed and place.get("business_status") == "CLOSED_TEMPORARILY":
+        return False
+    if filters.few_reviews and not is_few_reviews(place.get("review_count")):
         return False
     website = (place.get("website") or "").strip()
     if not website or is_social_media_url(website) or is_booking_url(website):
@@ -780,6 +787,7 @@ async def search_google(
     status: List[str] = Query(default_factory=list),
     min_score: int = Query(0, ge=0, le=100),
     exclude_closed: bool = Query(False),
+    few_reviews: bool = Query(False),
     only_new: bool = Query(True),
     expand_neighbors: bool = Query(False),
     session: Session = Depends(get_session),
@@ -788,7 +796,9 @@ async def search_google(
     unknown = [s for s in status if s not in SEARCH_STATUS_FILTERS]
     if unknown:
         raise HTTPException(422, f"Unknown status filter: {', '.join(unknown)}")
-    filters = SearchFilters(statuses=list(dict.fromkeys(status)), min_score=min_score, exclude_closed=exclude_closed)
+    filters = SearchFilters(
+        statuses=list(dict.fromkeys(status)), min_score=min_score, exclude_closed=exclude_closed, few_reviews=few_reviews
+    )
     excluded = _excluded_places(session, user.id, only_new=only_new)
 
     if not USE_LIVE_GOOGLE:
@@ -1244,6 +1254,46 @@ async def refresh_timma(
     if db_lead.timma_fetched_at == before:
         raise HTTPException(502, "Timma fetch failed, try again later")
     return db_lead
+
+@app.post("/leads/{lead_id}/measure-speed", response_model=Lead)
+async def measure_speed(
+    lead_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUser = Depends(verify_token),
+):
+    """PageSpeed Insights (mobiili) liidin sivulle, käsin napista. Epäonnistuessa mitään ei tallenneta.
+
+    Lukee samalla etusivun ©-vuoden (yksi sivupyyntö), jos sitä ei vielä ole.
+    """
+    db_lead = session.get(Lead, lead_id)
+    if not db_lead or db_lead.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    website = (db_lead.website or "").strip()
+    if (
+        not website
+        or db_lead.website_status in ("NO WEBSITE", "BROKEN WEBSITE")
+        or is_social_media_url(website)
+        or is_booking_url(website)
+    ):
+        raise HTTPException(422, "Lead has no working website to measure")
+    url = website if website.lower().startswith(("http://", "https://")) else f"https://{website}"
+    try:
+        result = await asyncio.to_thread(measure_pagespeed, url, GOOGLE_API_KEY)
+    except SpeedTestUnavailable as e:
+        logger.warning(f"PageSpeed-mittaus epäonnistui (liidi {lead_id}): {e}")
+        raise HTTPException(503, "Speed test unavailable, try later")
+    db_lead.pagespeed_lcp_s = result.lcp_seconds
+    db_lead.pagespeed_score = result.score
+    db_lead.pagespeed_at = utc_now()
+    if db_lead.site_copyright_year is None:
+        year = await asyncio.to_thread(fetch_copyright_year, url)
+        if year:
+            db_lead.site_copyright_year = year
+    session.add(db_lead)
+    session.commit()
+    session.refresh(db_lead)
+    return db_lead
+
 
 # 5. POISTA LIIDI
 @app.delete("/leads/{lead_id}")
@@ -2014,6 +2064,20 @@ class CallScriptResponse(BaseModel):
     model: str
 
 
+def measured_speed_line(lead: Lead) -> Optional[str]:
+    """Latausaika promptiin vain, jos se on oikeasti mitattu (PageSpeed) ja hidas. Ei arvioita."""
+    lcp = lead.pagespeed_lcp_s
+    if lcp is None or lcp <= SLOW_LCP_SECONDS:
+        return None
+    seconds = f"{lcp:.1f}".replace(".", ",")
+    return (
+        f"MITATTU LATAUSAIKA (Googlen PageSpeed-mittaus puhelimella): sivun pääsisältö latautuu noin {seconds} sekunnissa. "
+        "Tämä on mitattu luku. Voit mainita sen yhdellä lauseella omana havaintonasi, esim. "
+        f'"Googlen mittauksen mukaan sivunne lataus puhelimella kestää noin {seconds} sekuntia". '
+        "Käytä vain tätä lukua. Älä arvioi tai keksi muita lukuja."
+    )
+
+
 def _prompt_facts(lead: Lead, profile: SenderProfile, *, has_demo: bool = False) -> list[str]:
     parts = [
         "LÄHETTÄJÄ (minä):",
@@ -2041,6 +2105,9 @@ def _prompt_facts(lead: Lead, profile: SenderProfile, *, has_demo: bool = False)
             parts.append(f"MIKSI SILLÄ ON VÄLIÄ (vihje): {why}")
     else:
         parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
+    speed = measured_speed_line(lead)
+    if speed:
+        parts.append(speed)
     offer = DEMO_OFFER if has_demo else OFFERS.get(lead.website_status or "", DEFAULT_OFFER)
     parts.append(f"TARJOUS: {offer}")
     if demo_booking_url(lead):
@@ -2085,8 +2152,14 @@ def build_demo_email_user_prompt(
         parts.append(f"HAVAINTO (varma, tein sen itse): {problem}")
     else:
         parts.append("HAVAINTO: ei varmistettua ongelmaa (älä väitä sivuston olevan rikki tai puutteellinen)")
+    speed = measured_speed_line(lead)
     if has_real_problem(lead.website_status):
         parts.append(f"ASIAKKAAN TILANNE NYT (kappale 2): {customer_impact(lead.website_status, lead.website_issue)}")
+        if speed:
+            parts.append(speed)
+        parts.append("\nKirjoita kappaleet 1 ja 2.")
+    elif speed:
+        parts.append(f"ASIAKKAAN TILANNE NYT (kappale 2): {speed}")
         parts.append("\nKirjoita kappaleet 1 ja 2.")
     else:
         parts.append("\nKirjoita vain kappale 1.")
@@ -2447,6 +2520,8 @@ async def ensure_site_facts(session: Session, lead: Lead) -> tuple[Optional[Site
 
     now = utc_now()
     lead.website_facts, lead.website_facts_at = facts.model_dump_json(), now
+    if scan.copyright_year:
+        lead.site_copyright_year = scan.copyright_year
     if not lead.website_context and scan.homepage_text:
         lead.website_context, lead.scraped_at = scan.homepage_text, now
     session.add(lead)

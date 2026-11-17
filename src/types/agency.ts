@@ -210,6 +210,11 @@ export interface SavedAgency {
   // Autodemo julkaisi demon: tarkista ennen yhteydenottoa
   review_before_contact: boolean;
   timma_fetched_at?: string | null;
+  // Ostosignaalit: vain mitattu (PageSpeed, mobiili) tai sivulta luettu arvo
+  pagespeed_lcp_s?: number | null;
+  pagespeed_score?: number | null;
+  pagespeed_at?: string | null;
+  site_copyright_year?: number | null;
   // Julkaistu ja voimassa oleva demo. Vain GET /leads -vastauksessa (laskettu Demo-taulusta)
   demo_published?: boolean;
   // Julkaistun demon avaukset (vain GET /leads): ei botteja eikä omia esikatseluja
