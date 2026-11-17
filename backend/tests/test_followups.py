@@ -422,3 +422,19 @@ def test_prompt_has_no_price_and_questions_forbidden() -> None:
     from app.main import FOLLOWUP_SYSTEM_PROMPT
 
     assert "EI kysymyksiä" in FOLLOWUP_SYSTEM_PROMPT and "hintaa" in FOLLOWUP_SYSTEM_PROMPT
+
+
+def test_followup_body_keeps_draft_reference_drops_questions_and_links() -> None:
+    from app.main import build_followup_body
+    from app.models import SenderProfile
+
+    profile = SenderProfile(user_id=USER_A, name="Palin", short_intro="x")
+    body = build_followup_body(
+        "Hei,\n\nLähetin teille aiemmin viestin ja luonnoksen nettisivuista. Katso https://x.fi Kiinnostaisiko?",
+        profile, 1, "https://demo.test/a",
+    )
+    assert "Lähetin teille aiemmin viestin ja luonnoksen nettisivuista." in body
+    assert "?" not in body and "https://x.fi" not in body
+    assert body.count("https://demo.test/a") == 1 and body.endswith(OPT_OUT_LINE)
+    assert "viimeinen viestini" not in body
+    assert "viimeinen viestini" in build_followup_body("Hyvä.", profile, 2, None)

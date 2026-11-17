@@ -1769,7 +1769,7 @@ def _drop_sentences(paragraph: str, predicate: Callable[[str], bool]) -> str:
     return " ".join(s.strip() for s in kept)
 
 
-def clean_demo_paragraphs(text: str) -> list[str]:
+def clean_demo_paragraphs(text: str, *, drop_draft_mentions: bool = True) -> list[str]:
     """Mallin kappaleet 1–2 siistittynä: ei tervehdystä, linkkejä, luonnosmainintaa eikä kysymyksiä.
 
     Koodi kirjoittaa linkin, tarjouksen ja seuraavan askeleen, joten mallin vastaavat lauseet
@@ -1783,7 +1783,7 @@ def clean_demo_paragraphs(text: str) -> list[str]:
         paragraph = " ".join(ln.strip() for ln in lines)
         paragraph = _drop_sentences(
             paragraph,
-            lambda s: s.rstrip().rstrip('"”)').endswith("?") or bool(_DRAFT_MENTION_RE.search(s)),
+            lambda s: s.rstrip().rstrip('"”)').endswith("?") or (drop_draft_mentions and bool(_DRAFT_MENTION_RE.search(s))),
         )
         paragraph = re.sub(r"\s{2,}", " ", paragraph).strip()
         if paragraph:
@@ -3143,7 +3143,8 @@ def build_followup_user_prompt(
 
 def build_followup_body(text: str, profile: SenderProfile, step_no: int, demo_url: Optional[str]) -> str:
     """Hei + mallin teksti + demolinkki (koodista) + viimeisen viestin lause + allekirjoitus + opt-out."""
-    paragraphs = clean_demo_paragraphs(text)[:2]
+    # Seurannassa viittaus aiempaan luonnokseen on tarkoituksellinen (aloitusviestissä sen kirjoittaa koodi)
+    paragraphs = clean_demo_paragraphs(text, drop_draft_mentions=False)[:2]
     parts = ["Hei,", *paragraphs]
     if demo_url:
         parts.append(FOLLOWUP_DEMO_LINE.format(url=demo_url))
