@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Tarjous{% if seller.brand %} - {{ seller.brand }}{% endif %}</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f4f5f7;color:#1c1f26;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 48px}
+.card{background:#fff;border:1px solid #e1e4ea;border-radius:12px;padding:20px;margin-bottom:16px}
+h1{font-size:1.5rem;margin:0 0 4px}
+h2{font-size:1.05rem;margin:0 0 12px}
+.muted{color:#5b6270;font-size:.9rem}
+.seller{font-weight:600;font-size:1.1rem}
+dl{margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.95rem}
+dt{color:#5b6270}dd{margin:0}
+.line{padding:12px 0;border-top:1px solid #eceef2}
+.line:first-of-type{border-top:0;padding-top:0}
+.line .top{display:flex;justify-content:space-between;gap:12px;font-weight:600}
+.line .top span:last-child{white-space:nowrap}
+.line p{margin:4px 0 0;font-size:.9rem;color:#5b6270;white-space:pre-line}
+.line .calc{font-size:.85rem;color:#5b6270;margin-top:4px}
+.totals{margin-top:12px;border-top:2px solid #1c1f26;padding-top:12px}
+.totals div{display:flex;justify-content:space-between;padding:2px 0}
+.totals .gross{font-weight:700;font-size:1.15rem;margin-top:4px}
+.terms{white-space:pre-line;font-size:.95rem}
+label.chk{display:flex;gap:10px;align-items:flex-start;margin:12px 0;font-size:.95rem}
+label.chk input{margin-top:4px;width:20px;height:20px;flex:none}
+input[type=text]{width:100%;font:inherit;padding:12px;border:1px solid #b9bfca;border-radius:8px}
+canvas{display:block;width:100%;height:160px;background:#fff;border:1px dashed #8b93a3;border-radius:8px;touch-action:none}
+button{font:inherit;border-radius:8px;padding:12px 18px;border:1px solid #b9bfca;background:#fff;cursor:pointer;min-height:44px}
+button.primary{background:#1c1f26;color:#fff;border-color:#1c1f26;font-weight:600;width:100%;margin-top:8px}
+button:disabled{opacity:.5;cursor:default}
+.row{display:flex;justify-content:space-between;align-items:center;margin:6px 0}
+#accept-msg{margin-top:10px;font-size:.95rem;color:#b3261e}
+.notice{background:#fff7e0;border:1px solid #f0d98a}
+.ok{background:#e9f7ee;border:1px solid #9fd5b0}
+.sig{max-width:100%;height:auto;border:1px solid #e1e4ea;border-radius:8px;background:#fff}
+.hash{font:12px ui-monospace,Menlo,monospace;word-break:break-all;color:#5b6270}
+.print{margin-top:8px}
+@media print{body{background:#fff}.card{border-color:#ccc;break-inside:avoid}.noprint,#accept-form{display:none!important}}
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+<div class="seller">{{ seller.brand or seller.name }}</div>
+{% if seller.company and seller.company != seller.brand %}<div class="muted">{{ seller.company }}</div>{% endif %}
+<div class="muted">{{ seller.name if seller.brand else '' }}{% if seller.phone %}{{ ' · ' if seller.brand else '' }}{{ seller.phone }}{% endif %}{% if seller.website %} · {{ seller.website }}{% endif %}</div>
+{% if seller.business_id %}<div class="muted">Y-tunnus: {{ seller.business_id }}</div>{% endif %}
+<h1 style="margin-top:16px">Tarjous{% if version > 1 %} (versio {{ version }}){% endif %}</h1>
+<dl>
+<dt>Vastaanottaja</dt><dd>{{ recipient }}</dd>
+<dt>Päivämäärä</dt><dd>{{ sent }}</dd>
+<dt>Voimassa</dt><dd>{{ valid_until }} asti</dd>
+</dl>
+</div>
+
+<div class="card">
+<h2>Palvelut</h2>
+{% for row in rows %}
+<div class="line">
+<div class="top"><span>{{ row.line.name }}</span><span>{{ row.net | eur }}</span></div>
+{% if row.line.description %}<p>{{ row.line.description }}</p>{% endif %}
+<div class="calc">{{ row.line.quantity }} × {{ row.line.unit_price_cents | eur }} · alv {{ row.line.vat_rate_bp | rate }} ({{ row.vat | eur }})</div>
+</div>
+{% endfor %}
+<div class="totals">
+<div><span>Yhteensä (alv 0 %)</span><span>{{ totals.net_cents | eur }}</span></div>
+{% for rate, amounts in totals.by_rate.items() %}
+<div class="muted"><span>Alv {{ rate | rate }}</span><span>{{ amounts[1] | eur }}</span></div>
+{% endfor %}
+<div class="gross"><span>Yhteensä sis. alv</span><span>{{ totals.gross_cents | eur }}</span></div>
+</div>
+</div>
+
+{% if terms %}
+<div class="card">
+<h2>Ehdot</h2>
+<div class="terms">{{ terms }}</div>
+</div>
+{% endif %}
+
+{{ accept_start | safe }}
+{% if superseded %}
+<div class="card notice">Tämä tarjous on korvattu uudemmalla versiolla, eikä sitä voi enää hyväksyä. Pyydä uusin linkki lähettäjältä.</div>
+{% else %}
+<div class="card" id="accept-form" data-hash="{{ digest }}">
+<h2>Hyväksy tarjous</h2>
+<label for="signer-name" class="muted">Nimesi</label>
+<input type="text" id="signer-name" autocomplete="name" maxlength="100">
+<div class="row" style="margin-top:16px"><span class="muted">Allekirjoitus (piirrä sormella tai hiirellä)</span><button type="button" id="sig-clear">Tyhjennä</button></div>
+<canvas id="sig-canvas" width="640" height="320" aria-label="Allekirjoitus"></canvas>
+<label class="chk"><input type="checkbox" id="chk-authority"><span>Minulla on oikeus hyväksyä tarjous yrityksen puolesta.</span></label>
+<label class="chk"><input type="checkbox" id="chk-accept"><span>Hyväksyn tarjouksen ({{ totals.gross_cents | eur }} sis. alv) ja sen ehdot.</span></label>
+<div class="muted">Hyväksymisen ajankohta tallennetaan automaattisesti.</div>
+<button type="button" class="primary" id="accept-btn">Hyväksy tarjous</button>
+<div id="accept-msg" role="alert"></div>
+<noscript><div class="muted">Hyväksyminen vaatii JavaScriptin.</div></noscript>
+</div>
+{% endif %}
+{{ accept_end | safe }}
+
+<div class="muted noprint print"><button type="button" id="print-btn">Tulosta tai tallenna PDF</button></div>
+<div class="hash" style="margin-top:12px">Tarjouksen tiiviste (SHA-256): {{ digest }}</div>
+</main>
+<script src="/q/quote.js"></script>
+</body>
+</html>

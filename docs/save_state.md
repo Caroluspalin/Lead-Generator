@@ -1,6 +1,40 @@
 # Agency Hunter — Save State (nykytila)
 
-## Mihin jäätiin (päivitetty 2026-11-17, seurantaviestit)
+## Mihin jäätiin (päivitetty 2026-11-17, tarjous linkkinä)
+
+**Tarjous linkkinä (2026-11-17), haara `tarjouslinkki`** (ei mergetty, ei deployattu, migraatio `6d212db6455a` ajamatta tuotantoon,
+down_revision `dc26706bcb28`). Testit: pytest 1096 passed, worker `npm test` 41, `npm run lint && npm run build` ok, `alembic check` puhdas (SQLite).
+MAX_SEARCH_CALLS, field mask ja demoputki ennallaan; ei uusia maksullisia kutsuja (R2 ja Worker Free -rajoissa).
+- **Katalogi** (`ServiceCatalogItem`, Settings -> Service catalog): ainoa hintojen lähde. Hinta alvittomana senteissä, alv-kanta per palvelu
+  sadasosaprosentteina (`vat_rate_bp`, 2550 = 25,5 %). Ehdot: `SenderProfile.quote_terms` (vapaa teksti, käyttäjän kirjoittama, tyhjä = ei ehto-osiota,
+  ei oletusehtoja koodissa). Ei AI-kuvausnappia: kuvaukset käsin. Rivit kopioidaan tarjoukseen luontihetkellä, katalogin muutos ei muuta tarjousta.
+- **Tarjous** (`Quote`, `QuoteLine`, `QuoteOpen`; `app/quotes.py`): versiot per liidi (`uq lead_id+version`), tila draft/sent/accepted/superseded.
+  Summat kokonaissenteissä, alv pyöristetään rivi kerrallaan puolet ylöspäin. Rivi = katalogirivi + määrä (`catalog_item_id`), omia hintoja ei hyväksytä.
+  Lähetys (`POST /quotes/{id}/send`, 428 ei profiilia, 503 ei R2:ta, 409 DNC) renderöi Jinja-sivun (`templates/quote/quote.html.j2`), tilannekuvaa
+  myyjän tiedot (brand/company/nimi/puhelin/sivusto profiilista, ei Lead-Generatorin nimeä) ja ehdot, laskee SHA-256-tiivisteen näkyvästä sisällöstä,
+  lataa `quotes/<token>.html` (metadata `expires-at` = `valid_until` (oletus 30 pv), `content-hash`, `state`), asettaa liidin `deal_value` = alviton summa
+  (pyöristetty euroihin) ja merkitsee aiemmat lähetetyt versiot `superseded` (niiden sivu päivitetään "korvattu"-tilaan). Draft on ainoa muokattava tila:
+  lähetetty tai hyväksytty -> PUT/DELETE/send 409, vain `POST /quotes/{id}/new-version` (uusi luonnos riveistä). Osoite `{DEMO_PUBLIC_BASE_URL}/q/<43 merkin token>`
+  (ei slugia).
+- **Worker** (`worker/src/quote.ts`, reitit `index.ts`:ssä): `GET /q/<token>` (noindex, oma CSP: `script-src 'self'`, `connect-src 'self'`, `img-src data:`),
+  `GET /q/quote.js` (allekirjoituskanvas, koodissa merkkijonona), `POST /q/<token>/accept`. Hyväksyntä: nimi (1-100), valtuusruksi, hyväksyntäruksi,
+  PNG-allekirjoitus (data-URL, max 250 kB); Origin-tarkistus; aika Workerin kello; tiiviste luetaan R2-objektin metadatasta (ei asiakkaalta); kirjoitus
+  `acceptances/<token>.json` vain jos avainta ei ole (`onlyIf etagDoesNotMatch '*'`, 409 jos on). 409 korvattu, 410 vanhentunut, 404 tuntematon. Ei IP:tä eikä UA:ta.
+  Hyväksytty sivu näyttää nimen, ajan, allekirjoituksen ja tiivisteen lomakkeen tilalla (myös vanhenemisen jälkeen). Avaus kirjataan avaimeen `opens/q-<token>/…`
+  samalla mekanismilla ja bottisuodatuksella kuin demot. Tulostus/PDF: selaimen tulostus (`@media print`, nappi sivulla).
+- **Backend-synkka**: `POST /leads/sync-opens` (sama throttle) tuo myös tarjousavaukset (`new_quote_opens`) ja hyväksynnät (`accepted_quotes`). Hyväksyntä
+  validoidaan (muoto, tiiviste = `Quote.content_hash`, valtuusruksi), tallennetaan (`accepted_at`, `accepted_name`, `signature`), tila accepted, `deal_value` = tämän tarjouksen
+  alviton summa; liidi -> Hired automaattisesti vain jos se on Contacted tai Proposal Received eikä DNC (ei koskaan Rejected/Shortlisted); toast näkyy aina.
+  `acceptances/`-objekti jää R2:een todisteeksi. `GET /leads` lisäksi `quote_id/version/status/net_cents/open_count/last_opened_at` (uusin versio).
+- **API**: `GET/POST /service-catalog`, `PUT/DELETE /service-catalog/{id}`, `GET/POST /leads/{id}/quotes`, `PUT/DELETE /quotes/{id}`, `POST /quotes/{id}/send`,
+  `POST /quotes/{id}/new-version`, `POST /leads/{id}/email/quote-link` (lisää luonnokseen kappaleen "Tarjouksen löydätte täältä: {url}" ennen allekirjoitusta, vain voimassa oleva lähetetty tarjous).
+- **UI**: kortilla "Create quote" / "Quote" -> `QuoteModal` (rivit katalogista, määrä, voimassaolopäivät, yhteensä alv:lla, Save draft / Publish quote, versiot, Copy link,
+  New version) ja tilamerkki "Quote: Draft / Sent / Opened / Accepted" (Opened = lähetetty + avattu). EmailDraftModal: "Add quote link to this draft".
+- **Auki**: (1) `acceptances/` ja `quotes/` jäävät R2:een pysyvästi, säilytysaika päätetään myöhemmin (henkilötieto: nimi, allekirjoitus), (2) hyväksynnän juridinen
+  riittävyys (piirretty allekirjoitus + nimi + aika + tiiviste, ei IP:tä) on Palin päätettävissä, (3) sähköpostilause ja tarjoussivun Finnish-tekstit ovat asiakkaalle
+  lähtevää tekstiä: Palin hyväksyy, (4) tarjoussivun 390 px -ulkoasua ei ole katsottu selaimessa (ei Playwrightia), (5) Worker deployaamatta, (6) Y-tunnus: `SenderProfile.business_id` (migraatio `80a9fb5c7ac4`, Settings "Business ID (Y-tunnus)") näkyy tarjoussivulla myyjän tietojen yhteydessä ja on mukana content_hashin seller-datassa; tyhjä = ei näy.
+
+## Edellinen: seurantaviestit (päivitetty 2026-11-17)
 
 **Automaattiset seurantaviestit (2026-11-17), haara `seurantaviestit`** (ei mergetty, ei deployattu). Migraatio `dc26706bcb28`
 (ei ajettu tuotantoon), `alembic check` puhdas. Testit: pytest 1047 passed, `npm run lint && npm run build` ok.

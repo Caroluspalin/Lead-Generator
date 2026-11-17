@@ -82,6 +82,7 @@ class ObjectStore(Protocol):
         metadata: Optional[dict[str, str]] = None,
     ) -> None: ...
     def exists(self, key: str) -> bool: ...
+    def get(self, key: str) -> Optional[bytes]: ...
     def delete(self, key: str) -> None: ...
     def list_objects(self, prefix: str) -> list[tuple[str, datetime]]: ...
 
@@ -142,6 +143,16 @@ class R2ObjectStore:
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
                 return False
+            raise
+
+    def get(self, key: str) -> Optional[bytes]:
+        from botocore.exceptions import ClientError
+
+        try:
+            return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return None
             raise
 
     def delete(self, key: str) -> None:

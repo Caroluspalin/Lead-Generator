@@ -62,24 +62,42 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   // luurangot tai virhepaneeli sulkisivat avoimen modaalin ja nollaisivat scrollin.
   const loadedForRef = useRef<string | null>(null);
 
-  // Tuo Workerin kirjaamat demoavaukset (palvelin throttlaa). Ei taustapollausta: kutsutaan listan haun yhteydessä.
+  // Tuo Workerin kirjaamat demo- ja tarjousavaukset sekä tarjoushyväksynnät (palvelin throttlaa). Ei taustapollausta: kutsutaan listan haun yhteydessä.
   const syncOpens = useCallback(async () => {
+    interface OpenEvent {
+      lead_id: number;
+      name: string;
+      count: number;
+    }
+    interface Sync {
+      new_opens: OpenEvent[];
+      new_quote_opens: OpenEvent[];
+      accepted_quotes: { lead_id: number; name: string; quote_id: number; moved_to_hired: boolean }[];
+    }
     try {
       const res = await apiFetch(`/leads/sync-opens`, { method: 'POST' });
       if (!res.ok) return;
-      const { new_opens }: { new_opens: { lead_id: number; name: string; count: number }[] } = await res.json();
-      if (new_opens.length === 0) return;
+      const { new_opens, new_quote_opens, accepted_quotes }: Sync = await res.json();
+      if (new_opens.length === 0 && new_quote_opens.length === 0 && accepted_quotes.length === 0) return;
       const listRes = await apiFetch(`/leads`);
       if (listRes.ok) setSavedAgencies(await listRes.json());
-      const names = new_opens.map((o) => o.name).filter(Boolean);
-      toast.success(
-        new_opens.length === 1
-          ? `${names[0] ?? 'A lead'} opened their demo`
-          : `${new_opens.length} leads opened their demo`,
-        { description: new_opens.length > 1 ? names.join(', ') : undefined },
-      );
+      const announce = (events: OpenEvent[], what: string) => {
+        if (events.length === 0) return;
+        const names = events.map((o) => o.name).filter(Boolean);
+        toast.success(
+          events.length === 1 ? `${names[0] ?? 'A lead'} opened their ${what}` : `${events.length} leads opened their ${what}`,
+          { description: events.length > 1 ? names.join(', ') : undefined },
+        );
+      };
+      announce(new_opens, 'demo');
+      announce(new_quote_opens, 'quote');
+      for (const accepted of accepted_quotes) {
+        toast.success(`${accepted.name || 'A lead'} accepted the quote`, {
+          description: accepted.moved_to_hired ? 'Lead moved to Hired.' : 'Lead stage unchanged.',
+        });
+      }
     } catch (err) {
-      console.error('Failed to sync demo opens:', err);
+      console.error('Failed to sync opens:', err);
     }
   }, []);
 
@@ -132,7 +150,7 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
       announceReplies(data);
       loadedForRef.current = userId;
       setError('');
-      if (data.some((a) => a.demo_published)) void syncOpens();
+      if (data.some((a) => a.demo_published || a.quote_status === 'sent' || a.quote_status === 'superseded')) void syncOpens();
     } catch (err) {
       console.error('Failed to fetch leads:', err);
       if (firstLoad) {
