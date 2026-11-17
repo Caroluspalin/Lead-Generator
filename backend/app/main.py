@@ -100,7 +100,7 @@ from .utils.timma import (
     timma_source,
 )
 from .utils.contact_finder import find_contact_email
-from . import followups
+from . import followups, replies
 from .utils.smtp_client import SmtpConfig, SmtpFailure, build_message, send_mail
 from .scoring import lead_score
 from .text_quality import FORBIDDEN_PATTERNS, PRICE_RE, find_forbidden_words, word_count  # noqa: F401
@@ -131,6 +131,13 @@ SMTP_BCC = os.getenv("SMTP_BCC", "").strip()
 # Seurantaviestit: oikea lähetys pois päältä kunnes FOLLOWUPS_SEND_ENABLED=true
 FOLLOWUP_SETTINGS = followups.FollowUpSettings.from_env()
 FOLLOWUP_TICK_SECONDS = 60
+# Vastausten tunnistus (IMAP, vain luku). Päällä vasta kun IMAP_ENABLED=true; tunnukset oletuksena SMTP:n
+IMAP_ENABLED = os.getenv("IMAP_ENABLED", "false").strip().lower() == "true"
+IMAP_HOST = os.getenv("IMAP_HOST", "").strip() or re.sub(r"^smtp", "imap", SMTP_HOST)
+IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+IMAP_USER = os.getenv("IMAP_USER", "").strip() or SMTP_USER
+IMAP_PASSWORD = os.getenv("IMAP_PASSWORD", "") or SMTP_PASSWORD
+IMAP_CHECK_SECONDS = int(os.getenv("IMAP_CHECK_SECONDS", "300"))
 
 # Safety Limits
 MAX_SEARCH_CALLS = 15      # Geocode + Text Search -sivut yhteensä, ehdoton raja per haku
@@ -218,17 +225,42 @@ async def _followup_send_loop() -> None:
         await asyncio.sleep(FOLLOWUP_TICK_SECONDS)
 
 
+def _imap_config() -> Optional[replies.ImapConfig]:
+    if not (IMAP_ENABLED and IMAP_HOST and IMAP_USER and IMAP_PASSWORD):
+        return None
+    return replies.ImapConfig(host=IMAP_HOST, user=IMAP_USER, password=IMAP_PASSWORD, port=IMAP_PORT)
+
+
+async def _imap_reply_loop() -> None:
+    await asyncio.sleep(45)
+    while True:
+        cfg = _imap_config()
+        if cfg is not None:
+            try:
+                outcomes = await asyncio.to_thread(replies.check_mailbox, engine, cfg, SMTP_FROM)
+                for outcome in outcomes:
+                    if outcome.action != "ignored":
+                        logger.info(f"Saapunut viesti käsitelty: {outcome.action} (sarjat {list(outcome.sequence_ids)})")
+            except Exception as e:
+                # Ei viestiä: poikkeus voisi sisältää palvelimen vastauksen
+                logger.error(f"IMAP-tarkistus epäonnistui: {type(e).__name__}")
+        await asyncio.sleep(IMAP_CHECK_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Tietokannan alustus käynnistyessä
     create_db_and_tables()
     expiry_task = asyncio.create_task(_demo_expiry_loop()) if get_object_store() else None
     followup_task = asyncio.create_task(_followup_send_loop()) if FOLLOWUP_SETTINGS.send_enabled else None
+    imap_task = asyncio.create_task(_imap_reply_loop()) if _imap_config() is not None else None
     yield
     if expiry_task:
         expiry_task.cancel()
     if followup_task:
         followup_task.cancel()
+    if imap_task:
+        imap_task.cancel()
 
 
 # App Initialization
