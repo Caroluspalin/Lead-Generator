@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import type { Agency, Demo, SavedAgency, PipelineStatus } from '../types/agency';
 import { apiFetch } from '../lib/api';
 import { useAuth } from './AuthContext';
+import type { SignalFilter } from '../lib/signals';
 
 interface PipelineContextValue {
   savedAgencies: SavedAgency[];
@@ -19,6 +20,7 @@ interface PipelineContextValue {
   runAutodemo: (id: number) => Promise<Demo>;
   markReviewed: (id: number) => Promise<void>;
   refreshTimma: (id: number) => Promise<void>;
+  measureSpeed: (id: number) => Promise<void>;
   updateWebsite: (id: number, website: string | null) => Promise<SavedAgency>;
   updateDealAmounts: (
     id: number,
@@ -28,6 +30,9 @@ interface PipelineContextValue {
   // Pipelinen "Demo published" -suodatin: täällä, jotta valinta säilyy välilehteä vaihdettaessa
   demoPublishedOnly: boolean;
   setDemoPublishedOnly: (value: boolean) => void;
+  // Pipelinen ostosignaalisuodattimet (Slow / Old site / Few reviews), AND-ehto
+  signalFilters: SignalFilter[];
+  toggleSignalFilter: (filter: SignalFilter) => void;
   // Pipelinen "Opened first" -järjestys (demon avanneet ensin)
   openedFirst: boolean;
   setOpenedFirst: (value: boolean) => void;
@@ -48,6 +53,10 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
   const [error, setError] = useState('');
   const [demoPublishedOnly, setDemoPublishedOnly] = useState(false);
   const [openedFirst, setOpenedFirst] = useState(false);
+  const [signalFilters, setSignalFilters] = useState<SignalFilter[]>([]);
+  const toggleSignalFilter = useCallback((filter: SignalFilter) => {
+    setSignalFilters((prev) => (prev.includes(filter) ? prev.filter((f) => f !== filter) : [...prev, filter]));
+  }, []);
   // Käyttäjä, jonka liidit on ladattu. Myöhemmät haut päivittävät listan taustalla:
   // luurangot tai virhepaneeli sulkisivat avoimen modaalin ja nollaisivat scrollin.
   const loadedForRef = useRef<string | null>(null);
@@ -245,6 +254,16 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
     mergeLead(updated);
   };
 
+  const measureSpeed = async (id: number) => {
+    const res = await apiFetch(`/leads/${id}/measure-speed`, { method: 'POST' });
+    if (!res.ok) {
+      const body: { detail?: string } = await res.json().catch(() => ({}));
+      throw new Error(res.status === 503 ? 'Speed test unavailable, try later' : body.detail ?? `Speed test failed: ${res.status}`);
+    }
+    const updated: SavedAgency = await res.json();
+    mergeLead(updated);
+  };
+
   // Backend muuttaa Timma-yrityssivun kanoniseen muotoon (https://timma.fi/yritys/slug), jolloin Refresh Timma näkyy
   const updateWebsite = async (id: number, website: string | null): Promise<SavedAgency> => {
     const res = await apiFetch(`/leads/${id}`, {
@@ -317,11 +336,14 @@ export const PipelineProvider: React.FC<{ children: ReactNode }> = ({
         runAutodemo,
         markReviewed,
         refreshTimma,
+        measureSpeed,
         updateWebsite,
         updateDealAmounts,
         setDemoPublished,
         demoPublishedOnly,
         setDemoPublishedOnly,
+        signalFilters,
+        toggleSignalFilter,
         openedFirst,
         setOpenedFirst,
         refresh,

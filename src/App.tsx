@@ -19,6 +19,7 @@ import type {
 import { usePipeline } from './context/PipelineContext';
 import { useAuth } from './context/AuthContext';
 import { apiFetch } from './lib/api';
+import { FEW_REVIEWS_BELOW } from './lib/signals';
 import Login from './components/Login';
 
 const STATUS_FILTERS: { value: SearchStatusFilter; label: string }[] = [
@@ -97,6 +98,7 @@ function AppShell() {
   const [statusFilters, setStatusFilters] = useState<SearchStatusFilter[]>([]);
   const [minScore, setMinScore] = useState(0);
   const [excludeClosed, setExcludeClosed] = useState(false);
+  const [fewReviews, setFewReviews] = useState(false);
   const [onlyNew, setOnlyNew] = useState(true);
   const [expandNeighbors, setExpandNeighbors] = useState(false);
   const [summary, setSummary] = useState<SearchSummary | null>(null);
@@ -157,6 +159,7 @@ function AppShell() {
         count: String(count),
         min_score: String(minScore),
         exclude_closed: String(excludeClosed),
+        few_reviews: String(fewReviews),
         only_new: String(onlyNew),
         expand_neighbors: String(expandNeighbors),
       });
@@ -359,6 +362,10 @@ function AppShell() {
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked={excludeClosed} onChange={(e) => setExcludeClosed(e.target.checked)} />
                     Exclude closed
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer" title={`Fewer than ${FEW_REVIEWS_BELOW} Google reviews`}>
+                    <input type="checkbox" checked={fewReviews} onChange={(e) => setFewReviews(e.target.checked)} />
+                    Few reviews
                   </label>
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked={expandNeighbors} onChange={(e) => setExpandNeighbors(e.target.checked)} />

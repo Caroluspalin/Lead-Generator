@@ -14,6 +14,7 @@ import {
   Rocket,
   RefreshCw,
   Eye,
+  Gauge,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipeline } from '../context/PipelineContext';
@@ -25,7 +26,7 @@ import type { SavedAgency, PipelineStatus } from '../types/agency';
 import EmailDraftModal from './EmailDraftModal';
 import CallScriptModal from './CallScriptModal';
 import DemoModal from './DemoModal';
-import { ScoreBadge, RatingDisplay, StatusBadge } from './ScoreBadge';
+import { ScoreBadge, RatingDisplay, StatusBadge, SignalBadges } from './ScoreBadge';
 
 const MAX_AMOUNT = 1_000_000;
 
@@ -207,7 +208,8 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setEmailWithDemo(true);
     setEmailModalOpen(true);
   };
-  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, updateWebsite, updateDealAmounts } = usePipeline();
+  const { findEmail, setDoNotContact, runAutodemo, markReviewed, refreshTimma, measureSpeed, updateWebsite, updateDealAmounts } = usePipeline();
+  const [measuring, setMeasuring] = useState(false);
   const [autodemoRunning, setAutodemoRunning] = useState(false);
   const [timmaRefreshing, setTimmaRefreshing] = useState(false);
   const [editingWebsite, setEditingWebsite] = useState(false);
@@ -281,6 +283,23 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       setTimmaRefreshing(false);
     }
   };
+
+  const handleMeasureSpeed = async () => {
+    setMeasuring(true);
+    try {
+      await measureSpeed(agency.id);
+      toast.success('Speed measured');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Speed test unavailable, try later');
+    } finally {
+      setMeasuring(false);
+    }
+  };
+
+  const canMeasureSpeed =
+    !!agency.website &&
+    !hasTimmaPage &&
+    !['NO WEBSITE', 'BROKEN WEBSITE'].includes(agency.website_status ?? '');
 
   const handleToggleDoNotContact = async () => {
     const next = !agency.do_not_contact;
@@ -390,6 +409,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           <StatusBadge status={agency.website_status} title={agency.website_issue ?? undefined} />
         )}
         <RatingDisplay rating={agency.rating} reviewCount={agency.review_count} />
+        <SignalBadges lead={agency} />
         {agency.demo_open_count ? (
           <span
             className="inline-flex items-center gap-1 rounded-sm bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success"
@@ -477,6 +497,18 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                 Edit
               </button>
             </>
+          )}
+          {canMeasureSpeed && !editingWebsite && (
+            <button
+              type="button"
+              onClick={handleMeasureSpeed}
+              disabled={measuring}
+              title={agency.pagespeed_at ? `Measured ${new Date(agency.pagespeed_at).toLocaleDateString()} (Google PageSpeed, mobile). Click to measure again.` : 'Measure mobile load speed with Google PageSpeed Insights (takes up to a minute)'}
+              className={`ml-2.5 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg disabled:opacity-60 ${linkClass}`}
+            >
+              {measuring ? <Loader2 size={11} className="animate-spin" /> : <Gauge size={11} />}
+              {measuring ? 'Measuring…' : agency.pagespeed_at ? 'Re-measure' : 'Measure speed'}
+            </button>
           )}
           {hasTimmaPage && !editingWebsite && (
             <button

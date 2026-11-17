@@ -1,5 +1,7 @@
 import React from 'react';
 import { Star } from 'lucide-react';
+import { signalBadges } from '../lib/signals';
+import type { SignalInput } from '../lib/signals';
 
 interface ScoreTone {
   text: string;
@@ -69,5 +71,29 @@ export const StatusBadge: React.FC<{ status: string; title?: string }> = ({ stat
       <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${style.dot}`} />
       {style.label}
     </span>
+  );
+};
+
+const SIGNAL_TONE = {
+  warn: 'bg-warning/10 text-warning',
+  good: 'bg-success/10 text-success',
+  info: 'bg-raised text-fg-muted',
+} as const;
+
+export const SignalBadges: React.FC<{ lead: SignalInput; fewReviews?: boolean }> = ({ lead, fewReviews }) => {
+  const badges = signalBadges(lead, { fewReviews });
+  if (badges.length === 0) return null;
+  return (
+    <>
+      {badges.map((b) => (
+        <span
+          key={b.key}
+          title={b.title}
+          className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-xs font-medium whitespace-nowrap ${SIGNAL_TONE[b.tone]}`}
+        >
+          {b.label}
+        </span>
+      ))}
+    </>
   );
 };

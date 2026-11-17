@@ -10,7 +10,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import type { Agency, WebsiteStatus } from '../types/agency';
-import { ScoreBadge, RatingDisplay, StatusBadge } from './ScoreBadge';
+import { ScoreBadge, RatingDisplay, StatusBadge, SignalBadges } from './ScoreBadge';
 
 interface LeadTableProps {
   leads: Agency[];
@@ -229,7 +229,10 @@ const LeadTable: React.FC<LeadTableProps> = ({ leads, loading, onSaveLead, onDis
                 </td>
 
                 <td className={`${bodyCell} whitespace-nowrap`}>
-                  <RatingDisplay rating={lead.rating} reviewCount={lead.review_count} />
+                  <div className="flex flex-col items-start gap-1">
+                    <RatingDisplay rating={lead.rating} reviewCount={lead.review_count} />
+                    <SignalBadges lead={lead} />
+                  </div>
                 </td>
 
                 <td className={`${bodyCell} whitespace-nowrap`}>

@@ -24,6 +24,38 @@ avannut julkaistun demon. Worker deployaamatta ja migraatio ajamatta (`alembic u
 
 ## Edellinen tila (päivitetty 2026-11-15)
 
+**Ostosignaalit (2026-11-17), haara `ostosignaalit`** (ei mergetty). Testit: pytest 1014 passed, `npm run lint && npm run build` ok,
+`alembic check` puhdas (SQLite). Migraatio `2d7b3a11de76` (Lead: `pagespeed_lcp_s`, `pagespeed_score`, `pagespeed_at`,
+`site_copyright_year`). MAX_SEARCH_CALLS, `PLACES_FIELD_MASK` ja `lead_score` ennallaan, ei uusia maksullisia kutsuja.
+
+- **Nopeus**: `POST /leads/{id}/measure-speed` (nappi "Measure speed" pipeline-kortin Website-rivillä, vain käsin) kutsuu
+  Google PageSpeed Insights v5:tä (mobiili) `asyncio.to_thread()`-kutsulla, timeout 60 s. Käyttää `GOOGLE_API_KEY`tä jos
+  asetettu, muuten ilman avainta (jaettu kiintiö). 429 / virhe / puuttuva LCP -> 503 "Speed test unavailable, try later",
+  mitään ei tallenneta. Tulos (LCP s, Lighthouse-pisteet, aika) on välimuistina Lead-sarakkeissa; nappi mittaa uudelleen.
+  Merkit: "Slow 8.2 s" (LCP > 4 s), "Fast 1.9 s" (< 2,5 s), väliltä ei merkkiä.
+- **Sivun ikä**: ©-vuosi (suurin löytynyt vuosi, ©/&copy;/(c)/copyright) luetaan etusivun raakasoupista ennen footerin
+  poistoa (`site_content.scan_site` -> `SiteScan.copyright_year`, tallentuu `ensure_site_facts`issa) tai Measure speed
+  -napin yhteydessä yhdellä etusivun GETillä (suojattu `site_content._get`, vain jos vuosi puuttuu). Merkki "Site from
+  2017", kun vuosi on vähintään 3 v vanha. Se on ©-vuosi, ei todellinen ikä (tooltip sanoo niin). Vanhat Deep Scan -
+  välimuistissa olevat liidit saavat vuoden vasta Measure speedistä.
+- **Uusi liike**: ensimmäisen arvostelun päivää ei ole datassa (field mask ennallaan, `reviews`-kenttä olisi kalliimpi
+  SKU), joten vain "Few reviews" (< 10 arvostelua, None = 0). Haussa suodatin `few_reviews` (backend `SearchFilters`,
+  `could_match` säästää sivupyynnöt) ja merkki hakutuloksissa; pipelinessa suodatin ja merkki.
+- **Suodattimet**: Search-lomakkeen "Few reviews"; Pipelinen otsikkorivillä "Slow site", "Old site", "Few reviews"
+  (`PipelineContext.signalFilters`, AND-ehto, säilyy välilehtiä vaihtaessa, yhdistyy Demo published -suodattimeen).
+  Merkit `src/lib/signals.ts` + `SignalBadges` (ScoreBadge.tsx). Nopeus ja ikä näkyvät vain pipelinessa (eivät ole
+  hakutuloksissa ilman lisäkutsuja).
+- **Sähköposti**: `measured_speed_line` lisää promptiin latausaikarivin vain jos `pagespeed_lcp_s` on mitattu ja > 4 s.
+  Muuten ei mainintaa; ©-vuotta ei käytetä viestissä. Demosähköpostissa rivi on kappaleen 2 sisältö, jos sivulla ei ole
+  muuta varmaa ongelmaa.
+- **Mainostaa (Meta Ad Library) jätetty pois**: API vaatii henkilöllisyyden vahvistuksen (facebook.com/ID) ja Meta for
+  Developers -sovelluksen; kattavuus EU:n kaupallisille mainoksille on vain kolmansien osapuolten lähteiden varassa eikä
+  nimihaku ole luotettava. Ei toteutettu. Jos halutaan, käyttäjän pitää tehdä vahvistus ja antaa token.
+- **Käsitesti**: (1) Pipeline-kortti, jolla on toimiva sivu -> Measure speed -> merkki "Slow/Fast x.x s" ja nappi muuttuu
+  Re-measure-tilaan; ilman internetyhteyttä / 429 -> toast "Speed test unavailable, try later". (2) Old site -rasti
+  näyttää vain ©-vuoden perusteella vanhat. (3) Search -> Few reviews -rasti: vain < 10 arvostelun liikkeet. (4) Generoi
+  sähköposti mitatulle hitaalle sivulle: viesti mainitsee mitatun sekuntimäärän, ei muita lukuja.
+
 **Myyntityön sujuvoitus: Timma-osoitteet (2026-11-13), `main`**, commitit `84a52e5` (website-kentän muokkaus) ja
 `b84854b` (varaa.timma.fi). Testit: pytest 963 passed, `npm run lint && npm run build` ok. Ei migraatioita, ei
 Worker-deployta. TIMMA_IMPORT_ENABLED, hideFromMarketplace-esto, MAX_SEARCH_CALLS, field mask ja demopohjat ennallaan.
