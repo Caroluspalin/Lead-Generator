@@ -1,5 +1,9 @@
 # Agency Hunter — Save State (nykytila)
 
+## Deploy 2026-11-19
+
+Laajennukset A–E ovat mainissa ja tuotannossa. Tuotannon Supabase ajettu `alembic upgrade head` (`0d6e4f41c99b` → `80a9fb5c7ac4`, 6 migraatiota: deal value, demo opens, buying signals, seurantaviestit, tarjous, business_id), `alembic check` puhdas. Worker deployattu (`agency-hunter-demos`, versio `6711f20f`, `demo.palinweb.fi`), savutesti: `/q/<tuntematon>` 404 + noindex. Testit ennen deployta: pytest 1100 passed, worker 41. `FOLLOWUPS_SEND_ENABLED` ja `IMAP_ENABLED` ovat yhä pois päältä. Alla olevat "ei deployattu / migraatio ajamatta" -maininnat ovat vanhentuneita.
+
 ## Mihin jäätiin (päivitetty 2026-11-17, tarjous linkkinä)
 
 **Tarjous linkkinä (2026-11-17), haara `tarjouslinkki`** (ei mergetty, ei deployattu, migraatio `6d212db6455a` ajamatta tuotantoon,
