@@ -1654,7 +1654,8 @@ def check_generated_text(text: str, *, kind: str, lead_id: int, model: str, max_
         warnings.append(f"kielletyt sanat: {', '.join(forbidden)}")
     if max_words is not None and word_count(text) > max_words + 20:
         warnings.append(f"liian pitkä: {word_count(text)} sanaa (tavoite ~{max_words})")
-    if PRICE_RE.search(text):
+    # Demo-osoitteen satunnaisliite (esim. "-k7x2e") voi näyttää hinnalta ("2e")
+    if PRICE_RE.search(re.sub(r"https?://\S+", "", text)):
         warnings.append("tekstissä mainitaan hinta")
     for w in warnings:
         logger.warning(f"Generoitu {kind} (liidi {lead_id}, {model}): {w}")

@@ -18,6 +18,7 @@ from app.main import (
     build_demo_email_body,
     build_demo_email_user_prompt,
     build_signature,
+    check_generated_text,
     clean_demo_paragraphs,
     customer_impact,
     demo_email_subject,
@@ -468,3 +469,10 @@ def test_demo_email_mentions_existing_booking() -> None:
     assert "Nykyinen ajanvarauksenne toimii sivulla sellaisenaan." in email_head(body)
     assert word_count(email_head(body)) <= DEMO_EMAIL_MAX_WORDS
     assert "ajanvaraus" not in build_demo_email_body(MODEL_TEXT, _profile(), URL).lower()
+
+
+@pytest.mark.parametrize("suffix", ["k7x2e", "a3e", "e9e"])
+def test_price_check_ignores_demo_url_slug_that_looks_like_a_price(suffix: str) -> None:
+    text = f"tein luonnoksen:\nhttps://demo.palinweb.fi/kauniaisten-parturi-{suffix}\nLinkki aukeaa puhelimella."
+    assert "tekstissä mainitaan hinta" not in check_generated_text(text, kind="sähköposti", lead_id=1, model="m")
+    assert "tekstissä mainitaan hinta" in check_generated_text(text + " Hinta on 390 €.", kind="sähköposti", lead_id=1, model="m")
