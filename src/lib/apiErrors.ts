@@ -21,6 +21,9 @@ export function outreachErrorMessage(status: number, detail: string): string {
   if (status === 409 && d.includes('not published')) {
     return 'The demo is not published, so no email was created. Publish the demo first.';
   }
+  if (status === 409 && d.includes('services not checked')) {
+    return "Services not checked: tick 'Services checked' and click Save texts in the Demo window before publishing.";
+  }
   if (status === 428) return 'Add your sender profile in Settings (sidebar) before creating demos and emails.';
   if (status === 503) return 'Publishing is not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env). No email was created.';
   if (status === 502 && (d.includes('upload') || d.includes('r2'))) {

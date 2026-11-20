@@ -3,7 +3,7 @@
 ## Remonttipohjat (2026-11-20, `main`, ei pushattu, Worker deployaamatta)
 
 Kaksi uutta pohjaa remonttiliideille: `remontti` (Halkolan pohjalta: kylpyhuone, sauna, putki) ja `lampopumppu` (Hongiston pohjalta).
-Ei migraatiota (`Demo.template` on merkkijono, uusi `service_area` on osa `content_json`:ia). Testit: pytest 1146 passed, `npm run lint && npm run build` ok.
+Ei migraatiota (`Demo.template` on merkkijono, uusi `service_area` on osa `content_json`:ia). Testit: pytest 1161 passed, `npm run lint && npm run build` ok.
 MAX_SEARCH_CALLS, field mask, Timma-tuonti, haku ja muut pohjat ennallaan.
 
 - **Valinta** (`template_for_lead(name, primary_type)`): tuotannon liideistä `primary_type` on useimmiten vain `service` (173/300) tai `general_contractor`, joten
@@ -11,15 +11,17 @@ MAX_SEARCH_CALLS, field mask, Timma-tuonti, haku ja muut pohjat ennallaan.
   tai nimessä remont/saneera/kylpy/laato/laatt/kaakel/putki/lvi (sanana)/sauna/märkätil/rakennus. Muut: `template_for_primary_type` kuten ennen. Käsinvalinta modaalissa toimii.
 - **Ei AI:ta**: `generate_demo` ohittaa OpenAI-, Timma-, Deep Scan-, Unsplash- ja Place Details -kutsut (`DemoTemplate.static`, `static_content()`). Regenerate säilyttää käsin
   muokatun sisällön. Pohjan vaihto remontti <-> lämpöpumppu palauttaa oletuslistan; remonttipohjasta muuhun vaihto antaa 422 (generoi uudelleen).
-- **Täyttö**: nimi, kaupunki, osoite, puhelin, "Lue arvostelut Googlessa" (`search.google.com/local/reviews?placeid=`, muuten `maps_url`, muuten ei osiota; ei arvosanaa eikä määrää).
+- **Hero**: h1 = palvelulistan kaksi ensimmäistä nimeä + kaupunki (`hero_heading`: "Kylpyhuone- ja saunaremontit Espoossa"; yhteinen pääte yhdistetään, remontti -> remontit, kaupungin sisäpaikallissijamuoto vain tunnetuille kaupungeille, muuten "…, Kaupunki"), yrityksen nimi pienenä yläpuolella, alaotsikko "Pyydä tarjous lomakkeella tai soita [numero]." (ilman numeroa vain lomake).
+- **Palvelut tarkistettu**: `DemoContent.services_checked` (content_json, ei migraatiota). Remonttipohjan julkaisu (`POST /demo/publish`, myös Autodemo) palauttaa 409 "Services not checked", kunnes kortin Demo-ikkunassa on valittu "Services checked" ja tallennettu. Palvelun muokkaus draftissa nollaa ruudun; pohjan vaihto remontti <-> lämpöpumppu nollaa tilan, Regenerate säilyttää. Jo julkaistua demoa ei oteta pois, jos ruutu poistetaan jälkikäteen.
+- **Täyttö**: nimi, kaupunki, osoite, puhelin, "Lue arvostelut Googlessa" (`search.google.com/local/reviews?placeid=`, muuten `maps_url`, muuten ei riviä; ei arvosanaa eikä määrää) on kompakti rivi "Arvostelut Googlessa" yhteystiedoissa, ei omaa osiota.
   Kortilta (Demo-ikkuna): palvelulista (3-6) ja Service area. Tyhjä toimialue = osiota ei näytetä. Puhelin puuttuu = ei Soita-nappia.
 - **Neutralisoitu sisältö**: Halkolan ja Hongiston keksityt väitteet (kestot, KSE, sertifikaatit, "ilman maksua", toimialueet, nimetyt työvaiheet) on poistettu. Kuvituskuvat ennen/jälkeen
-  -säätimessä, päällä paikkamerkki "Teidän kohteenne kuvat tähän…". Banneri "Luonnos, tehnyt {yritys tai nimi lähettäjäprofiilista}", footer "Kuvat: tekoälyllä tehty kuvitus.",
+  -säätimessä, päällä paikkamerkki "Teidän kohteenne kuvat tähän…". Banneri "Luonnos, tehnyt {brand_name, company_name tai name lähettäjäprofiilista}", footer "Kuvat: tekoälyllä tehty kuvitus.",
   lomake näyttää vain demo-vahvistuksen. Kotitalousvähennyksen luvut ja laskurit kopioitu mallisivuilta sellaisinaan (testi vartioi).
 - **Assetit** (`templates/demo/assets/{remontti,lampopumppu}/`): remontti 7,1 Mt, lampopumppu 8,9 Mt (121 framea x 2 kokoa, kuvat, fontit), noin 520 tiedostoa R2:ssa kerran
   (sisällön tiivisteellä, `immutable`, `upload_assets` ohittaa jo ladatut). Julkaistu demo lisää vain HTML:n. Framet ovat `f-001.webp`/`m-001.webp`, osoitteet HTML:n `data-f`/`data-m`.
 - **Tekemättä**: `cd worker && npx wrangler deploy` ei tarvita CSP:n vuoksi (CSP_V2 kattaa), mutta ensimmäinen julkaisu lataa ~16 Mt R2:een. Käsin: iOS Safari -tarkistus ja
-  Lighthouse. Banneri käyttää `company_name`a tai `name`a profiilista: varmista, että profiilissa company_name = "Palin Web".
+  Lighthouse. Tuotantoprofiilissa company_name on tyhjä ja brand_name "Palin Web", joten remonttipohjat käyttävät brand_namea.
 
 ## Deploy 2026-11-19
 

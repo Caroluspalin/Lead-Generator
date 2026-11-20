@@ -28,8 +28,9 @@
     <canvas id="scrubCanvas" aria-hidden="true" data-f="{{ frames['f'] }}" data-m="{{ frames['m'] }}"></canvas>
     <div class="scrub-shade" aria-hidden="true"></div>
     <div class="wrap scrub-copy">
-      <h1>{{ business.name }}</h1>
-      <p class="lede">{% if business.city %}{{ business.city }}. {% endif %}Pyydä tarjous alla olevalla lomakkeella{% if tel %} tai soita {{ business.phone }}{% endif %}.</p>
+      <p class="yritys">{{ business.name }}</p>
+      <h1>{{ hero_title }}</h1>
+      <p class="lede">Pyydä tarjous lomakkeella{% if tel %} tai soita {{ business.phone }}{% endif %}.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="#tarjous">Pyydä tarjous</a>
         <a class="btn btn-light" href="#vahennys">Laske kotitalousvähennys</a>
@@ -139,21 +140,6 @@
   </div>
 </section>
 
-{% if reviews_url %}
-<section class="band" aria-labelledby="arvostelut-h">
-  <div class="wrap reviews">
-    <div class="g-box">
-      <b>Asiakkaiden arviot Googlessa</b>
-      <a class="btn btn-ghost btn-small" href="{{ reviews_url }}" rel="noopener noreferrer">Lue arvostelut Googlessa</a>
-    </div>
-    <div>
-      <h2 id="arvostelut-h">Lukekaa, mitä asiakkaat sanovat</h2>
-      <p class="soft-52">Arvostelut ovat Googlessa omilla nimillä kirjoitettuina.</p>
-    </div>
-  </div>
-</section>
-{% endif %}
-
 <section id="tarjous" aria-labelledby="tarjous-h">
   <div class="wrap form-wrap">
     <div>
@@ -170,6 +156,12 @@
         <li><span>Toimialue</span><b>{{ content.service_area }}</b></li>
 {% endif %}
       </ul>
+{% if reviews_url %}
+      <div class="arvostelut-rivi">
+        <b>Arvostelut Googlessa</b>
+        <a class="btn btn-ghost btn-small" href="{{ reviews_url }}" rel="noopener noreferrer">Lue arvostelut Googlessa</a>
+      </div>
+{% endif %}
     </div>
 
     <form id="quote" novalidate>

@@ -324,6 +324,8 @@ class DemoContent(DemoAIContent):
     price_note: str = Field(default=DEFAULT_PRICE_NOTE, min_length=5, max_length=120)
     # Vain remonttipohjat, käsin kortilta. Tyhjä = osiota ei näytetä
     service_area: Optional[str] = Field(default=None, max_length=120)
+    # Remonttipohjat: käyttäjä on käynyt palvelulistan läpi kortilta. Julkaisu estetty ennen tätä (oletuslista ei ole yrityksen oma)
+    services_checked: bool = False
 
 
 class DemoImages(BaseModel):
@@ -441,6 +443,50 @@ def static_content(template: str) -> DemoStoredContent:
         services=[DemoService(name=n, description=d) for n, d in _STATIC_SERVICES[template]],
         price_note=DEFAULT_PRICE_NOTE,
     )
+
+
+# Sisäpaikallissijamuoto tunnetuille kaupungeille; muille ei taivuteta (arvaus olisi väärin yhtä usein)
+_CITY_IN = {
+    "espoo": "Espoossa", "helsinki": "Helsingissä", "vantaa": "Vantaalla", "kauniainen": "Kauniaisissa",
+    "kirkkonummi": "Kirkkonummella", "tampere": "Tampereella", "turku": "Turussa", "oulu": "Oulussa",
+    "lahti": "Lahdessa", "jyväskylä": "Jyväskylässä", "kuopio": "Kuopiossa", "porvoo": "Porvoossa",
+    "sipoo": "Sipoossa", "vihti": "Vihdissä", "lohja": "Lohjalla", "nurmijärvi": "Nurmijärvellä",
+    "tuusula": "Tuusulassa", "kerava": "Keravalla", "järvenpää": "Järvenpäässä", "hyvinkää": "Hyvinkäällä",
+    "pori": "Porissa", "vaasa": "Vaasassa", "kotka": "Kotkassa", "hämeenlinna": "Hämeenlinnassa",
+    "rovaniemi": "Rovaniemellä", "joensuu": "Joensuussa", "seinäjoki": "Seinäjoella",
+    "lappeenranta": "Lappeenrannassa", "kouvola": "Kouvolassa", "raasepori": "Raaseporissa",
+}
+_SHARED_SUFFIX_MIN = 6
+_PLURAL_SUFFIX = {"remontti": "remontit"}
+
+
+def _lower_first(text: str) -> str:
+    # "LVI-työt" ei muutu, "Saunaremontti" -> "saunaremontti"
+    return text if text[:2].isupper() else text[:1].lower() + text[1:]
+
+
+def _joined_services(first: str, second: str) -> str:
+    """"Kylpyhuoneremontti" + "Saunaremontti" -> "Kylpyhuone- ja saunaremontit"; muuten "A ja b"."""
+    a, b = first.strip(), second.strip()
+    suffix = ""
+    for size in range(min(len(a), len(b)) - 1, _SHARED_SUFFIX_MIN - 1, -1):
+        if a[-size:].lower() == b[-size:].lower():
+            suffix = b[-size:]
+            break
+    if suffix:
+        plural = _PLURAL_SUFFIX.get(suffix.lower(), suffix)
+        return f"{a[:-len(suffix)]}- ja {_lower_first(b[:-len(suffix)])}{plural}"
+    return f"{a} ja {_lower_first(b)}"
+
+
+def hero_heading(services: list[DemoService], city: str) -> str:
+    """Remonttipohjien h1: palvelulistan kaksi ensimmäistä nimeä + kaupunki, ei keksittyä tekstiä."""
+    text = _joined_services(services[0].name, services[1].name) if len(services) > 1 else services[0].name
+    city = city.strip()
+    if not city:
+        return text
+    inflected = _CITY_IN.get(city.casefold())
+    return f"{text} {inflected}" if inflected else f"{text}, {city}"
 
 
 def google_reviews_url(place_id: Optional[str], maps_url: Optional[str]) -> Optional[str]:
@@ -904,6 +950,7 @@ class DemoSender:
     company_name: Optional[str]
     phone: Optional[str]
     website: Optional[str]
+    brand_name: Optional[str] = None  # profiilin "Palin Web": remonttipohjien banneri ja footer
 
 
 @dataclass(frozen=True)
@@ -1385,7 +1432,7 @@ def _render_static(
 
     # Framet ovat sisällön tiivisteellä osoitettuja tiedostoja, joten JS saa osoitteet HTML:stä (ei fetch/arvausta)
     frames = {key: " ".join(a.url for a in asset_series(template, key)) for key in ("f", "m")}
-    maker = sender.company_name or sender.name
+    maker = sender.brand_name or sender.company_name or sender.name
     return _env.get_template(f"{template}.html.j2").render(
         template=template,
         palette=palette,
@@ -1394,6 +1441,7 @@ def _render_static(
         content=content,
         asset=asset,
         frames=frames,
+        hero_title=hero_heading(content.services, business.city),
         business=business,
         reviews_url=google_reviews_url(business.place_id, business.maps_url),
         sender=sender,

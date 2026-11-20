@@ -2619,7 +2619,7 @@ def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lea
         ),
         sender=DemoSender(
             name=profile.name, company_name=profile.company_name, phone=profile.phone,
-            website=_safe_web_url(profile.website),
+            website=_safe_web_url(profile.website), brand_name=profile.brand_name,
         ),
     )
 
@@ -3068,6 +3068,10 @@ def publish_demo(
     if lead.do_not_contact:
         raise HTTPException(409, "Lead is marked do not contact")
     profile = _require_sender_profile(session, user)
+    if is_static_template(demo.template) and not DemoStoredContent.model_validate_json(demo.content_json).services_checked:
+        raise HTTPException(
+            409, "Services not checked: tick 'Services checked' and save the texts in the Demo window before publishing"
+        )
     store = get_object_store()
     if store is None:
         raise HTTPException(503, "Publishing not configured (R2_* and DEMO_PUBLIC_BASE_URL in backend .env)")

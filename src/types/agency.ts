@@ -30,6 +30,7 @@ export interface DemoContent {
   services: DemoService[];
   price_note: string;
   service_area?: string | null; // vain remonttipohjat; tyhjä = osiota ei näytetä
+  services_checked?: boolean; // remonttipohjat: julkaisu estetty, kunnes palvelulista on tarkistettu
 }
 
 // Unsplash-kuva (hotlinkattava raw_url sisältää ixid-parametrin, joka pitää säilyttää)

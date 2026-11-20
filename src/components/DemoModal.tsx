@@ -40,6 +40,9 @@ type PhoneShot =
   | { status: 'unavailable' }
   | { status: 'error' };
 
+const SERVICES_NOT_CHECKED =
+  "Services not checked: tick 'Services checked' and click Save texts in the Demo window before publishing.";
+
 const toEditable = (demo: Demo): DemoContent => ({
   hero_title: demo.content.hero_title,
   hero_subtitle: demo.content.hero_subtitle,
@@ -48,6 +51,7 @@ const toEditable = (demo: Demo): DemoContent => ({
   services: demo.content.services.map((s) => ({ ...s })),
   price_note: demo.content.price_note,
   service_area: demo.content.service_area ?? null,
+  services_checked: demo.content.services_checked ?? false,
 });
 
 const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreateEmail }) => {
@@ -176,6 +180,11 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
 
   const setPublished = async (publish: boolean) => {
     if (!publish && !window.confirm('Take the demo offline? The link in sent emails stops working.')) return;
+    if (publish && demo && isStatic && !demo.content.services_checked) {
+      toast.error(SERVICES_NOT_CHECKED);
+      setError(SERVICES_NOT_CHECKED);
+      return;
+    }
     setBusy('publish');
     try {
       const res = await apiFetch(`/leads/${agency.id}/demo/${publish ? 'publish' : 'unpublish'}`, { method: 'POST' });
@@ -197,6 +206,12 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
     if (!demo || !onCreateEmail) return;
     if (demo.status === 'published') {
       onCreateEmail();
+      return;
+    }
+    if (isStatic && !demo.content.services_checked) {
+      const message = SERVICES_NOT_CHECKED;
+      setError(message);
+      toast.error(message);
       return;
     }
     setBusy('publish');
@@ -250,7 +265,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
 
   const updateService = (index: number, key: 'name' | 'description', value: string) =>
     setDraft((d) =>
-      d ? { ...d, services: d.services.map((s, i) => (i === index ? { ...s, [key]: value } : s)) } : d,
+      d ? { ...d, services_checked: false, services: d.services.map((s, i) => (i === index ? { ...s, [key]: value } : s)) } : d,
     );
 
   const removePrice = (index: number) =>
@@ -545,7 +560,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                                 type="button"
                                 aria-label="Remove last service"
                                 disabled={draft.services.length <= MIN_SERVICES}
-                                onClick={() => setDraft({ ...draft, services: draft.services.slice(0, -1) })}
+                                onClick={() => setDraft({ ...draft, services_checked: false, services: draft.services.slice(0, -1) })}
                                 className="grid size-6 place-content-center rounded-sm text-fg-muted hover:text-fg hover:bg-raised disabled:opacity-30"
                               >
                                 <Minus size={14} />
@@ -555,7 +570,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                                 aria-label="Add service"
                                 disabled={draft.services.length >= MAX_SERVICES}
                                 onClick={() =>
-                                  setDraft({ ...draft, services: [...draft.services, { name: '', description: '' }] })
+                                  setDraft({ ...draft, services_checked: false, services: [...draft.services, { name: '', description: '' }] })
                                 }
                                 className="grid size-6 place-content-center rounded-sm text-fg-muted hover:text-fg hover:bg-raised disabled:opacity-30"
                               >
@@ -603,6 +618,22 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                           </div>
                         </div>
 
+                        {isStatic && (
+                          <label className="flex items-start gap-2 text-sm text-fg">
+                            <input
+                              type="checkbox"
+                              checked={draft.services_checked ?? false}
+                              onChange={(e) => setDraft({ ...draft, services_checked: e.target.checked })}
+                              className="mt-0.5"
+                            />
+                            <span>
+                              Services checked
+                              <span className="block text-xs text-fg-subtle">
+                                Required before publishing. The default list is not this company&apos;s own. Click Save texts after ticking.
+                              </span>
+                            </span>
+                          </label>
+                        )}
                         {isStatic ? (
                           <label className={labelClass}>
                             Service area (section is hidden when empty)

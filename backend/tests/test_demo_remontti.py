@@ -11,9 +11,11 @@ from app.demo_site import (
     TEMPLATES,
     DemoBusiness,
     DemoSender,
+    DemoService,
     asset_series,
     demo_asset,
     google_reviews_url,
+    hero_heading,
     phone_to_tel,
     is_static_template,
     render_demo_html,
@@ -29,7 +31,7 @@ BUSINESS = DemoBusiness(
     name="Putki & Saneeraus Oy", city="Espoo", address="Testitie 1, 02100 Espoo", phone="040 123 4567",
     maps_url="https://maps.google.com/?cid=1", place_id="ChIJabc123",
 )
-SENDER = DemoSender(name="Carolus Palin", company_name="Palin Web", phone=None, website="https://palinweb.fi")
+SENDER = DemoSender(name="Carolus Palin", company_name=None, phone=None, website="https://palinweb.fi", brand_name="Palin Web")
 
 
 def render(template: str, business: DemoBusiness = BUSINESS, **content_updates: Any) -> str:
@@ -86,6 +88,48 @@ def test_mandatory_markers(template: str) -> None:
     # Lomake ei lähetä mitään: ei action-attribuuttia eikä method, vahvistus kertoo että kyse on luonnoksesta
     assert "<form id=\"quote\" novalidate>" in html
     assert "Tietoja ei lähetetty minnekään" in html
+
+
+def services(*names: str) -> list[DemoService]:
+    return [DemoService(name=n, description=f"Kuvaus palvelulle {n}.") for n in names]
+
+
+@pytest.mark.parametrize("names,city,expected", [
+    (("Kylpyhuoneremontti", "Saunaremontti", "WC-remontti"), "Espoo", "Kylpyhuone- ja saunaremontit Espoossa"),
+    (("Putki- ja LVI-työt", "Saunaremontti"), "Vantaa", "Putki- ja LVI-työt ja saunaremontti Vantaalla"),
+    (("Maalämpö", "Ilma-vesilämpöpumppu"), "Kauniainen", "Maalämpö ja ilma-vesilämpöpumppu Kauniaisissa"),
+    (("Putkiasennus", "Pumppuasennus"), "Espoo", "Putki- ja pumppuasennus Espoossa"),
+    (("Kylpyhuoneremontti", "Saunaremontti"), "Pikkukylä", "Kylpyhuone- ja saunaremontit, Pikkukylä"),
+    (("Kylpyhuoneremontti", "Saunaremontti"), "", "Kylpyhuone- ja saunaremontit"),
+    (("Kylpyhuoneremontti", "LVI-työt"), "Espoo", "Kylpyhuoneremontti ja LVI-työt Espoossa"),
+])
+def test_hero_heading_from_services_and_city(names: tuple[str, ...], city: str, expected: str) -> None:
+    assert hero_heading(services(*names), city) == expected
+
+
+@pytest.mark.parametrize("template", STATIC)
+def test_hero_has_company_name_above_services_heading_and_short_subtitle(template: str) -> None:
+    html = render(template)
+    heading = hero_heading(static_content(template).services, BUSINESS.city)
+    assert re.search(rf'<p class="yritys">Putki &amp; Saneeraus Oy</p>\s*<h1>{re.escape(heading)}</h1>', html)
+    assert '<p class="lede">Pyydä tarjous lomakkeella tai soita 040 123 4567.</p>' in html
+    no_phone = render(template, DemoBusiness(name="Ei Puhelinta Oy", city="Espoo", address=None, phone=None, maps_url=None))
+    assert '<p class="lede">Pyydä tarjous lomakkeella.</p>' in no_phone
+
+
+@pytest.mark.parametrize("template", STATIC)
+def test_banner_and_footer_use_brand_name(template: str) -> None:
+    html = render(template)
+    assert "Luonnos, tehnyt Palin Web." in html and "Carolus" not in html
+
+
+@pytest.mark.parametrize("template", STATIC)
+def test_reviews_are_a_compact_row_in_contact_section(template: str) -> None:
+    html = render(template)
+    assert "Lukekaa" not in html and 'id="arvostelut-h"' not in html
+    contact = html[html.index('id="tarjous"'):html.index('<form id="quote"')]
+    assert 'class="arvostelut-rivi"' in contact and "<b>Arvostelut Googlessa</b>" in contact
+    assert "Lue arvostelut Googlessa" in contact
 
 
 @pytest.mark.parametrize("template", STATIC)
@@ -247,6 +291,46 @@ def test_template_switch_between_renovation_and_others(
     assert demo["template"] == "remontti"
 
 
+def check_services(client: TestClient, lead_id: int) -> None:
+    demo = client.get(f"/leads/{lead_id}/demo").json()
+    content = {k: v for k, v in demo["content"].items() if k not in ("opening_hours", "opening_periods", "images", "site_based", "timma")}
+    content["services_checked"] = True
+    assert client.patch(f"/leads/{lead_id}/demo", json={"content": content}).status_code == 200
+
+
+def test_publish_blocked_until_services_checked(
+    client_a: TestClient, make_lead: Any, sender_profile: dict[str, Any], no_ai: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = FakeStore()
+    monkeypatch.setattr("app.main.get_r2_config", lambda: CONFIG)
+    monkeypatch.setattr("app.main.get_object_store", lambda: store)
+    monkeypatch.setattr("app.demo_publish._uploaded_assets", set())
+    lead = make_lead(name="Saneeraus Laine", city="Espoo", primary_type="service")
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    assert demo["content"]["services_checked"] is False
+    blocked = client_a.post(f"/leads/{lead['id']}/demo/publish")
+    assert blocked.status_code == 409 and "Services not checked" in blocked.json()["detail"]
+    assert store.headers == {}
+    check_services(client_a, lead["id"])
+    assert client_a.post(f"/leads/{lead['id']}/demo/publish").status_code == 200
+    # Regenerate säilyttää tarkistetun tilan, pohjan vaihto palauttaa oletuslistan ja vaatii tarkistuksen uudelleen
+    assert client_a.post(f"/leads/{lead['id']}/demo", json={}).json()["content"]["services_checked"] is True
+    switched = client_a.patch(f"/leads/{lead['id']}/demo", json={"template": "lampopumppu"}).json()
+    assert switched["content"]["services_checked"] is False
+
+
+def test_autodemo_creates_draft_but_does_not_publish_unchecked_services(
+    client_a: TestClient, make_lead: Any, sender_profile: dict[str, Any], no_ai: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = FakeStore()
+    monkeypatch.setattr("app.main.get_r2_config", lambda: CONFIG)
+    monkeypatch.setattr("app.main.get_object_store", lambda: store)
+    lead = make_lead(name="Saneeraus Laine", city="Espoo", primary_type="service")
+    res = client_a.post(f"/leads/{lead['id']}/autodemo")
+    assert res.status_code == 409 and "Services not checked" in res.json()["detail"]
+    assert client_a.get(f"/leads/{lead['id']}/demo").json()["status"] == "draft"
+
+
 def test_publish_uploads_shared_assets_once(
     client_a: TestClient, make_lead: Any, sender_profile: dict[str, Any], no_ai: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -267,6 +351,7 @@ def test_publish_uploads_shared_assets_once(
         lead = make_lead(name=name, city="Espoo", primary_type="service")
         ids.append(lead["id"])
         client_a.post(f"/leads/{lead['id']}/demo", json={})
+        check_services(client_a, lead["id"])
         assert client_a.post(f"/leads/{lead['id']}/demo/publish").status_code == 200
     expected = {asset_key(a) for a in template_assets("remontti")}
     assert expected <= set(puts)
