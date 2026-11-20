@@ -132,9 +132,10 @@ def test_template_for_primary_type(primary_type: str | None, template: str) -> N
 
 
 def test_each_template_has_two_to_three_schemes() -> None:
-    assert set(TEMPLATES) == {"cafe", "salon", "barber", "premium", "beauty", "restaurant", "services"}
+    assert set(TEMPLATES) == {"cafe", "salon", "barber", "premium", "remontti", "lampopumppu", "beauty", "restaurant", "services"}
     for t in TEMPLATES.values():
-        assert 2 <= len(t.schemes) <= 3
+        # Remonttipohjilla on yksi paletti (tests/test_demo_remontti.py)
+        assert t.static or 2 <= len(t.schemes) <= 3
 
 
 def test_validate_template_choice() -> None:
@@ -447,9 +448,11 @@ def test_unknown_token_is_404(client_a: TestClient) -> None:
 def test_templates_catalog_endpoint(client_a: TestClient) -> None:
     catalog = client_a.get("/demo-templates").json()
     # Uudet (versio 2) pohjat ensin
-    assert [t["id"] for t in catalog] == ["cafe", "salon", "barber", "premium", "beauty", "restaurant", "services"]
+    assert [t["id"] for t in catalog] == [
+        "cafe", "salon", "barber", "premium", "remontti", "lampopumppu", "beauty", "restaurant", "services",
+    ]
     assert {s["id"] for s in catalog[0]["color_schemes"]} == {"paahto", "kaura", "ruis"}
-    assert {s["id"] for s in catalog[4]["color_schemes"]} == {"rose", "sage", "noir"}
+    assert {s["id"] for s in catalog[6]["color_schemes"]} == {"rose", "sage", "noir"}
 
 
 # --- Tenant-isolaatio ---

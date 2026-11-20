@@ -29,6 +29,7 @@ export interface DemoContent {
   about: string;
   services: DemoService[];
   price_note: string;
+  service_area?: string | null; // vain remonttipohjat; tyhjä = osiota ei näytetä
 }
 
 // Unsplash-kuva (hotlinkattava raw_url sisältää ixid-parametrin, joka pitää säilyttää)
@@ -85,6 +86,7 @@ export interface DemoTemplateOption {
   id: string;
   label: string;
   version: number; // 2 = uudet pohjat (cafe ...), 1 = Classic
+  static?: boolean; // remonttipohjat: ei AI-tekstiä, vain palvelulista ja toimialue muokattavissa
   color_schemes: { id: string; label: string }[];
 }
 

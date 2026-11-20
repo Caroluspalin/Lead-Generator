@@ -80,7 +80,9 @@ from .demo_site import (
     parse_ai_content,
     render_demo_html,
     retry_prompt,
-    template_for_primary_type,
+    is_static_template,
+    static_content,
+    template_for_lead,
     templates_catalog,
     validate_template_choice,
 )
@@ -2613,7 +2615,7 @@ def _render_for(demo_template: str, scheme: str, content: DemoStoredContent, lea
         utm_app=UNSPLASH_APP_NAME,
         business=DemoBusiness(
             name=lead.name, city=lead.city, address=lead.address, phone=lead.phone,
-            maps_url=_safe_web_url(lead.maps_url), booking_url=demo_booking_url(lead),
+            maps_url=_safe_web_url(lead.maps_url), booking_url=demo_booking_url(lead), place_id=lead.google_place_id,
         ),
         sender=DemoSender(
             name=profile.name, company_name=profile.company_name, phone=profile.phone,
@@ -2840,8 +2842,6 @@ async def generate_demo(
 ):
     lead = _get_contactable_lead(session, lead_id, user)
     profile = _require_sender_profile(session, user)
-    if not OPENAI_API_KEY:
-        raise HTTPException(500, "OPENAI_API_KEY not configured")
     demo = session.exec(select(Demo).where(Demo.lead_id == lead_id, Demo.user_id == user.id)).first()
     # Regenerate ilman pohjaa säilyttää käsin valitun pohjan ja värin; Googlen luokka vain ensimmäiselle demolle
     if req.template:
@@ -2849,12 +2849,21 @@ async def generate_demo(
     elif demo is not None:
         template_choice, scheme_choice = demo.template, req.color_scheme or demo.color_scheme
     else:
-        template_choice, scheme_choice = template_for_primary_type(lead.primary_type), req.color_scheme
+        template_choice, scheme_choice = template_for_lead(lead.name, lead.primary_type), req.color_scheme
     try:
         template, scheme = validate_template_choice(template_choice, scheme_choice)
     except ValueError as e:
         raise HTTPException(422, str(e))
 
+    if is_static_template(template):
+        # Remonttipohjat: ei AI:ta, Timmaa, kuvahakua eikä Place Details -kutsua. Regenerate säilyttää käsin muokatun sisällön
+        stored = static_content(template)
+        if demo is not None and demo.template == template:
+            stored = DemoStoredContent.model_validate_json(demo.content_json)
+        return await _save_demo(session, request, lead, profile, demo, template, scheme, stored)
+
+    if not OPENAI_API_KEY:
+        raise HTTPException(500, "OPENAI_API_KEY not configured")
     timma = await ensure_timma(session, lead)
     site_facts, scan_results = await ensure_site_facts(session, lead)
     # Timman palveluiden nimet AI:lle lähteeksi, jos omaa sivua ei ole (hinnasto tulee koodista, ei mallilta)
@@ -2899,10 +2908,18 @@ async def generate_demo(
         background_tasks.add_task(_track_downloads, used)
     _log_demo_cost(lead_id, results, place_calls, unsplash_requests=searches + len(used))
 
+    return await _save_demo(session, request, lead, profile, demo, template, scheme, stored)
+
+
+async def _save_demo(
+    session: Session, request: Request, lead: Lead, profile: SenderProfile, demo: Optional[Demo],
+    template: str, scheme: str, stored: DemoStoredContent,
+) -> DemoOut:
+    lead_id = lead.id
     html = _render_for(template, scheme, stored, lead, profile)
     if demo is None:
         demo = Demo(
-            user_id=user.id, lead_id=lead_id, template=template, color_scheme=scheme,
+            user_id=lead.user_id, lead_id=lead_id, template=template, color_scheme=scheme,
             content_json=stored.model_dump_json(), html=html, public_token=new_public_token(),
             public_slug=new_public_slug(lead.name, lambda slug: _demo_path_taken(session, slug)),
         )
@@ -2960,6 +2977,11 @@ def update_demo(
         raise HTTPException(422, str(e))
 
     stored = DemoStoredContent.model_validate_json(demo.content_json)
+    if template != demo.template and (is_static_template(template) or is_static_template(demo.template)):
+        # Remonttipohjien sisältö ei ole AI-tekstiä: pohjan vaihto toiseen tyyppiin ei saa tuoda vanhaa sisältöä mukanaan
+        if not is_static_template(template):
+            raise HTTPException(422, "Regenerate the demo to switch from a renovation template to another template")
+        stored = static_content(template)
     if req.content is not None:
         if not site_prices_allowed(req.content.services, lead_site_facts(lead)):
             raise HTTPException(422, "Prices can only come from the business's current website")

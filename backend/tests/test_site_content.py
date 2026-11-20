@@ -341,7 +341,7 @@ def _render(template: str, services: list[DemoService]) -> str:
                             content=content, business=BUSINESS, sender=SENDER)
 
 
-@pytest.mark.parametrize("template", list(TEMPLATES))
+@pytest.mark.parametrize("template", [t for t, v in TEMPLATES.items() if not v.static])
 def test_every_template_shows_site_prices_with_note(template: str) -> None:
     html = _render(template, attach_site_prices(_ai_services(), FACTS))
     assert "32 €" in html and "alk. 60 €" in html
@@ -349,7 +349,7 @@ def test_every_template_shows_site_prices_with_note(template: str) -> None:
     assert "Hinnat ja ajanvaraus puhelimitse" not in html
 
 
-@pytest.mark.parametrize("template", list(TEMPLATES))
+@pytest.mark.parametrize("template", [t for t, v in TEMPLATES.items() if not v.static])
 def test_no_prices_and_no_note_without_site_prices(template: str) -> None:
     html = _render(template, attach_site_prices(_ai_services(), None))
     assert "€" not in html

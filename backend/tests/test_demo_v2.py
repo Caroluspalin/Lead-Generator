@@ -33,7 +33,7 @@ from tests.conftest import FakeOpenAI
 from tests.test_demo_publish import CONFIG, FakeStore
 from tests.test_demo_site import VALID
 
-V2_TEMPLATES = [t for t, v in TEMPLATES.items() if v.version >= 2]
+V2_TEMPLATES = [t for t, v in TEMPLATES.items() if v.version >= 2 and not v.static]
 WORKER = (Path(__file__).resolve().parents[2] / "worker" / "src" / "index.ts").read_text()
 
 
@@ -323,7 +323,7 @@ def test_preview_of_v1_demo_keeps_inline_csp(client_a: TestClient, make_lead: An
                                              sender_profile: dict[str, Any]) -> None:
     fake_openai.reply = json.dumps(VALID)
     lead = make_lead(name="Putkiliike", city="Espoo", website_status="NO WEBSITE", primary_type="plumber")
-    demo = client_a.post(f"/leads/{lead['id']}/demo", json={}).json()
+    demo = client_a.post(f"/leads/{lead['id']}/demo", json={"template": "services"}).json()
     assert "style-src 'unsafe-inline'" in client_a.get(f"/demo/{demo['public_path']}").headers["content-security-policy"]
 
 

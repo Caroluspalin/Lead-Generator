@@ -1,0 +1,272 @@
+{# Remontti (kylpyhuone, saunat, putki) ja lämpöpumppu jakavat tämän tiedoston; lampopumppu.html.j2 vain perii sen.
+   Teksti on tarkoituksella neutraali: ei kestoja, takuita, sertifikaatteja, hintoja, referenssejä eikä toimialuetta ilman käsin
+   kirjoitettua arvoa. Yritykseltä tulevat vain nimi, kaupunki, osoite, puhelin, arvostelulinkki, palvelulista ja toimialue. #}
+{% extends "base_v2.html.j2" %}
+{% set hp = template == 'lampopumppu' %}
+{% block banner %}<p class="demo-bar" role="note">{{ banner }}{% if sender.phone %} · <a href="tel:{{ sender.phone | replace(' ', '') }}">{{ sender.phone }}</a>{% endif %}{% if sender.website %} · <a href="{{ sender.website }}" rel="noopener noreferrer">{{ sender.website | replace('https://', '') | replace('http://', '') }}</a>{% endif %}</p>{% endblock %}
+{% block preload %}<link rel="preload" as="image" href="{{ asset(template, 'jalkeen.webp').url }}" type="image/webp">{% endblock %}
+{% block body %}
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="#sisalto" aria-label="{{ business.name }}, etusivu">
+      <span class="brand-mark" aria-hidden="true">{% if not hp %}<i></i><i></i><i></i><i></i>{% endif %}</span>
+      <span class="brand-name">{{ business.name }}{% if business.city %}<small>{{ business.city }}</small>{% endif %}</span>
+    </a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="#palvelut">Palvelut</a>
+      <a href="#vahennys">Kotitalousvähennys</a>
+      <a href="#tarjous">Yhteystiedot</a>
+    </nav>
+    <a class="btn btn-primary btn-small" href="#tarjous">Pyydä tarjous</a>
+  </div>
+</header>
+
+<main id="sisalto">
+<section class="scrub" id="scrub" aria-label="Kuvitus: {% if hp %}lämmityshuone ennen ja jälkeen{% else %}kylpyhuone ennen ja jälkeen{% endif %}">
+  <div class="scrub-sticky">
+    <img class="scrub-fallback" id="heroImg" src="{{ asset(template, 'jalkeen.webp').url }}" alt="Kuvitus: {% if hp %}valmis lämmityshuone, jossa valkoinen lämpöpumppu ja eristetyt putket{% else %}valmis kylpyhuone, isot vaaleat laatat, lasiseinä ja tammitaso{% endif %}" width="1344" height="752">
+    <canvas id="scrubCanvas" aria-hidden="true" data-f="{{ frames['f'] }}" data-m="{{ frames['m'] }}"></canvas>
+    <div class="scrub-shade" aria-hidden="true"></div>
+    <div class="wrap scrub-copy">
+      <h1>{{ business.name }}</h1>
+      <p class="lede">{% if business.city %}{{ business.city }}. {% endif %}Pyydä tarjous alla olevalla lomakkeella{% if tel %} tai soita {{ business.phone }}{% endif %}.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#tarjous">Pyydä tarjous</a>
+        <a class="btn btn-light" href="#vahennys">Laske kotitalousvähennys</a>
+      </div>
+    </div>
+{% if hp %}
+    <div class="readout" aria-hidden="true">
+      <div><span>Lämmitys</span><b id="roHeat">Öljy</b></div>
+      <div><span>Vaihe</span><b id="roStep">Ennen</b></div>
+    </div>
+{% endif %}
+    <ol class="scrub-steps" aria-hidden="true">
+      <li data-at="0">Ennen</li><li data-at="0.28">Purku</li><li data-at="{{ '0.55' if hp else '0.52' }}">{{ 'Asennus' if hp else 'Laatoitus' }}</li><li data-at="{{ '0.84' if hp else '0.82' }}">Valmis</li>
+    </ol>
+    <button type="button" class="replay" id="replay">Katso animaatio uudelleen</button>
+  </div>
+</section>
+
+<section class="compare-sec" aria-labelledby="vertaa-h">
+  <div class="wrap compare-grid">
+    <div>
+      <h2 id="vertaa-h">Vertaa ennen ja jälkeen</h2>
+      <p class="soft-52">Liukusäätimen kuvat ovat tekoälyllä tehtyä kuvitusta, eivät yrityksen kohteita.</p>
+    </div>
+    <div>
+      <div class="compare" id="compare">
+        <img class="before" src="{{ asset(template, 'ennen.webp').url }}" alt="Kuvitus ennen: {% if hp %}vanha öljykattila, iso öljysäiliö ja kellastuneet seinät{% else %}vanha kylpyhuone, beiget pikkulaatat, suihkuverho ja loisteputkivalo{% endif %}" width="1344" height="752" loading="lazy">
+        <img class="after" src="{{ asset(template, 'jalkeen.webp').url }}" alt="Kuvitus jälkeen: {% if hp %}lämpöpumppu, eristetyt putket ja vasta maalatut seinät{% else %}uusi kylpyhuone, isot vaaleat laatat, lasiseinä ja tammitaso{% endif %}" width="1344" height="752" loading="lazy">
+        <div class="handle" aria-hidden="true">
+          <span class="knob"><svg viewBox="0 0 24 24" fill="none" stroke="#1F2B2A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6"/></svg></span>
+        </div>
+        <span class="tag l">Ennen</span><span class="tag r">Jälkeen</span>
+        <div class="paikkamerkki">Teidän kohteenne kuvat tähän: ennen ja jälkeen samasta kulmasta.</div>
+        <label class="sr" for="cmp">Vertaa ennen ja jälkeen</label>
+        <input id="cmp" type="range" min="0" max="100" value="100" aria-valuetext="0 prosenttia jälkeen-kuvaa näkyvissä">
+      </div>
+      <p class="compare-cap">Voitte myös vetää itse.</p>
+    </div>
+  </div>
+</section>
+
+<section id="palvelut" class="band" aria-labelledby="palvelut-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="palvelut-h">{{ tpl.services_title }}</h2>
+    </div>
+    <div class="svc-grid">
+{% for s in content.services %}
+      <article class="svc"><h3>{{ s.name }}</h3><p>{{ s.description }}</p></article>
+{% endfor %}
+    </div>
+  </div>
+</section>
+
+<section id="vahennys" aria-labelledby="vahennys-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="vahennys-h">Paljonko saatte kotitalousvähennystä?</h2>
+      <p>Vähennys lasketaan vain työn osuudesta, ei {{ 'laitteesta' if hp else 'materiaaleista' }}. Työn osuus selviää tarjouksesta tai laskusta.</p>
+    </div>
+    <div class="calc">
+      <div class="calc-in">
+{% if hp %}
+        <div class="field">
+          <span class="lbl" id="oil-lbl">Millä talo lämpiää nyt?</span>
+          <div class="seg" role="radiogroup" aria-labelledby="oil-lbl">
+            <label><input type="radio" name="oil" value="1" checked><span>Öljyllä</span></label>
+            <label><input type="radio" name="oil" value="0"><span>Jollain muulla</span></label>
+          </div>
+          <span class="hint">Korotettu vähennys koskee vain öljylämmityksestä luopumista.</span>
+        </div>
+{% endif %}
+        <div class="field">
+          <label for="price">{{ 'Kokonaishinta' if hp else 'Remontin kokonaishinta' }} (€, sis. alv)</label>
+          <input id="price" type="number" inputmode="numeric" min="0" step="500" value="{{ 18000 if hp else 16000 }}">
+        </div>
+        <div class="field">
+          <span class="lbl" id="share-lbl">Työn osuus hinnasta</span>
+          <div class="range-row">
+            <input id="share" type="range" min="{{ 10 if hp else 20 }}" max="{{ 70 if hp else 80 }}" step="5" value="{{ 40 if hp else 55 }}" aria-labelledby="share-lbl">
+            <output id="shareOut" for="share">{{ 40 if hp else 55 }} %</output>
+          </div>
+          <span class="hint">Työn osuus selviää tarjouksesta tai laskusta.</span>
+        </div>
+        <div class="field">
+          <span class="lbl" id="ppl-lbl">Kuinka moni maksaa laskun?</span>
+          <div class="seg" role="radiogroup" aria-labelledby="ppl-lbl">
+            <label><input type="radio" name="ppl" value="1"><span>1 henkilö</span></label>
+            <label><input type="radio" name="ppl" value="2" checked><span>2 henkilöä</span></label>
+          </div>
+          <span class="hint">Kumpikin voi hakea vähennystä omasta osuudestaan.</span>
+        </div>
+      </div>
+      <div class="calc-out" aria-live="polite">
+        <span>Kotitalousvähennys yhteensä</span>
+        <span class="out-big" id="deduct">0 €</span>
+        <div class="out-row"><span>Työn osuus</span><b id="work">0 €</b></div>
+        <div class="out-row"><span>Hinta vähennyksen jälkeen</span><b id="net">0 €</b></div>
+{% if hp %}
+        <div class="diff" id="diff"></div>
+        <small>Laskettu vuoden 2026 säännöillä. Öljylämmityksestä luopuminen: 60 % työn osuudesta, enintään 3 500 € henkilöä kohden. Muu työ: 40 %, enintään 2 100 €. Omavastuu 150 € henkilöä kohden vuodessa. Arvio, ei verotuspäätös. Vähennystä ei saa, jos samaan työhön on saatu muuta tukea. Tarkistakaa omat tietonne <a href="https://www.vero.fi/henkiloasiakkaat/vahennykset/kotitalousvahennys/">vero.fi:stä</a>.</small>
+{% else %}
+        <small>Laskettu vuoden 2026 säännöillä: 40 % työn osuudesta, omavastuu 150 € ja enintään 2 100 € henkilöä kohden vuodessa. Arvio, ei verotuspäätös. Tarkista omat tietosi <a href="https://www.vero.fi/henkiloasiakkaat/vahennykset/kotitalousvahennys/">vero.fi:stä</a>.</small>
+{% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if reviews_url %}
+<section class="band" aria-labelledby="arvostelut-h">
+  <div class="wrap reviews">
+    <div class="g-box">
+      <b>Asiakkaiden arviot Googlessa</b>
+      <a class="btn btn-ghost btn-small" href="{{ reviews_url }}" rel="noopener noreferrer">Lue arvostelut Googlessa</a>
+    </div>
+    <div>
+      <h2 id="arvostelut-h">Lukekaa, mitä asiakkaat sanovat</h2>
+      <p class="soft-52">Arvostelut ovat Googlessa omilla nimillä kirjoitettuina.</p>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<section id="tarjous" aria-labelledby="tarjous-h">
+  <div class="wrap form-wrap">
+    <div>
+      <h2 id="tarjous-h">Pyydä tarjous</h2>
+      <p class="soft-40">Kertokaa {{ 'talosta' if hp else 'tilasta' }} muutamalla sanalla.</p>
+      <ul class="contact-list">
+{% if tel %}
+        <li><span>Puhelin</span><b><a href="tel:{{ tel }}">{{ business.phone }}</a></b></li>
+{% endif %}
+{% if business.address %}
+        <li><span>Osoite</span><b>{{ business.address }}</b></li>
+{% endif %}
+{% if content.service_area %}
+        <li><span>Toimialue</span><b>{{ content.service_area }}</b></li>
+{% endif %}
+      </ul>
+    </div>
+
+    <form id="quote" novalidate>
+      <div class="form-grid">
+        <fieldset class="field full chips-set">
+          <legend class="lbl">{{ 'Mikä kiinnostaa?' if hp else 'Mikä remontti?' }}</legend>
+          <div class="chips">
+{% if hp %}
+            <label><input type="radio" name="type" value="maalampo" checked><span>Maalämpö</span></label>
+            <label><input type="radio" name="type" value="ilmavesi"><span>Ilma-vesilämpöpumppu</span></label>
+            <label><input type="radio" name="type" value="ilmalampo"><span>Ilmalämpöpumppu</span></label>
+            <label><input type="radio" name="type" value="eos"><span>En tiedä vielä</span></label>
+{% else %}
+            <label><input type="radio" name="type" value="kylpyhuone" checked><span>Kylpyhuone</span></label>
+            <label><input type="radio" name="type" value="sauna"><span>Sauna</span></label>
+            <label><input type="radio" name="type" value="kylpyhuone+sauna"><span>Kylpyhuone ja sauna</span></label>
+            <label><input type="radio" name="type" value="wc"><span>WC</span></label>
+            <label><input type="radio" name="type" value="muu"><span>Muu</span></label>
+{% endif %}
+          </div>
+        </fieldset>
+{% if hp %}
+        <div class="field">
+          <label for="heat">Nykyinen lämmitys</label>
+          <select id="heat"><option>Öljy</option><option>Suora sähkö</option><option>Varaava sähkö</option><option>Puu tai pelletti</option><option>Muu</option></select>
+        </div>
+        <div class="field">
+          <label for="area">Talon koko (m²)</label>
+          <input id="area" type="number" inputmode="numeric" min="1" placeholder="esim. 140">
+        </div>
+{% else %}
+        <div class="field">
+          <label for="area">Pinta-ala (m²)</label>
+          <input id="area" type="number" inputmode="decimal" min="1" placeholder="esim. 5">
+        </div>
+{% endif %}
+        <div class="field">
+          <label for="zip">Postinumero</label>
+          <input id="zip" type="text" inputmode="numeric" maxlength="5" placeholder="esim. 02230">
+        </div>
+        <div class="field">
+          <label for="when">Toivottu aikataulu</label>
+          <select id="when">
+            <option>Mahdollisimman pian</option>
+            <option>1–3 kuukauden päästä</option>
+            <option>Myöhemmin tai ei vielä tiedossa</option>
+          </select>
+        </div>
+{% if not hp %}
+        <div class="field">
+          <label for="house">Talotyyppi</label>
+          <select id="house">
+            <option>Kerrostalo</option><option>Rivitalo</option><option>Omakotitalo</option><option>Paritalo</option>
+          </select>
+        </div>
+{% endif %}
+        <div class="field full">
+          <label for="msg">Lisätiedot (vapaaehtoinen)</label>
+          <textarea id="msg" rows="3"></textarea>
+        </div>
+        <div class="field" id="f-name">
+          <label for="name">Nimi</label>
+          <input id="name" type="text" autocomplete="name" required>
+          <span class="err">Kirjoittakaa nimenne.</span>
+        </div>
+        <div class="field" id="f-phone">
+          <label for="phone">Puhelin</label>
+          <input id="phone" type="tel" autocomplete="tel" required>
+          <span class="err">Kirjoittakaa puhelinnumeronne.</span>
+        </div>
+      </div>
+      <div class="submit-row">
+        <button class="btn btn-primary" type="submit">Lähetä tarjouspyyntö</button>
+        <small>Luonnoksessa lomake ei lähetä tietoja minnekään.</small>
+      </div>
+      <div class="sent" role="status">
+        <h3>Tämä on luonnos</h3>
+        <p>Lomake näyttää vain tämän vahvistuksen. Tietoja ei lähetetty minnekään.</p>
+      </div>
+    </form>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><b>{{ business.name }}</b>{% if business.address %}<br>{{ business.address }}{% endif %}</div>
+    <div>Luonnos, ei yrityksen virallinen sivu. Kuvat: tekoälyllä tehty kuvitus.<br>Sivut: {% if sender.website %}<a href="{{ sender.website }}" rel="noopener noreferrer">{{ maker }}</a>{% else %}{{ maker }}{% endif %}</div>
+  </div>
+</footer>
+
+<div class="mbar{{ '' if tel else ' yksi' }}">
+{% if tel %}
+  <a class="btn btn-ghost" href="tel:{{ tel }}">Soita</a>
+{% endif %}
+  <a class="btn btn-primary" href="#tarjous">Pyydä tarjous</a>
+</div>
+
+<script src="{{ asset(template, 'sivu.js').url }}" defer></script>
+{% endblock %}

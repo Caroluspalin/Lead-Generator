@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import quote
 
 import requests
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -95,6 +96,8 @@ class DemoTemplate:
     about_title: str = "Tietoa meistä"  # jos AI ei anna about_titlea
     # price_note kun hinnat näkyvät; ei saa toistaa services_leadia (sama rivi v2-pohjissa)
     price_note_site: str = DEFAULT_PRICE_NOTE_SITE
+    # Remonttipohjat: ei AI-tekstiä, sisältö on pohjan oletuslista jota käyttäjä muokkaa kortilta
+    static: bool = False
 
 
 # Värit valittu niin, että tekstin kontrasti taustaa vasten on vähintään WCAG AA (4.5:1)
@@ -151,6 +154,22 @@ TEMPLATES: dict[str, DemoTemplate] = {
             "pullo": Palette("Bottle green", "#10211C"),
         },
     ),
+    "remontti": DemoTemplate(
+        label="Renovation (bathroom, sauna, plumbing)",
+        services_title="Palvelut",
+        services_lead="",
+        version=2,
+        static=True,
+        schemes={"kalvo": Palette("Membrane", "#F6F7F5")},
+    ),
+    "lampopumppu": DemoTemplate(
+        label="Heat pumps",
+        services_title="Palvelut",
+        services_lead="",
+        version=2,
+        static=True,
+        schemes={"kupari": Palette("Copper", "#F1F3F2")},
+    ),
     "beauty": DemoTemplate(
         label="Classic hair & beauty",
         services_title="Palvelut",
@@ -205,6 +224,27 @@ def template_for_primary_type(primary_type: Optional[str]) -> str:
     return DEFAULT_TEMPLATE
 
 
+# Nimen avainsanat (primary_type on remonttiliideillä usein vain "service"). Lämpöpumppu ensin: "LVI ja lämpöpumput"
+_HEATPUMP_NAME_RE = re.compile(r"lämpöpump|maalämp|ilmalämp|ilma-?vesi|heat ?pump|energiakaiv", re.I)
+_RENOVATION_NAME_RE = re.compile(r"remont|saneera|kylpy|laato|laatt|kaakel|putki|\blvi\b|sauna|märkätil|rakennus", re.I)
+_RENOVATION_TYPES = {"plumber", "general_contractor"}
+
+
+def template_for_lead(name: str, primary_type: Optional[str]) -> str:
+    """Remonttiliidit nimen perusteella, muut primary_typen mukaan (template_for_primary_type)."""
+    t = (primary_type or "").lower()
+    if t == "hvac_contractor" or _HEATPUMP_NAME_RE.search(name):
+        return "lampopumppu"
+    if t in _RENOVATION_TYPES or _RENOVATION_NAME_RE.search(name):
+        return "remontti"
+    return template_for_primary_type(primary_type)
+
+
+def is_static_template(template: str) -> bool:
+    tpl = TEMPLATES.get(template)
+    return tpl is not None and tpl.static
+
+
 def default_scheme(template: str) -> str:
     return next(iter(TEMPLATES[template].schemes))
 
@@ -227,6 +267,7 @@ def templates_catalog() -> list[dict[str, object]]:
             "id": tid,
             "label": t.label,
             "version": t.version,
+            "static": t.static,
             "color_schemes": [{"id": sid, "label": s.label} for sid, s in t.schemes.items()],
         }
         for tid, t in ordered
@@ -281,6 +322,8 @@ class DemoContent(DemoAIContent):
     """Tallennettu ja käyttäjän muokattavissa oleva sisältö."""
     services: list[DemoService] = Field(min_length=3, max_length=6)  # type: ignore[assignment]
     price_note: str = Field(default=DEFAULT_PRICE_NOTE, min_length=5, max_length=120)
+    # Vain remonttipohjat, käsin kortilta. Tyhjä = osiota ei näytetä
+    service_area: Optional[str] = Field(default=None, max_length=120)
 
 
 class DemoImages(BaseModel):
@@ -371,6 +414,40 @@ class DemoStoredContent(DemoContent):
     # Sisältö kirjoitettu yrityksen nykyisen sivun tietojen pohjalta (sähköpostin maininta)
     site_based: bool = False
     timma: Optional[DemoTimma] = None
+
+
+_STATIC_SERVICES: dict[str, list[tuple[str, str]]] = {
+    "remontti": [
+        ("Kylpyhuoneremontti", "Kylpyhuoneen uusiminen purusta pintoihin ja kalusteisiin."),
+        ("Saunaremontti", "Saunan paneelit, lauteet ja kiuas uusiksi."),
+        ("WC-remontti", "Pienen tilan uusiminen: seinä-WC, laatoitus ja pinnat."),
+        ("Putki- ja LVI-työt", "Putkityöt ja LVI-asennukset remontin yhteydessä."),
+    ],
+    "lampopumppu": [
+        ("Maalämpö", "Lämpö otetaan porakaivosta maaperästä tai kalliosta."),
+        ("Ilma-vesilämpöpumppu", "Ulkoyksikkö ottaa lämmön ulkoilmasta ja lämmittää talon vesikiertoisen lämmönjaon."),
+        ("Ilmalämpöpumppu", "Lisälämmitys ja viilennys kesäksi ilmasta ilmaan."),
+    ],
+}
+
+
+def static_content(template: str) -> DemoStoredContent:
+    """Remonttipohjien sisältö ilman AI:ta: pohjan oletuspalvelut, käyttäjä muokkaa kortilta. Muut tekstit
+    ovat pohjassa kiinteitä, joten tässä on vain skeeman vaatimat kentät (meta description)."""
+    return DemoStoredContent(
+        hero_title="Luonnos nettisivusta",
+        hero_subtitle="Luonnos yrityksen nettisivusta, ei yrityksen virallinen sivu.",
+        about="Luonnos yrityksen nettisivusta. Sisältö on pohjan oletussisältöä, jota ei ole muokattu yrityksen omilla tiedoilla.",
+        services=[DemoService(name=n, description=d) for n, d in _STATIC_SERVICES[template]],
+        price_note=DEFAULT_PRICE_NOTE,
+    )
+
+
+def google_reviews_url(place_id: Optional[str], maps_url: Optional[str]) -> Optional[str]:
+    """Linkki Googlen arvosteluihin, ei arvosanaa eikä määrää. Käsin lisätyillä ja dev-mockin liideillä ei ole oikeaa place_id:tä."""
+    if place_id and not place_id.startswith(("manual-", "dev-")):
+        return f"https://search.google.com/local/reviews?placeid={quote(place_id, safe='')}"
+    return maps_url
 
 
 def timma_price_list(content: DemoStoredContent, template: str) -> list[PriceCategory]:
@@ -818,6 +895,7 @@ class DemoBusiness:
     phone: Optional[str]
     maps_url: Optional[str]
     booking_url: Optional[str] = None  # ajanvarausalusta (timma.fi tms.), vain liidin omasta website-kentästä
+    place_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -1176,6 +1254,8 @@ def render_demo_html(
     template, color_scheme = validate_template_choice(template, color_scheme)
     tpl = TEMPLATES[template]
     business = _with_timma(business, content)
+    if tpl.static:
+        return _render_static(template, color_scheme, content, business, sender)
     if tpl.version >= 2:
         return _render_v2(template, color_scheme, content, business, sender, utm_app)
     icons = service_icon_names([(s.name, s.description) for s in content.services], template)
@@ -1286,6 +1366,42 @@ def _render_v2(
         kyltti=kyltti_split(business.name) if template == "barber" else None,
         nimi_pisin=longest_segment(business.name),
         pisin=longest_segment,
+    )
+
+
+def _render_static(
+    template: str, palette: str, content: DemoStoredContent, business: DemoBusiness, sender: DemoSender
+) -> str:
+    """Remonttipohjat: kiinteä neutraali teksti, vain nimi, kaupunki, yhteystiedot, palvelulista ja toimialue vaihtuvat."""
+    tpl = TEMPLATES[template]
+    scheme = tpl.schemes[palette]
+    assert isinstance(scheme, Palette)
+
+    def asset(group: str, name: str) -> DemoAsset:
+        found = demo_asset(group, name)
+        if found is None:
+            raise RuntimeError(f"Demo asset missing: {group}/{name}")
+        return found
+
+    # Framet ovat sisällön tiivisteellä osoitettuja tiedostoja, joten JS saa osoitteet HTML:stä (ei fetch/arvausta)
+    frames = {key: " ".join(a.url for a in asset_series(template, key)) for key in ("f", "m")}
+    maker = sender.company_name or sender.name
+    return _env.get_template(f"{template}.html.j2").render(
+        template=template,
+        palette=palette,
+        theme_color=scheme.theme,
+        tpl=tpl,
+        content=content,
+        asset=asset,
+        frames=frames,
+        business=business,
+        reviews_url=google_reviews_url(business.place_id, business.maps_url),
+        sender=sender,
+        maker=maker,
+        tel=phone_to_tel(business.phone),
+        banner=f"Luonnos, tehnyt {maker}. Ei yrityksen virallinen sivu.",
+        image_note=None,
+        aukiolo=None,
     )
 
 

@@ -687,7 +687,7 @@ def contact_sheet(samples: list[Sample], out: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--template", choices=[t for t, v in TEMPLATES.items() if v.version >= 2])
+    parser.add_argument("--template", choices=[t for t, v in TEMPLATES.items() if v.version >= 2 and not v.static])
     parser.add_argument("--serve", action="store_true", help="jätä palvelin käyntiin selaintestien jälkeen")
     args = parser.parse_args()
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")

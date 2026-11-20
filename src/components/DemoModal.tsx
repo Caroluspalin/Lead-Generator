@@ -47,6 +47,7 @@ const toEditable = (demo: Demo): DemoContent => ({
   about: demo.content.about,
   services: demo.content.services.map((s) => ({ ...s })),
   price_note: demo.content.price_note,
+  service_area: demo.content.service_area ?? null,
 });
 
 const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreateEmail }) => {
@@ -258,6 +259,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
     );
 
   const currentTemplate = templates.find((t) => t.id === demo?.template);
+  const isStatic = currentTemplate?.static === true;
 
   const labelClass = 'block text-2xs font-medium text-fg-muted';
   const secondaryButton =
@@ -432,6 +434,7 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                       </select>
                     </div>
 
+                    {!isStatic && (
                     <div>
                       <span className={`${labelClass} mb-1.5`}>
                         Hero image
@@ -484,9 +487,12 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                         </div>
                       )}
                     </div>
+                    )}
 
                     {draft && (
                       <div className="space-y-3">
+                        {!isStatic && (
+                        <>
                         <label className={labelClass}>
                           Headline
                           <input
@@ -526,6 +532,8 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                             className={`${inputClass} mt-1 resize-y`}
                           />
                         </label>
+                        </>
+                        )}
 
                         <div>
                           <div className="flex items-center justify-between mb-1">
@@ -595,15 +603,28 @@ const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, agency, onCreate
                           </div>
                         </div>
 
-                        <label className={labelClass}>
-                          Prices note
-                          <input
-                            value={draft.price_note}
-                            onChange={(e) => setDraft({ ...draft, price_note: e.target.value })}
-                            maxLength={120}
-                            className={`${inputClass} mt-1`}
-                          />
-                        </label>
+                        {isStatic ? (
+                          <label className={labelClass}>
+                            Service area (section is hidden when empty)
+                            <input
+                              value={draft.service_area ?? ''}
+                              onChange={(e) => setDraft({ ...draft, service_area: e.target.value.trim() ? e.target.value : null })}
+                              maxLength={120}
+                              placeholder="e.g. Espoo, Helsinki and Vantaa"
+                              className={`${inputClass} mt-1`}
+                            />
+                          </label>
+                        ) : (
+                          <label className={labelClass}>
+                            Prices note
+                            <input
+                              value={draft.price_note}
+                              onChange={(e) => setDraft({ ...draft, price_note: e.target.value })}
+                              maxLength={120}
+                              className={`${inputClass} mt-1`}
+                            />
+                          </label>
+                        )}
 
                         <button
                           onClick={() => patch({ content: draft }, 'Texts saved')}

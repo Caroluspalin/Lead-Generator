@@ -1,5 +1,26 @@
 # Agency Hunter — Save State (nykytila)
 
+## Remonttipohjat (2026-11-20, `main`, ei pushattu, Worker deployaamatta)
+
+Kaksi uutta pohjaa remonttiliideille: `remontti` (Halkolan pohjalta: kylpyhuone, sauna, putki) ja `lampopumppu` (Hongiston pohjalta).
+Ei migraatiota (`Demo.template` on merkkijono, uusi `service_area` on osa `content_json`:ia). Testit: pytest 1146 passed, `npm run lint && npm run build` ok.
+MAX_SEARCH_CALLS, field mask, Timma-tuonti, haku ja muut pohjat ennallaan.
+
+- **Valinta** (`template_for_lead(name, primary_type)`): tuotannon liideistä `primary_type` on useimmiten vain `service` (173/300) tai `general_contractor`, joten
+  nimen avainsanat ratkaisevat. Lämpöpumppu: `hvac_contractor` tai nimessä lämpöpump/maalämp/ilmalämp/ilma-vesi/energiakaiv. Remontti: `plumber`, `general_contractor`
+  tai nimessä remont/saneera/kylpy/laato/laatt/kaakel/putki/lvi (sanana)/sauna/märkätil/rakennus. Muut: `template_for_primary_type` kuten ennen. Käsinvalinta modaalissa toimii.
+- **Ei AI:ta**: `generate_demo` ohittaa OpenAI-, Timma-, Deep Scan-, Unsplash- ja Place Details -kutsut (`DemoTemplate.static`, `static_content()`). Regenerate säilyttää käsin
+  muokatun sisällön. Pohjan vaihto remontti <-> lämpöpumppu palauttaa oletuslistan; remonttipohjasta muuhun vaihto antaa 422 (generoi uudelleen).
+- **Täyttö**: nimi, kaupunki, osoite, puhelin, "Lue arvostelut Googlessa" (`search.google.com/local/reviews?placeid=`, muuten `maps_url`, muuten ei osiota; ei arvosanaa eikä määrää).
+  Kortilta (Demo-ikkuna): palvelulista (3-6) ja Service area. Tyhjä toimialue = osiota ei näytetä. Puhelin puuttuu = ei Soita-nappia.
+- **Neutralisoitu sisältö**: Halkolan ja Hongiston keksityt väitteet (kestot, KSE, sertifikaatit, "ilman maksua", toimialueet, nimetyt työvaiheet) on poistettu. Kuvituskuvat ennen/jälkeen
+  -säätimessä, päällä paikkamerkki "Teidän kohteenne kuvat tähän…". Banneri "Luonnos, tehnyt {yritys tai nimi lähettäjäprofiilista}", footer "Kuvat: tekoälyllä tehty kuvitus.",
+  lomake näyttää vain demo-vahvistuksen. Kotitalousvähennyksen luvut ja laskurit kopioitu mallisivuilta sellaisinaan (testi vartioi).
+- **Assetit** (`templates/demo/assets/{remontti,lampopumppu}/`): remontti 7,1 Mt, lampopumppu 8,9 Mt (121 framea x 2 kokoa, kuvat, fontit), noin 520 tiedostoa R2:ssa kerran
+  (sisällön tiivisteellä, `immutable`, `upload_assets` ohittaa jo ladatut). Julkaistu demo lisää vain HTML:n. Framet ovat `f-001.webp`/`m-001.webp`, osoitteet HTML:n `data-f`/`data-m`.
+- **Tekemättä**: `cd worker && npx wrangler deploy` ei tarvita CSP:n vuoksi (CSP_V2 kattaa), mutta ensimmäinen julkaisu lataa ~16 Mt R2:een. Käsin: iOS Safari -tarkistus ja
+  Lighthouse. Banneri käyttää `company_name`a tai `name`a profiilista: varmista, että profiilissa company_name = "Palin Web".
+
 ## Deploy 2026-11-19
 
 Laajennukset A–E ovat mainissa ja tuotannossa. Tuotannon Supabase ajettu `alembic upgrade head` (`0d6e4f41c99b` → `80a9fb5c7ac4`, 6 migraatiota: deal value, demo opens, buying signals, seurantaviestit, tarjous, business_id), `alembic check` puhdas. Worker deployattu (`agency-hunter-demos`, versio `6711f20f`, `demo.palinweb.fi`), savutesti: `/q/<tuntematon>` 404 + noindex. Testit ennen deployta: pytest 1100 passed, worker 41. `FOLLOWUPS_SEND_ENABLED` ja `IMAP_ENABLED` ovat yhä pois päältä. Alla olevat "ei deployattu / migraatio ajamatta" -maininnat ovat vanhentuneita.
